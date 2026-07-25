@@ -1,4 +1,4 @@
-from localstream.app import create_app
+from kostream.app import create_app
 
 
 def test_home_loads():
@@ -6,7 +6,7 @@ def test_home_loads():
     client = app.test_client()
     resp = client.get("/")
     assert resp.status_code == 200
-    assert b"LocalWatch" in resp.data or b"Spotlight" in resp.data
+    assert b"Ko-Stream" in resp.data or b"Spotlight" in resp.data
 
 
 def test_search():

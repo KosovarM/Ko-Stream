@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from localstream.library import scan_library
-from localstream.models import slugify
+from kostream.library import scan_library
+from kostream.models import slugify
 
 
 def test_slugify():

@@ -4,14 +4,14 @@ from pathlib import Path
 
 from flask import Flask, abort, render_template, request, send_from_directory, url_for
 
-from localstream.library import (
+from kostream.library import (
     MEDIA_ROOT,
     get_show,
     load_progress,
     save_progress,
     scan_library,
 )
-from localstream.models import Episode, Show, slugify
+from kostream.models import Episode, Show, slugify
 
 PROGRESS_FILE = Path(__file__).resolve().parents[2] / "data" / "progress.json"
 
@@ -22,7 +22,7 @@ def create_app(media_root: Path | None = None) -> Flask:
 
     @app.context_processor
     def inject_globals():
-        return {"site_name": "LocalWatch"}
+        return {"site_name": "Ko-Stream"}
 
     @app.route("/")
     def home():

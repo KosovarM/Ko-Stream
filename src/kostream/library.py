@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from localstream.models import Episode, Show, VIDEO_EXTENSIONS, slugify
+from kostream.models import Episode, Show, VIDEO_EXTENSIONS, slugify
 
 MEDIA_ROOT = Path(__file__).resolve().parents[2] / "media" / "shows"
 EPISODE_PATTERN = re.compile(
