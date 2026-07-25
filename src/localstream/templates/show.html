@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}{{ show.title }} — {{ site_name }}{% endblock %}
+{% block content %}
+<section class="detail-hero">
+  <div class="detail-poster"><span>{{ show.title[:2] }}</span></div>
+  <div class="detail-info">
+    <h1>{{ show.title }}</h1>
+    <div class="meta-tags">
+      <span class="tag">{{ show.type_label }}</span>
+      <span class="tag">{{ show.episode_count }} EP</span>
+      {% for g in show.genres %}<span class="tag genre">{{ g }}</span>{% endfor %}
+    </div>
+    <p>{{ show.description }}</p>
+  </div>
+</section>
+
+<section class="section">
+  <h2 class="section-title">Episodes</h2>
+  <div class="episode-list">
+    {% for ep in show.episodes %}
+    <a href="{{ url_for('watch', show_id=show.id, episode_id=ep.id) }}" class="episode-item">
+      <span class="ep-num">S{{ '%02d'|format(ep.season) }}E{{ '%02d'|format(ep.number) }}</span>
+      <span class="ep-title">{{ ep.title }}</span>
+      {% if progress.get(ep.id) %}
+      <span class="ep-progress">Resume</span>
+      {% endif %}
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,39 @@
+<div class="sidebar-block">
+  <h3>Top Airing</h3>
+  <ul class="sidebar-list">
+    {% for show in top_airing %}
+    <li>
+      <a href="{{ url_for('show_detail', show_id=show.id) }}">
+        <span class="sidebar-thumb">{{ show.title[:1] }}</span>
+        <span class="sidebar-text">{{ show.title }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+
+<div class="sidebar-block">
+  <h3>Most Popular</h3>
+  <ul class="sidebar-list">
+    {% for show in most_popular %}
+    <li>
+      <a href="{{ url_for('show_detail', show_id=show.id) }}">
+        <span class="sidebar-thumb">{{ show.title[:1] }}</span>
+        <span class="sidebar-text">{{ show.title }}</span>
+      </a>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+
+<div class="sidebar-block">
+  <h3 class="top10-head">Top 10 <span class="pill">Today</span></h3>
+  <ol class="top10">
+    {% for show in top10 %}
+    <li>
+      <span class="top10-rank">{{ '%02d'|format(loop.index) }}</span>
+      <a href="{{ url_for('show_detail', show_id=show.id) }}">{{ show.title }}</a>
+    </li>
+    {% endfor %}
+  </ol>
+</div>

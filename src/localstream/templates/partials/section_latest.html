@@ -1,0 +1,14 @@
+<section class="section">
+  <h2 class="section-title">Latest Episode</h2>
+  <div class="latest-grid">
+    {% for show, ep in latest %}
+    <a href="{{ url_for('watch', show_id=show.id, episode_id=ep.id) }}" class="latest-card">
+      <div class="latest-poster"><span>{{ show.title[:2] }}</span></div>
+      <div class="latest-info">
+        <h3>{{ show.title }}</h3>
+        <p>EP {{ ep.number }} · {{ show.type_label }}</p>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>

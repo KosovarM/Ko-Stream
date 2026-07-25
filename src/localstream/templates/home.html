@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ site_name }} — Watch Local Series{% endblock %}
+{% block content %}
+<section class="spotlight-section">
+  <div class="spotlight-carousel" id="spotlight">
+    {% for show in spotlight %}
+    <article class="spotlight-slide {% if loop.first %}active{% endif %}" data-index="{{ loop.index0 }}">
+      <div class="spotlight-bg"></div>
+      <div class="spotlight-content">
+        <span class="spotlight-rank">#{{ loop.index }} Spotlight</span>
+        <h1>{{ show.title }}</h1>
+        <div class="meta-tags">
+          <span class="tag">{{ show.type_label }}</span>
+          {% if show.latest_episode %}
+          <span class="tag">EP {{ show.latest_episode.number }}</span>
+          {% endif %}
+          <span class="tag hd">HD</span>
+        </div>
+        <p class="spotlight-desc">{{ show.description[:280] }}{% if show.description|length > 280 %}…{% endif %}</p>
+        <div class="spotlight-actions">
+          {% if show.latest_episode %}
+          <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=show.latest_episode.id) }}">Watch Now</a>
+          {% endif %}
+          <a class="btn-detail" href="{{ url_for('show_detail', show_id=show.id) }}">Detail</a>
+        </div>
+      </div>
+      <div class="spotlight-poster">
+        <div class="poster-placeholder">{{ show.title[:2] }}</div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  <div class="spotlight-dots">
+    {% for show in spotlight %}
+    <button type="button" class="dot {% if loop.first %}active{% endif %}" data-slide="{{ loop.index0 }}"></button>
+    {% endfor %}
+  </div>
+</section>
+
+<div class="home-layout">
+  <div class="home-main">
+    {% set section_title = 'Trending' %}
+    {% set section_shows = trending %}
+    {% include "partials/section_row.html" %}
+
+    {% set section_title = 'Latest Episode' %}
+    {% include "partials/section_latest.html" %}
+
+    {% set section_title = 'New On LocalWatch' %}
+    {% set section_shows = trending %}
+    {% include "partials/section_row.html" %}
+  </div>
+
+  <aside class="home-sidebar">
+    {% include "partials/sidebar.html" %}
+  </aside>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='spotlight.js') }}"></script>
+{% endblock %}

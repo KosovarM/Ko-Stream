@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Search — {{ site_name }}{% endblock %}
+{% block content %}
+<section class="section">
+  <h1 class="section-title">Search{% if query %}: “{{ query }}”{% endif %}</h1>
+  <div class="card-row">
+    {% for show in shows %}
+    <a href="{{ url_for('show_detail', show_id=show.id) }}" class="anime-card">
+      <div class="card-poster"><span class="card-initials">{{ show.title[:2] }}</span></div>
+      <h3 class="card-title">{{ show.title }}</h3>
+    </a>
+    {% else %}
+    <p class="empty">No results. Add shows under <code>media/shows/</code>.</p>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}

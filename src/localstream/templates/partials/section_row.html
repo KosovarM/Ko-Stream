@@ -1,0 +1,17 @@
+<section class="section">
+  <h2 class="section-title">{{ section_title }}</h2>
+  <div class="card-row">
+    {% for show in section_shows %}
+    <a href="{{ url_for('show_detail', show_id=show.id) }}" class="anime-card">
+      <div class="card-poster">
+        <span class="card-initials">{{ show.title[:2] }}</span>
+        {% if show.latest_episode %}
+        <span class="card-ep-badge">{{ show.latest_episode.number }}</span>
+        {% endif %}
+        <span class="card-type">{{ show.type_label }}</span>
+      </div>
+      <h3 class="card-title">{{ show.title }}</h3>
+    </a>
+    {% endfor %}
+  </div>
+</section>

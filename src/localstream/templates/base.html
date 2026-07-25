@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ site_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a href="{{ url_for('home') }}" class="logo">
+        <span class="logo-icon">▶</span>
+        <span class="logo-text">{{ site_name }}</span>
+      </a>
+      <form class="search-form" action="{{ url_for('search') }}" method="get">
+        <input type="search" name="q" placeholder="Search anime, series…" value="{{ request.args.get('q', '') }}">
+        <button type="submit">Search</button>
+      </form>
+      <nav class="header-nav">
+        <a href="{{ url_for('home') }}">Home</a>
+        <a href="{{ url_for('search') }}">Browse</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="site-main">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="site-footer">
+    <p>Local media only — add files to <code>media/shows/</code>. UI inspired by Aniwatch layout.</p>
+  </footer>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

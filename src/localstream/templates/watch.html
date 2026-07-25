@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ episode.title }} — {{ show.title }}{% endblock %}
+{% block content %}
+<section class="player-section">
+  <div class="player-wrap">
+    {% if is_demo %}
+    <div class="player-demo">
+      <p>Demo mode — add video files to <code>media/shows/{{ show.title }}/</code></p>
+      <p>Example: <code>S01E01.mp4</code></p>
+    </div>
+    {% else %}
+    <video id="player" controls autoplay {% if video_url %}src="{{ video_url }}"{% endif %}></video>
+    {% endif %}
+  </div>
+  <div class="player-meta">
+    <h1>{{ show.title }}</h1>
+    <p>Episode {{ episode.number }} — {{ episode.title }}</p>
+    {% if next_episode %}
+    <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=next_episode.id) }}">Next Episode →</a>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+{% if not is_demo %}
+<script>
+  const video = document.getElementById('player');
+  const epId = {{ episode.id | tojson }};
+  video.addEventListener('timeupdate', () => {
+    if (Math.floor(video.currentTime) % 10 === 0) {
+      fetch('{{ url_for("api_progress") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({episode_id: epId, seconds: video.currentTime})
+      });
+    }
+  });
+</script>
+{% endif %}
+{% endblock %}
