@@ -1164,16 +1164,6 @@ img { max-width: 100%; }
   color: #e07070;
 }
 
-.local-media-download-status {
-  margin-top: 0.5rem;
-  font-size: 0.88rem;
-  color: var(--muted);
-}
-
-.local-media-download-status.is-error {
-  color: #e07070;
-}
-
 .ep-upload-btn {
   flex-shrink: 0;
   cursor: pointer;

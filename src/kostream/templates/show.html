@@ -65,26 +65,15 @@
     <div class="local-media-intro">
       <h2 class="section-title">Local files</h2>
       <p class="local-media-hint">
-        Upload per episode, or open the show folder. Missing files can be filled via download when configured.
+        Open the show folder and drop files named
+        <code>SxxExx.mp4</code> (e.g. <code>S04E03.mp4</code>), or use Upload next to an episode.
       </p>
     </div>
     <div class="local-media-actions">
       <button type="button" class="btn-detail" id="btn-open-folder">Open folder</button>
-      <button
-        type="button"
-        class="btn-watch"
-        id="btn-download-missing"
-        {% if missing_count == 0 %}disabled{% endif %}
-        title="{% if download_configured %}Download missing episodes via KOSTREAM_DOWNLOAD_CMD{% else %}Set KOSTREAM_DOWNLOAD_CMD first{% endif %}"
-      >
-        Download missing{% if missing_count %} ({{ missing_count }}){% endif %}
-      </button>
     </div>
   </div>
   <p class="local-media-msg" id="local-media-msg" hidden></p>
-  <p class="local-media-download-status" id="download-job-status" {% if not download_job or download_job.status == 'idle' %}hidden{% endif %}>
-    {% if download_job %}{{ download_job.message }}{% if download_job.error %} — {{ download_job.error }}{% endif %}{% endif %}
-  </p>
 </section>
 
 <section class="section detail-episodes">
@@ -187,67 +176,11 @@
       showLocalMsg(data.error || 'Could not open folder.', true);
       return;
     }
+    const tip = 'Add files as SxxExx.mp4, then refresh this page.';
     if (!data.opened) {
-      showLocalMsg(`Folder ready — open manually: ${data.folder_path}`);
+      showLocalMsg(`Folder ready — open manually: ${data.folder_path}. ${tip}`);
     } else {
-      localMsg.hidden = true;
-    }
-  });
-
-  const downloadStatus = document.getElementById('download-job-status');
-  const downloadBtn = document.getElementById('btn-download-missing');
-  let downloadPoll = null;
-
-  function setDownloadStatus(text, isError) {
-    if (!downloadStatus) return;
-    downloadStatus.hidden = !text;
-    downloadStatus.textContent = text || '';
-    downloadStatus.classList.toggle('is-error', !!isError);
-  }
-
-  async function pollDownloadStatus() {
-    const resp = await fetch(`/api/show/${encodeURIComponent(showId)}/download-missing/status`);
-    const data = await resp.json().catch(() => ({}));
-    if (data.running) {
-      setDownloadStatus(data.message || 'Downloading…');
-      return;
-    }
-    if (downloadPoll) {
-      clearInterval(downloadPoll);
-      downloadPoll = null;
-    }
-    if (downloadBtn) downloadBtn.disabled = (data.missing_now || 0) === 0;
-    if (data.status === 'error') {
-      setDownloadStatus(data.error || data.message || 'Download failed.', true);
-      return;
-    }
-    if (data.status === 'done') {
-      setDownloadStatus(data.message || 'Download finished.');
-      setTimeout(() => location.reload(), 800);
-    }
-  }
-
-  downloadBtn?.addEventListener('click', async () => {
-    downloadBtn.disabled = true;
-    setDownloadStatus('Starting download…');
-    const resp = await fetch(`/api/show/${encodeURIComponent(showId)}/download-missing`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: '{}',
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || !data.ok) {
-      setDownloadStatus(data.error || 'Could not start download.', true);
-      downloadBtn.disabled = false;
-      return;
-    }
-    setDownloadStatus(data.message || 'Downloading…');
-    if (data.running) {
-      downloadPoll = setInterval(pollDownloadStatus, 1500);
-    } else if (data.status === 'done') {
-      setTimeout(() => location.reload(), 600);
-    } else {
-      downloadBtn.disabled = false;
+      showLocalMsg(`Opened ${data.folder_path || 'folder'}. ${tip}`);
     }
   });
 

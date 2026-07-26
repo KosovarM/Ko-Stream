@@ -59,12 +59,6 @@ from kostream.library import (
     save_progress,
     scan_library,
 )
-from kostream.download_jobs import (
-    download_configured,
-    get_download_job,
-    missing_episodes,
-    start_download_missing,
-)
 from kostream.episode_fetch import fetch_episode_from_url
 from kostream.local_media import (
     LocalMediaError,
@@ -74,7 +68,7 @@ from kostream.local_media import (
     save_episode_file,
 )
 from kostream.local_registry import list_for_show
-from kostream.stream_fetch import ffmpeg_available
+from kostream.stream_fetch import StreamFetchError, ffmpeg_available, resolve_fetch_source
 
 from kostream.models import (
     Episode,
@@ -99,6 +93,10 @@ from kostream.watch_progress import (
 )
 from kostream.sync_jobs import get_sync_job, start_mal_sync
 from kostream.streaming import stream_file_with_range
+
+
+import m3u8
+from urllib.parse import urljoin
 
 PROGRESS_FILE = Path(__file__).resolve().parents[2] / "data" / "progress.json"
 COMPLETED_FILE = Path(__file__).resolve().parents[2] / "data" / "completed.json"
@@ -132,7 +130,6 @@ def create_app(
             "grab_enabled": grab_enabled(),
             "grab_has_resolver": bool(grab_cmd()),
             "grab_demo_enabled": grab_demo_enabled(),
-            "download_configured": download_configured(),
             "catalog_count": len(catalog.enabled),
             "poster_for": _poster_for,
             "episode_completed": episode_completed,
@@ -375,15 +372,12 @@ def create_app(
         local_info = build_local_info(
             show, app.config["MEDIA_ROOT"], catalog_path=app.config["CATALOG_PATH"]
         )
-        missing_count = len(missing_episodes(show))
         return render_template(
             "show.html",
             show=show,
             relation_links=relation_links,
             relations_pending=relations_pending,
             local_info=local_info,
-            missing_count=missing_count,
-            download_job=get_download_job(show.id).to_dict(),
         )
 
     @app.route("/api/show/<show_id>/local-info")
@@ -458,7 +452,7 @@ def create_app(
 
     @app.route("/api/show/<show_id>/fetch-episode", methods=["POST"])
     def api_show_fetch_episode(show_id: str):
-        """Download an explicitly provided stream URL into the show folder via ffmpeg."""
+        """Copy/download an explicit URL or local file into the show folder; update registry."""
         show = get_show(show_id, app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
         if not show:
             abort(404)
@@ -470,7 +464,11 @@ def create_app(
         episode = next((e for e in show.episodes if e.id == episode_id), None)
         if not episode:
             abort(404)
-        if not ffmpeg_available():
+        try:
+            kind, _source = resolve_fetch_source(str(url))
+        except StreamFetchError as exc:
+            return {"ok": False, "error": str(exc)}, 400
+        if kind == "http" and not ffmpeg_available():
             return {"ok": False, "error": "ffmpeg not found on PATH"}, 500
         try:
             result = fetch_episode_from_url(
@@ -482,6 +480,18 @@ def create_app(
             )
         except LocalMediaError as exc:
             return {"ok": False, "error": str(exc)}, 400
+        # Fresh scan so callers know the episode is playable as local.
+        refreshed = get_show(show_id, app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
+        ep_now = (
+            next((e for e in refreshed.episodes if e.id == episode_id), None)
+            if refreshed
+            else None
+        )
+        result["is_local"] = bool(
+            ep_now and ep_now.filename != "demo.mp4"
+            and not str(ep_now.filename).startswith(("strm:", "jellyfin:"))
+        )
+        result["reload_suggested"] = True
         return result
 
     @app.route("/api/show/<show_id>/local-registry")
@@ -489,33 +499,19 @@ def create_app(
         show = get_show(show_id, app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
         if not show:
             abort(404)
-        return {"ok": True, "show_id": show_id, "episodes": list_for_show(show_id)}
-
-    @app.route("/api/show/<show_id>/download-missing", methods=["POST"])
-    def api_show_download_missing(show_id: str):
-        show = get_show(show_id, app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
-        if not show:
-            abort(404)
-        try:
-            job = start_download_missing(
-                show,
-                app.config["MEDIA_ROOT"],
-                catalog_path=app.config["CATALOG_PATH"],
-            )
-        except LocalMediaError as exc:
-            return {"ok": False, "error": str(exc), **get_download_job(show_id).to_dict()}, 400
-        return {"ok": True, **job.to_dict()}
-
-    @app.route("/api/show/<show_id>/download-missing/status")
-    def api_show_download_missing_status(show_id: str):
-        show = get_show(show_id, app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
-        if not show:
-            abort(404)
-        job = get_download_job(show_id)
+        episodes = list_for_show(show_id)
+        filenames = sorted(
+            {str(e.get("filename")) for e in episodes if e.get("filename")}
+        )
+        episode_ids = sorted(
+            {str(e.get("episode_id")) for e in episodes if e.get("episode_id")}
+        )
         return {
-            **job.to_dict(),
-            "missing_now": len(missing_episodes(show)),
-            "configured": download_configured(),
+            "ok": True,
+            "show_id": show_id,
+            "episodes": episodes,
+            "filenames": filenames,
+            "episode_ids": episode_ids,
         }
 
     @app.route("/watch/<show_id>/<episode_id>")
@@ -785,6 +781,7 @@ def create_app(
         )
 
     return app
+
 
 
 def _poster_for(show: Show) -> str | None:

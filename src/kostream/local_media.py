@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from kostream.catalog import CatalogEntry, load_catalog, save_catalog, upsert_entry
+from kostream.local_registry import mark_local
 from kostream.models import VIDEO_EXTENSIONS, Episode, Show, is_local_file_episode
 
 _INVALID_FOLDER_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -140,12 +141,21 @@ def save_episode_file(
     target_name = expected_episode_filename(episode, ext=ext)
     target = _safe_child_file(folder_path, target_name)
     target.write_bytes(data)
+    entry = mark_local(
+        show.id,
+        episode.id,
+        path=str(target),
+        filename=target_name,
+        source_url=None,
+    )
     return {
         "ok": True,
         "filename": target_name,
         "path": str(target),
         "folder": info["folder"],
         "episode_id": episode.id,
+        "registry": entry,
+        "registry_updated": True,
     }
 
 

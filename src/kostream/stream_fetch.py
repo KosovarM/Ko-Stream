@@ -32,21 +32,59 @@ def validate_stream_url(url: str) -> str:
     return cleaned
 
 
+def resolve_fetch_source(url: str) -> tuple[str, str | Path]:
+    """Return ``(\"http\", url)`` or ``(\"local\", Path)`` for an explicit fetch source."""
+    cleaned = (url or "").strip().strip('"').strip("'")
+    if not cleaned:
+        raise StreamFetchError("Empty source")
+
+    parsed = urlparse(cleaned)
+    if parsed.scheme in ("http", "https") and parsed.netloc:
+        return "http", cleaned
+
+    if parsed.scheme == "file":
+        from urllib.request import url2pathname
+
+        local = Path(url2pathname(parsed.path))
+    else:
+        # Plain path, or Windows drive path (urlparse treats "C:" as scheme).
+        local = Path(cleaned)
+
+    local = local.expanduser()
+    if not local.is_file():
+        raise StreamFetchError(f"Local file not found: {local}")
+    return "local", local.resolve()
+
+
 def fetch_stream_to_file(
     url: str,
     dest: Path,
     *,
     timeout_seconds: int = 60 * 60,
 ) -> Path:
-    """Download ``url`` to ``dest`` using ffmpeg stream copy (no re-encode)."""
-    cleaned = validate_stream_url(url)
-    if not shutil.which("ffmpeg"):
-        raise StreamFetchError("ffmpeg not found on PATH")
+    """Copy a local file or download ``url`` to ``dest`` (ffmpeg stream copy for http)."""
+    kind, source = resolve_fetch_source(url)
 
     dest = dest.resolve()
     dest.parent.mkdir(parents=True, exist_ok=True)
     if dest.exists():
         dest.unlink()
+
+    if kind == "local":
+        src = Path(source)
+        log.info("local copy %s → %s", src, dest)
+        try:
+            shutil.copy2(src, dest)
+        except OSError as exc:
+            raise StreamFetchError(f"Local copy failed: {exc}") from exc
+        if not dest.is_file() or dest.stat().st_size == 0:
+            dest.unlink(missing_ok=True)
+            raise StreamFetchError("Local copy produced an empty file")
+        return dest
+
+    cleaned = str(source)
+    if not shutil.which("ffmpeg"):
+        raise StreamFetchError("ffmpeg not found on PATH")
 
     # -c copy: remux only. aac_adtstoasc helps HLS → MP4 audio.
     cmd = [

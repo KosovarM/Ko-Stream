@@ -11,7 +11,11 @@ from kostream.local_media import (
 )
 from kostream.local_registry import mark_local
 from kostream.models import Episode, Show
-from kostream.stream_fetch import StreamFetchError, fetch_stream_to_file, validate_stream_url
+from kostream.stream_fetch import (
+    StreamFetchError,
+    fetch_stream_to_file,
+    resolve_fetch_source,
+)
 
 
 def fetch_episode_from_url(
@@ -23,9 +27,9 @@ def fetch_episode_from_url(
     catalog_path: Path | None = None,
     registry_path: Path | None = None,
 ) -> dict:
-    """Download ``url`` to SxxExx.mp4 under the show folder and register it."""
+    """Copy/download ``url`` to SxxExx.mp4 under the show folder and register it."""
     try:
-        cleaned = validate_stream_url(url)
+        kind, source = resolve_fetch_source(url)
     except StreamFetchError as exc:
         raise LocalMediaError(str(exc)) from exc
 
@@ -34,8 +38,9 @@ def fetch_episode_from_url(
     filename = expected_episode_filename(episode, ext=".mp4")
     dest = folder / filename
 
+    source_label = str(source)
     try:
-        fetch_stream_to_file(cleaned, dest)
+        fetch_stream_to_file(url, dest)
     except StreamFetchError as exc:
         raise LocalMediaError(str(exc)) from exc
 
@@ -44,7 +49,7 @@ def fetch_episode_from_url(
         episode.id,
         path=str(dest),
         filename=filename,
-        source_url=cleaned,
+        source_url=source_label if kind == "http" else f"file://{source}",
         registry_path=registry_path,
     )
     return {
@@ -53,5 +58,7 @@ def fetch_episode_from_url(
         "path": str(dest),
         "folder": info["folder"],
         "episode_id": episode.id,
+        "source_kind": kind,
         "registry": entry,
+        "registry_updated": True,
     }

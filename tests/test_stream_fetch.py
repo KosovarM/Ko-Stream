@@ -107,3 +107,42 @@ def test_fetch_rejects_bad_url(tmp_path: Path):
     show = Show(id="a", title="A", description="", episodes=[ep])
     with pytest.raises(LocalMediaError):
         fetch_episode_from_url(show, ep, "ftp://nope", tmp_path / "shows")
+
+
+def test_fetch_episode_from_local_path(tmp_path: Path):
+    media = tmp_path / "shows"
+    catalog = tmp_path / "selected.json"
+    reg = tmp_path / "registry.json"
+    src = tmp_path / "test.mp4"
+    src.write_bytes(b"dummy-video")
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-1",
+                    enabled=True,
+                    source="mal",
+                    folder="Demo",
+                    mal_id=1,
+                    title="Demo",
+                )
+            ]
+        ),
+        catalog,
+    )
+    ep = Episode("mal-1-s04e03", "mal-1", 4, 3, "Episode 3", "demo.mp4")
+    show = Show(id="mal-1", title="Demo", description="", mal_id=1, episodes=[ep])
+
+    result = fetch_episode_from_url(
+        show,
+        ep,
+        str(src),
+        media,
+        catalog_path=catalog,
+        registry_path=reg,
+    )
+    assert result["ok"] is True
+    assert result["registry_updated"] is True
+    assert result["source_kind"] == "local"
+    assert (media / "Demo" / "S04E03.mp4").read_bytes() == b"dummy-video"
+    assert get_local("mal-1", "mal-1-s04e03", registry_path=reg) is not None
