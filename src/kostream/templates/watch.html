@@ -2,31 +2,155 @@
 {% block title %}{{ episode.title }} — {{ show.title }}{% endblock %}
 {% block content %}
 <section class="player-section">
+  <a class="player-back" href="{{ url_for('show_detail', show_id=show.id) }}">‹ Episodes overview</a>
   <div class="player-wrap">
     {% if is_demo %}
     <div class="player-demo">
-      <p>Demo mode — add video files to <code>media/shows/{{ show.title }}/</code></p>
-      <p>Example: <code>S01E01.mp4</code></p>
+      <p>Stream only — no local file for this episode.</p>
+      {% if grab_has_resolver %}
+      <p>Press <strong>Resolve stream</strong> to fetch a URL via your Grab resolver.</p>
+      {% elif grab_demo_enabled %}
+      <p>Demo samples are enabled, but no URL resolved yet.</p>
+      {% else %}
+      <p>Paste a direct HTTPS URL below, or set <code>KOSTREAM_GRAB_CMD</code> to your resolver.</p>
+      {% endif %}
+      <p class="player-hint">Local files go in <code>media/shows/…/S01E0N.mp4</code> when you prefer downloads.</p>
     </div>
     {% else %}
-    <video id="player" controls autoplay {% if video_url %}src="{{ video_url }}"{% endif %}></video>
+    <video id="player" controls autoplay playsinline {% if video_url %}src="{{ video_url }}"{% endif %}></video>
+    {% if is_grab %}
+    <p class="player-hint">
+      On-demand stream (grab{% if grab_source %}: {{ grab_source }}{% endif %}) — no local copy stored.
+    </p>
+    {% elif is_external %}
+    <p class="player-hint">On-demand stream — no local copy stored by Ko-Stream.</p>
+    {% endif %}
     {% endif %}
   </div>
+  {% if grab_enabled and episode.filename == 'demo.mp4' %}
+  <div class="grab-actions">
+    {% if grab_has_resolver or grab_demo_enabled %}
+    <button type="button" class="btn-watch" id="grab-resolve">
+      {% if is_demo %}Resolve stream{% else %}Refresh stream URL{% endif %}
+    </button>
+    {% endif %}
+    <form class="grab-override" id="grab-override-form">
+      <label for="grab-url">Direct stream URL (HTTPS .mp4 / .m3u8)</label>
+      <div class="grab-override-row">
+        <input type="url" id="grab-url" name="url" placeholder="https://example.com/episode.m3u8" required>
+        <button type="submit" class="btn-detail" name="action" value="play">Save &amp; play</button>
+        <button type="submit" class="btn-watch" name="action" value="fetch" id="grab-fetch-local">
+          Download to library
+        </button>
+      </div>
+      <p class="grab-override-msg" id="grab-override-msg" hidden></p>
+    </form>
+  </div>
+  {% endif %}
   <div class="player-meta">
     <h1>{{ show.title }}</h1>
-    <p>Episode {{ episode.number }} — {{ episode.title }}</p>
-    {% if next_episode %}
-    <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=next_episode.id) }}">Next Episode →</a>
-    {% endif %}
+    <p>{{ episode.title }}</p>
+    <div class="player-actions">
+      {% if prev_episode %}
+      <a class="btn-detail" href="{{ url_for('watch', show_id=show.id, episode_id=prev_episode.id) }}">← Previous Episode</a>
+      {% endif %}
+      <button type="button" class="btn-watch" id="mark-complete">
+        ✓ Mark episode watched{% if mal_connected %} · sync MAL{% endif %}
+      </button>
+      {% if next_episode %}
+      <a class="btn-detail" href="{{ url_for('watch', show_id=show.id, episode_id=next_episode.id) }}">Next Episode →</a>
+      {% endif %}
+    </div>
   </div>
 </section>
 {% endblock %}
 
 {% block scripts %}
-{% if not is_demo %}
 <script>
-  const video = document.getElementById('player');
+  const showId = {{ show.id | tojson }};
   const epId = {{ episode.id | tojson }};
+
+  async function markComplete() {
+    const resp = await fetch('{{ url_for("api_episode_complete") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({show_id: showId, episode_id: epId}),
+    });
+    if (resp.ok) {
+      window.location.href = '{{ url_for("show_detail", show_id=show.id) }}';
+    }
+  }
+
+  document.getElementById('mark-complete')?.addEventListener('click', markComplete);
+
+  const grabMsg = document.getElementById('grab-override-msg');
+  function showGrabError(text) {
+    if (!grabMsg) return;
+    grabMsg.hidden = false;
+    grabMsg.textContent = text;
+  }
+
+  document.getElementById('grab-resolve')?.addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    const resp = await fetch('{{ url_for("api_grab_resolve") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({show_id: showId, episode_id: epId, force: true}),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && data.ok) {
+      location.reload();
+      return;
+    }
+    btn.disabled = false;
+    showGrabError(data.error || 'Could not resolve stream URL.');
+  });
+
+  const grabForm = document.getElementById('grab-override-form');
+  if (grabForm) {
+    grabForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const input = document.getElementById('grab-url');
+      const submitter = event.submitter;
+      const action = (submitter && submitter.value) || 'play';
+      const url = input.value;
+
+      if (action === 'fetch') {
+        const btn = document.getElementById('grab-fetch-local');
+        if (btn) btn.disabled = true;
+        showGrabError('Downloading via ffmpeg…');
+        const resp = await fetch(`/api/show/${encodeURIComponent(showId)}/fetch-episode`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({episode_id: epId, url}),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.ok && data.ok) {
+          window.location.href = '{{ url_for("show_detail", show_id=show.id) }}';
+          return;
+        }
+        if (btn) btn.disabled = false;
+        showGrabError(data.error || 'Download failed.');
+        return;
+      }
+
+      const resp = await fetch('{{ url_for("api_grab_override") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({show_id: showId, episode_id: epId, url}),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (resp.ok && data.ok) {
+        location.reload();
+        return;
+      }
+      showGrabError(data.error || 'Could not save stream URL.');
+    });
+  }
+
+  {% if not is_demo %}
+  const video = document.getElementById('player');
   video.addEventListener('timeupdate', () => {
     if (Math.floor(video.currentTime) % 10 === 0) {
       fetch('{{ url_for("api_progress") }}', {
@@ -36,6 +160,9 @@
       });
     }
   });
+  video.addEventListener('ended', () => {
+    markComplete();
+  });
+  {% endif %}
 </script>
-{% endif %}
 {% endblock %}

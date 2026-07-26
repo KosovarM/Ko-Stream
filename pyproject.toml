@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ko-stream"
-version = "0.1.0"
-description = "Ko-Stream — local series streaming (Aniwatch-inspired UI)"
+version = "0.2.0"
+description = "Ko-Stream — private local series library with MAL metadata"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [

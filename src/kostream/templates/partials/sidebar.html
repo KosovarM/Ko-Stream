@@ -1,10 +1,17 @@
 <div class="sidebar-block">
-  <h3>Top Airing</h3>
+  <h3 class="sidebar-title">Currently Airing</h3>
   <ul class="sidebar-list">
     {% for show in top_airing %}
     <li>
       <a href="{{ url_for('show_detail', show_id=show.id) }}">
-        <span class="sidebar-thumb">{{ show.title[:1] }}</span>
+        <span class="sidebar-thumb">
+          {% set poster = poster_for(show) %}
+          {% if poster %}
+          <img src="{{ poster }}" alt="" loading="lazy">
+          {% else %}
+          {{ show.title[:1] }}
+          {% endif %}
+        </span>
         <span class="sidebar-text">{{ show.title }}</span>
       </a>
     </li>
@@ -13,12 +20,19 @@
 </div>
 
 <div class="sidebar-block">
-  <h3>Most Popular</h3>
+  <h3 class="sidebar-title">More from library</h3>
   <ul class="sidebar-list">
     {% for show in most_popular %}
     <li>
       <a href="{{ url_for('show_detail', show_id=show.id) }}">
-        <span class="sidebar-thumb">{{ show.title[:1] }}</span>
+        <span class="sidebar-thumb">
+          {% set poster = poster_for(show) %}
+          {% if poster %}
+          <img src="{{ poster }}" alt="" loading="lazy">
+          {% else %}
+          {{ show.title[:1] }}
+          {% endif %}
+        </span>
         <span class="sidebar-text">{{ show.title }}</span>
       </a>
     </li>
@@ -27,7 +41,7 @@
 </div>
 
 <div class="sidebar-block">
-  <h3 class="top10-head">Top 10 <span class="pill">Today</span></h3>
+  <h3 class="sidebar-title top10-head">Library list</h3>
   <ol class="top10">
     {% for show in top10 %}
     <li>

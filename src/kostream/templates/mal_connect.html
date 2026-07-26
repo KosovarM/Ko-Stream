@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Connect MyAnimeList — {{ site_name }}{% endblock %}
+{% block content %}
+<section class="catalog-page mal-connect-page">
+  <header class="catalog-header">
+    <h1>Connect MyAnimeList</h1>
+    <p class="catalog-meta">Keep <strong>ko-stream serve</strong> running while you connect.</p>
+    <p class="catalog-meta">Redirect URI (must match MAL app exactly): <code>{{ redirect_uri }}</code></p>
+  </header>
+
+  <section class="catalog-section">
+    <h2>Step 1 — Log in on MyAnimeList</h2>
+    <p>If the login form keeps looping, use this button first (opens MAL’s normal login, then returns to authorize).</p>
+    <a class="btn-watch" href="{{ login_first_url }}" target="_blank" rel="noopener">Log in to MyAnimeList</a>
+  </section>
+
+  <section class="catalog-section">
+    <h2>Step 2 — Approve Ko-Stream</h2>
+    <p>After you are logged in, open the authorization page and click <strong>Allow</strong>.</p>
+    <a class="btn-detail" href="{{ authorize_url }}" target="_blank" rel="noopener">Authorize Ko-Stream</a>
+  </section>
+
+  <section class="catalog-section">
+    <h2>Step 3 — Finish (automatic or manual)</h2>
+    <p>Normally you are redirected back to Ko-Stream automatically. If the browser shows “can’t connect” but the address bar contains <code>?code=...</code>, copy the full URL or just the code below.</p>
+    <form class="mal-manual-form" method="post" action="{{ url_for('mal_complete_manual') }}">
+      <textarea name="code" rows="3" placeholder="Paste callback URL or authorization code here"></textarea>
+      <button type="submit" class="btn-watch">Complete connection</button>
+    </form>
+  </section>
+
+  <section class="catalog-section mal-troubleshoot">
+    <h2>Login keeps asking for password?</h2>
+    <ul>
+      <li>Register redirect URI at <a href="https://myanimelist.net/apiconfig" target="_blank" rel="noopener">myanimelist.net/apiconfig</a> as exactly: <code>{{ redirect_uri }}</code></li>
+      <li><code>127.0.0.1</code> and <code>localhost</code> are different — register the one you use in <code>MAL_REDIRECT_URI</code></li>
+      <li>Log in at <a href="https://myanimelist.net/login.php" target="_blank" rel="noopener">myanimelist.net/login.php</a> first, then Step 2</li>
+      <li>Disable ad blockers / privacy extensions for myanimelist.net</li>
+      <li>Try another browser (Chrome or Firefox)</li>
+      <li>Type password manually (no autofill)</li>
+    </ul>
+    <p><a href="{{ url_for('catalog_page') }}">← Back to catalog</a></p>
+  </section>
+</section>
+{% endblock %}

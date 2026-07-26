@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+{% block title %}Catalog — {{ site_name }}{% endblock %}
+{% block content %}
+<section class="catalog-page">
+  <header class="catalog-header">
+    <h1>Catalog</h1>
+    <p>
+      Only <strong>enabled</strong> entries load on the home page — fast for local testing.
+      Config file: <code>{{ catalog_path }}</code>
+    </p>
+    <p class="catalog-meta">{{ catalog_count }} enabled · {{ catalog.shows|length }} total{% if mal_count %} · {{ mal_count }} from MAL{% endif %}</p>
+    {% if mal_message %}
+    <p class="catalog-success">{{ mal_message }}</p>
+    {% endif %}
+    {% if mal_error %}
+    <p class="catalog-error">{{ mal_error }}</p>
+    {% endif %}
+  </header>
+
+  <section class="catalog-section mal-section">
+    <h2>MyAnimeList</h2>
+    {% if not mal_configured %}
+    <p class="empty">Set <code>MAL_CLIENT_ID</code> and <code>MAL_CLIENT_SECRET</code> env vars, then restart Ko-Stream. See <code>data/mal/README.md</code>.</p>
+    {% elif mal_connected %}
+    <p>Connected as <strong>{{ mal_username or 'MyAnimeList user' }}</strong>.</p>
+    {% if mal_last_sync %}
+    <p class="catalog-meta mal-last-sync">{{ mal_last_sync }}</p>
+    {% else %}
+    <p class="catalog-meta mal-last-sync">Last sync: never</p>
+    {% endif %}
+    <p class="catalog-meta" id="mal-sync-status" hidden></p>
+    <div class="mal-actions">
+      <button type="button" class="btn-watch" id="mal-sync">Sync animelist + metadata</button>
+      <button type="button" class="btn-detail" id="mal-disconnect">Disconnect</button>
+    </div>
+    {% else %}
+    <p>Connect your MyAnimeList account to import your full anime list into the catalog (posters + synopsis).</p>
+    {% if mal_redirect_uri %}
+    <p class="catalog-meta">Redirect URI for MAL app: <code>{{ mal_redirect_uri }}</code></p>
+    {% endif %}
+    {% if mal_client_hint %}
+    <p class="catalog-meta">Client ID in use: <code>{{ mal_client_hint }}</code> — must match apiconfig (32 chars)</p>
+    {% endif %}
+    <a class="btn-watch" href="{{ url_for('mal_connect') }}">Connect MyAnimeList</a>
+    <p class="catalog-meta">Login loop? The connect page has a step-by-step fix + manual code paste.</p>
+    {% endif %}
+  </section>
+
+  <section class="catalog-section">
+    <h2>Selected shows</h2>
+    {% if catalog.shows %}
+    <ul class="catalog-list">
+      {% for entry in catalog.shows %}
+      <li class="catalog-item">
+        <label class="catalog-toggle">
+          <input type="checkbox" data-id="{{ entry.id }}" {% if entry.enabled %}checked{% endif %}>
+          <span class="catalog-title">{{ entry.title or entry.folder or entry.id }}</span>
+        </label>
+        <span class="catalog-tags">
+          <span class="tag">{{ entry.source }}</span>
+          {% if entry.anilist_id %}<span class="tag">AniList {{ entry.anilist_id }}</span>{% endif %}
+          {% if entry.mal_id %}<span class="tag">MAL {{ entry.mal_id }}</span>{% endif %}
+          {% if entry.folder %}<span class="tag">{{ entry.folder }}</span>{% endif %}
+        </span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No entries yet — add a local folder or search AniList below.</p>
+    {% endif %}
+  </section>
+
+  <section class="catalog-section">
+    <h2>Local folders</h2>
+    {% if folders %}
+    <ul class="catalog-list">
+      {% for folder in folders %}
+      <li class="catalog-item">
+        <span>{{ folder }}</span>
+        <button type="button" class="btn-detail btn-add-folder" data-folder="{{ folder }}">Add to catalog</button>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No folders in <code>media/shows/</code> yet.</p>
+    {% endif %}
+  </section>
+
+  <section class="catalog-section">
+    <h2>Search AniList (metadata &amp; posters)</h2>
+    <form id="anilist-search" class="catalog-search">
+      <input type="search" name="q" placeholder="e.g. Frieren, One Piece" minlength="2" required>
+      <button type="submit">Search</button>
+    </form>
+    <ul id="anilist-results" class="catalog-results"></ul>
+  </section>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('.catalog-toggle input').forEach((box) => {
+    box.addEventListener('change', async () => {
+      await fetch('{{ url_for("api_catalog_toggle") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: box.dataset.id, enabled: box.checked})
+      });
+    });
+  });
+
+  document.querySelectorAll('.btn-add-folder').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const folder = btn.dataset.folder;
+      await fetch('{{ url_for("api_catalog_add") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({source: 'local', folder, id: folder.toLowerCase().replace(/[^a-z0-9]+/g, '-')})
+      });
+      location.reload();
+    });
+  });
+
+  document.getElementById('anilist-search').addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const q = new FormData(event.target).get('q');
+    const list = document.getElementById('anilist-results');
+    list.innerHTML = '<li>Searching…</li>';
+    const resp = await fetch(`{{ url_for('api_anilist_search') }}?q=${encodeURIComponent(q)}`);
+    const data = await resp.json();
+    list.innerHTML = '';
+    if (data.error) {
+      list.innerHTML = `<li class="empty catalog-error">${data.error}</li>`;
+      return;
+    }
+    (data.results || []).forEach((item) => {
+      const li = document.createElement('li');
+      li.className = 'catalog-result';
+      li.innerHTML = `
+        ${item.poster_url ? `<img src="${item.poster_url}" alt="" width="48">` : ''}
+        <div>
+          <strong>${item.title.replace(/</g, '&lt;')}</strong>
+          <div class="catalog-tags">${(item.genres || []).map(g => `<span class="tag genre">${g}</span>`).join('')}</div>
+        </div>
+        <button type="button" class="btn-watch">Add</button>
+      `;
+      li.querySelector('button').addEventListener('click', async () => {
+        await fetch('{{ url_for("api_catalog_add") }}', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            source: 'demo',
+            id: 'anilist-' + item.anilist_id,
+            anilist_id: item.anilist_id,
+            title: item.title
+          })
+        });
+        location.reload();
+      });
+      list.appendChild(li);
+    });
+    if (!list.children.length) list.innerHTML = '<li class="empty">No results</li>';
+  });
+
+  const malSync = document.getElementById('mal-sync');
+  const malSyncStatus = document.getElementById('mal-sync-status');
+  if (malSync) {
+    const pollStatus = async () => {
+      const resp = await fetch('{{ url_for("api_mal_sync_status") }}');
+      const data = await resp.json();
+      if (malSyncStatus) {
+        malSyncStatus.hidden = false;
+        malSyncStatus.textContent = data.message || data.phase || 'Working…';
+      }
+      if (data.running) {
+        malSync.disabled = true;
+        malSync.textContent = data.phase === 'enrich' ? 'Enriching metadata…' : 'Syncing list…';
+        setTimeout(pollStatus, 1200);
+        return;
+      }
+      malSync.disabled = false;
+      malSync.textContent = 'Sync animelist + metadata';
+      if (data.status === 'done' || data.status === 'error') {
+        const msg = data.message || (data.error ? `Sync failed: ${data.error}` : 'Sync finished.');
+        location.href = '{{ url_for("catalog_page") }}?mal_message=' + encodeURIComponent(msg);
+      }
+    };
+
+    malSync.addEventListener('click', async () => {
+      malSync.disabled = true;
+      malSync.textContent = 'Starting sync…';
+      if (malSyncStatus) {
+        malSyncStatus.hidden = false;
+        malSyncStatus.textContent = 'Starting…';
+      }
+      try {
+        const resp = await fetch('{{ url_for("api_mal_sync") }}', { method: 'POST' });
+        const data = await resp.json();
+        if (!data.ok) {
+          alert(data.error || 'Sync failed');
+          malSync.disabled = false;
+          malSync.textContent = 'Sync animelist + metadata';
+          return;
+        }
+        pollStatus();
+      } catch (err) {
+        alert('Could not start sync.');
+        malSync.disabled = false;
+        malSync.textContent = 'Sync animelist + metadata';
+      }
+    });
+
+    // Resume status UI if a sync is already running (e.g. after refresh).
+    fetch('{{ url_for("api_mal_sync_status") }}')
+      .then((r) => r.json())
+      .then((data) => { if (data.running) pollStatus(); })
+      .catch(() => {});
+  }
+
+  const malDisconnect = document.getElementById('mal-disconnect');
+  if (malDisconnect) {
+    malDisconnect.addEventListener('click', async () => {
+      if (!confirm('Disconnect MyAnimeList and remove MAL entries from catalog?')) return;
+      await fetch('{{ url_for("api_mal_disconnect") }}', { method: 'POST' });
+      location.reload();
+    });
+  }
+</script>
+{% endblock %}

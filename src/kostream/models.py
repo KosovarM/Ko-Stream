@@ -15,19 +15,44 @@ class Episode:
     duration_label: str = "TV"
 
 
+@dataclass(frozen=True)
+class RelatedAnime:
+    mal_id: int
+    title: str
+    relation_type: str
+
+
 @dataclass
 class Show:
     id: str
     title: str
     description: str
     poster: str | None = None
+    poster_url: str | None = None
+    banner_url: str | None = None
     type_label: str = "TV"
     episodes: list[Episode] = field(default_factory=list)
     genres: list[str] = field(default_factory=list)
+    anilist_id: int | None = None
+    mal_id: int | None = None
+    episodes_watched: int = 0
+    anime_status: str | None = None
+    list_status: str | None = None
+    added_at: str | None = None
+    user_score: int | None = None
+    mean_score: float | None = None
+    related_anime: list[RelatedAnime] = field(default_factory=list)
 
     @property
     def episode_count(self) -> int:
         return len(self.episodes)
+
+    @property
+    def is_metadata_only(self) -> bool:
+        """True when there are no local/playable files — MAL/AniList placeholders only."""
+        if not self.episodes:
+            return True
+        return all(ep.filename == "demo.mp4" for ep in self.episodes)
 
     @property
     def latest_episode(self) -> Episode | None:
@@ -47,3 +72,34 @@ def slugify(name: str) -> str:
 
 
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mkv"}
+STRM_EXTENSION = ".strm"
+
+
+def is_jellyfin_episode(episode: Episode) -> bool:
+    return episode.filename.startswith("jellyfin:")
+
+
+def is_strm_episode(episode: Episode) -> bool:
+    return episode.filename.startswith("strm:")
+
+
+def is_local_file_episode(episode: Episode) -> bool:
+    """True when the episode points at a real file under media/shows (not demo/strm/jellyfin)."""
+    if episode.filename == "demo.mp4":
+        return False
+    if is_strm_episode(episode) or is_jellyfin_episode(episode):
+        return False
+    return bool(episode.filename)
+
+
+def is_stream_only_episode(episode: Episode) -> bool:
+    """Placeholder episode playable only via Grab / remote stream, no local file."""
+    return episode.filename == "demo.mp4"
+
+
+def jellyfin_item_id(episode: Episode) -> str:
+    return episode.filename.split(":", 1)[1]
+
+
+def strm_target_url(episode: Episode) -> str:
+    return episode.filename.split(":", 1)[1]

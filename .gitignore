@@ -1,4 +1,4 @@
-# Python
+﻿# Python
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -14,6 +14,29 @@ media/
 
 # Progress DB
 data/progress.json
+data/completed.json
+
+# Grab URL cache / overrides (local)
+data/grab/cache.json
+data/grab/overrides.json
+
+# Local asset registry (fetched streams)
+data/local_registry.json
+
+# Optional flat asset dump used by stream_fetch CLI
+media_assets/
+
+# MAL OAuth tokens + local sync/cache (local only)
+data/mal/tokens.json
+data/mal/pending_oauth.json
+data/mal/last_sync.json
+data/mal/cache/
+
+# AniList / other API caches
+data/cache/
+
+# Personal catalog selection
+data/catalog/selected.json
 
 # IDE
 .vscode/

@@ -1,31 +1,321 @@
 {% extends "base.html" %}
 {% block title %}{{ show.title }} — {{ site_name }}{% endblock %}
 {% block content %}
-<section class="detail-hero">
-  <div class="detail-poster"><span>{{ show.title[:2] }}</span></div>
-  <div class="detail-info">
-    <h1>{{ show.title }}</h1>
-    <div class="meta-tags">
-      <span class="tag">{{ show.type_label }}</span>
-      <span class="tag">{{ show.episode_count }} EP</span>
-      {% for g in show.genres %}<span class="tag genre">{{ g }}</span>{% endfor %}
+{% set poster = poster_for(show) %}
+{% set bg = show.banner_url or poster %}
+{% set next_ep = next_unwatched_episode(show, progress, completed) %}
+{% set local_info = local_info or {} %}
+<section class="detail-banner" {% if bg %}style="background-image: url('{{ bg }}')"{% endif %}>
+  <div class="detail-banner-shade"></div>
+  <div class="detail-hero">
+    <div class="detail-poster">
+      {% if poster %}
+      <img src="{{ poster }}" alt="{{ show.title }}" class="detail-poster-img">
+      {% else %}
+      <span>{{ show.title[:2] }}</span>
+      {% endif %}
     </div>
-    <p>{{ show.description }}</p>
+    <div class="detail-info">
+      <h1>{{ show.title }}</h1>
+      <div class="meta-tags">
+        <span class="tag tag-icon">▶ {{ show.type_label }}</span>
+        <span class="tag">{{ show.episode_count }} EP</span>
+        {% if show.is_metadata_only and grab_enabled %}
+        <span class="tag tag-meta">Test stream</span>
+        {% elif show.is_metadata_only %}
+        <span class="tag tag-meta">Metadata only</span>
+        {% endif %}
+        {% if show.mean_score %}
+        <span class="tag tag-score">★ {{ '%.2f'|format(show.mean_score) }} MAL</span>
+        {% endif %}
+        {% if show.user_score %}
+        <span class="tag tag-my-score">Your score: {{ show.user_score }}/10</span>
+        {% endif %}
+        {% if show.episodes_watched %}
+        <span class="tag">{{ show.episodes_watched }} watched</span>
+        {% endif %}
+        {% if show.anime_status == 'currently_airing' %}
+        <span class="tag tag-airing">Airing</span>
+        {% endif %}
+        {% for g in show.genres[:4] %}<span class="tag genre">{{ g }}</span>{% endfor %}
+      </div>
+      <p class="detail-desc">{{ show.description }}</p>
+      {% if show.is_metadata_only and grab_enabled %}
+      <p class="meta-only-hint">No local files — use Grab for streams, or add files below into the show folder.</p>
+      {% elif show.is_metadata_only %}
+      <p class="meta-only-hint">No local video files yet — prepare the folder and upload episodes below.</p>
+      {% endif %}
+      {% if next_ep and (not show.is_metadata_only or grab_enabled) %}
+      <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=next_ep.id) }}">
+        ▶ {% if show.episodes_watched %}Continue{% else %}Watch Now{% endif %} · EP {{ next_ep.number }}
+      </a>
+      {% elif next_ep and show.is_metadata_only %}
+      <a class="btn-detail" href="{{ url_for('watch', show_id=show.id, episode_id=next_ep.id) }}">
+        Episode list · EP {{ next_ep.number }}
+      </a>
+      {% elif show.list_status == 'completed' %}
+      <span class="tag tag-completed-show">Completed on MAL</span>
+      {% endif %}
+    </div>
   </div>
 </section>
 
-<section class="section">
+<section class="section local-media-panel" id="local-media-panel">
+  <div class="local-media-header">
+    <div class="local-media-intro">
+      <h2 class="section-title">Local files</h2>
+      <p class="local-media-hint">
+        Upload per episode, or open the show folder. Missing files can be filled via download when configured.
+      </p>
+    </div>
+    <div class="local-media-actions">
+      <button type="button" class="btn-detail" id="btn-open-folder">Open folder</button>
+      <button
+        type="button"
+        class="btn-watch"
+        id="btn-download-missing"
+        {% if missing_count == 0 %}disabled{% endif %}
+        title="{% if download_configured %}Download missing episodes via KOSTREAM_DOWNLOAD_CMD{% else %}Set KOSTREAM_DOWNLOAD_CMD first{% endif %}"
+      >
+        Download missing{% if missing_count %} ({{ missing_count }}){% endif %}
+      </button>
+    </div>
+  </div>
+  <p class="local-media-msg" id="local-media-msg" hidden></p>
+  <p class="local-media-download-status" id="download-job-status" {% if not download_job or download_job.status == 'idle' %}hidden{% endif %}>
+    {% if download_job %}{{ download_job.message }}{% if download_job.error %} — {{ download_job.error }}{% endif %}{% endif %}
+  </p>
+</section>
+
+<section class="section detail-episodes">
   <h2 class="section-title">Episodes</h2>
-  <div class="episode-list">
-    {% for ep in show.episodes %}
-    <a href="{{ url_for('watch', show_id=show.id, episode_id=ep.id) }}" class="episode-item">
-      <span class="ep-num">S{{ '%02d'|format(ep.season) }}E{{ '%02d'|format(ep.number) }}</span>
-      <span class="ep-title">{{ ep.title }}</span>
-      {% if progress.get(ep.id) %}
-      <span class="ep-progress">Resume</span>
+
+  {% if relations_pending and not relation_links %}
+  <p class="relations-pending" id="relations-pending">Loading prequel / sequel links…</p>
+  {% endif %}
+
+  {% if relation_links %}
+  <nav class="show-relations" aria-label="Related seasons">
+    {% for link in relation_links %}
+    <a
+      href="{{ link.href }}"
+      class="relation-btn relation-{{ link.kind }}{% if link.external %} relation-external{% endif %}"
+      {% if link.external %}target="_blank" rel="noopener noreferrer"{% endif %}
+    >
+      <span class="relation-label">{{ link.label }}</span>
+      <span class="relation-title">{{ link.title }}</span>
+      {% if link.external %}
+      <span class="relation-hint">View on MAL ↗</span>
       {% endif %}
     </a>
     {% endfor %}
+  </nav>
+  {% endif %}
+
+  <div class="episode-list">
+    {% for ep in show.episodes %}
+    {% set done = episode_completed(show, ep, progress, completed) %}
+    {% set is_next = next_ep and ep.id == next_ep.id %}
+    {% set stream_only = ep.filename == 'demo.mp4' %}
+    {% set is_local = ep.filename != 'demo.mp4' and not ep.filename.startswith('strm:') and not ep.filename.startswith('jellyfin:') %}
+    {% set expected = 'S%02dE%02d.mp4'|format(ep.season, ep.number) %}
+    <div class="episode-row{% if done %} ep-completed{% endif %}{% if is_next %} ep-next{% endif %}{% if stream_only %} ep-meta{% endif %}{% if is_local %} ep-local{% endif %}">
+      <a href="{{ url_for('watch', show_id=show.id, episode_id=ep.id) }}" class="episode-item">
+        <span class="ep-num">S{{ '%02d'|format(ep.season) }}E{{ '%02d'|format(ep.number) }}</span>
+        <span class="ep-title">{{ ep.title }}</span>
+        {% if is_local %}
+        <span class="ep-badge ep-local-badge">local</span>
+        {% elif stream_only %}
+        <span class="ep-badge ep-stream-badge">stream only</span>
+        {% endif %}
+        {% if done %}
+        <span class="ep-badge ep-completed-badge">✓ Completed</span>
+        {% elif is_next %}
+        <span class="ep-badge ep-next-badge">▶ Next</span>
+        {% elif progress.get(ep.id) %}
+        <span class="ep-progress">Resume</span>
+        {% endif %}
+      </a>
+      {% if stream_only or not is_local %}
+      <label class="ep-upload-btn" title="Upload local file as {{ expected }}">
+        Upload
+        <input
+          type="file"
+          accept="video/mp4,video/webm,video/x-matroska,.mp4,.webm,.mkv"
+          data-episode-id="{{ ep.id }}"
+          data-expected="{{ expected }}"
+          class="ep-upload-input"
+          hidden
+        >
+      </label>
+      {% endif %}
+      {% if not done %}
+      <button
+        type="button"
+        class="ep-mark-btn"
+        data-show-id="{{ show.id }}"
+        data-episode-id="{{ ep.id }}"
+        title="Mark as watched{% if mal_connected %} and sync to MAL{% endif %}"
+      >✓</button>
+      {% endif %}
+    </div>
+    {% endfor %}
   </div>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const showId = {{ show.id | tojson }};
+  const localMsg = document.getElementById('local-media-msg');
+
+  function showLocalMsg(text, isError) {
+    if (!localMsg) return;
+    localMsg.hidden = false;
+    localMsg.textContent = text;
+    localMsg.classList.toggle('is-error', !!isError);
+  }
+
+  document.getElementById('btn-open-folder')?.addEventListener('click', async () => {
+    const resp = await fetch(`/api/show/${encodeURIComponent(showId)}/open-folder`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: '{}',
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      showLocalMsg(data.error || 'Could not open folder.', true);
+      return;
+    }
+    if (!data.opened) {
+      showLocalMsg(`Folder ready — open manually: ${data.folder_path}`);
+    } else {
+      localMsg.hidden = true;
+    }
+  });
+
+  const downloadStatus = document.getElementById('download-job-status');
+  const downloadBtn = document.getElementById('btn-download-missing');
+  let downloadPoll = null;
+
+  function setDownloadStatus(text, isError) {
+    if (!downloadStatus) return;
+    downloadStatus.hidden = !text;
+    downloadStatus.textContent = text || '';
+    downloadStatus.classList.toggle('is-error', !!isError);
+  }
+
+  async function pollDownloadStatus() {
+    const resp = await fetch(`/api/show/${encodeURIComponent(showId)}/download-missing/status`);
+    const data = await resp.json().catch(() => ({}));
+    if (data.running) {
+      setDownloadStatus(data.message || 'Downloading…');
+      return;
+    }
+    if (downloadPoll) {
+      clearInterval(downloadPoll);
+      downloadPoll = null;
+    }
+    if (downloadBtn) downloadBtn.disabled = (data.missing_now || 0) === 0;
+    if (data.status === 'error') {
+      setDownloadStatus(data.error || data.message || 'Download failed.', true);
+      return;
+    }
+    if (data.status === 'done') {
+      setDownloadStatus(data.message || 'Download finished.');
+      setTimeout(() => location.reload(), 800);
+    }
+  }
+
+  downloadBtn?.addEventListener('click', async () => {
+    downloadBtn.disabled = true;
+    setDownloadStatus('Starting download…');
+    const resp = await fetch(`/api/show/${encodeURIComponent(showId)}/download-missing`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: '{}',
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      setDownloadStatus(data.error || 'Could not start download.', true);
+      downloadBtn.disabled = false;
+      return;
+    }
+    setDownloadStatus(data.message || 'Downloading…');
+    if (data.running) {
+      downloadPoll = setInterval(pollDownloadStatus, 1500);
+    } else if (data.status === 'done') {
+      setTimeout(() => location.reload(), 600);
+    } else {
+      downloadBtn.disabled = false;
+    }
+  });
+
+  async function uploadEpisode(episodeId, file) {
+    const body = new FormData();
+    body.append('episode_id', episodeId);
+    body.append('file', file);
+    const resp = await fetch(`/api/show/${encodeURIComponent(showId)}/upload-episode`, {
+      method: 'POST',
+      body,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || !data.ok) {
+      showLocalMsg(data.error || 'Upload failed.', true);
+      return false;
+    }
+    showLocalMsg(`Saved as ${data.filename}`);
+    return true;
+  }
+
+  document.querySelectorAll('.ep-upload-input').forEach((input) => {
+    input.addEventListener('change', async () => {
+      const file = input.files && input.files[0];
+      if (!file) return;
+      const ok = await uploadEpisode(input.dataset.episodeId, file);
+      input.value = '';
+      if (ok) location.reload();
+    });
+  });
+
+  document.querySelectorAll('.ep-mark-btn').forEach((btn) => {
+    btn.addEventListener('click', async (event) => {
+      event.preventDefault();
+      btn.disabled = true;
+      const resp = await fetch('{{ url_for("api_episode_complete") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+          show_id: btn.dataset.showId,
+          episode_id: btn.dataset.episodeId,
+        }),
+      });
+      if (resp.ok) {
+        location.reload();
+      } else {
+        btn.disabled = false;
+      }
+    });
+  });
+
+  {% if relations_pending and not relation_links %}
+  let tries = 0;
+  const timer = setInterval(async () => {
+    tries += 1;
+    try {
+      const resp = await fetch('{{ url_for("api_show_relations_ready", show_id=show.id) }}');
+      const data = await resp.json();
+      if (data.ready) {
+        clearInterval(timer);
+        location.reload();
+      }
+    } catch (_) {}
+    if (tries > 15) {
+      clearInterval(timer);
+      const el = document.getElementById('relations-pending');
+      if (el) el.textContent = 'No prequel/sequel links yet. Refresh later if needed.';
+    }
+  }, 1500);
+  {% endif %}
+</script>
 {% endblock %}

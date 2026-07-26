@@ -1,53 +1,83 @@
 {% extends "base.html" %}
-{% block title %}{{ site_name }} — Watch Local Series{% endblock %}
+{% block title %}{{ site_name }} — Your library{% endblock %}
 {% block content %}
 <section class="spotlight-section">
   <div class="spotlight-carousel" id="spotlight">
     {% for show in spotlight %}
+    {% set poster = poster_for(show) %}
+    {% set bg = show.banner_url or poster %}
+    {% set watch_ep = next_unwatched_episode(show, progress, completed) %}
     <article class="spotlight-slide {% if loop.first %}active{% endif %}" data-index="{{ loop.index0 }}">
-      <div class="spotlight-bg"></div>
-      <div class="spotlight-content">
-        <span class="spotlight-rank">#{{ loop.index }} Spotlight</span>
-        <h1>{{ show.title }}</h1>
-        <div class="meta-tags">
-          <span class="tag">{{ show.type_label }}</span>
-          {% if show.latest_episode %}
-          <span class="tag">EP {{ show.latest_episode.number }}</span>
-          {% endif %}
-          <span class="tag hd">HD</span>
+      <div class="spotlight-bg" {% if bg %}style="background-image: url('{{ bg }}')"{% endif %}></div>
+      <div class="spotlight-shade"></div>
+      <div class="spotlight-layout">
+        <div class="spotlight-content">
+          <span class="spotlight-rank">Featured · {{ loop.index }}</span>
+          <h1>{{ show.title }}</h1>
+          <div class="meta-tags">
+            <span class="tag tag-icon">▶ {{ show.type_label }}</span>
+            {% if watch_ep %}
+            <span class="tag tag-icon">⏱ EP {{ watch_ep.number }}</span>
+            {% elif show.latest_episode %}
+            <span class="tag tag-icon">⏱ EP {{ show.latest_episode.number }}</span>
+            {% endif %}
+            {% if show.is_metadata_only %}
+            <span class="tag tag-meta">Metadata only</span>
+            {% endif %}
+            {% if show.episode_count %}
+            <span class="tag">{{ show.episode_count }} EP</span>
+            {% endif %}
+          </div>
+          <p class="spotlight-desc">{{ show.description[:320] }}{% if show.description|length > 320 %}…{% endif %}</p>
+          <div class="spotlight-actions">
+            {% if watch_ep %}
+            <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=watch_ep.id) }}">
+              ▶ {% if show.episodes_watched %}Continue{% else %}Open{% endif %}
+            </a>
+            {% endif %}
+            <a class="btn-detail" href="{{ url_for('show_detail', show_id=show.id) }}">Detail ›</a>
+          </div>
         </div>
-        <p class="spotlight-desc">{{ show.description[:280] }}{% if show.description|length > 280 %}…{% endif %}</p>
-        <div class="spotlight-actions">
-          {% if show.latest_episode %}
-          <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=show.latest_episode.id) }}">Watch Now</a>
-          {% endif %}
-          <a class="btn-detail" href="{{ url_for('show_detail', show_id=show.id) }}">Detail</a>
+        {% if poster %}
+        <div class="spotlight-poster">
+          <img src="{{ poster }}" alt="{{ show.title }}" class="spotlight-poster-img">
         </div>
-      </div>
-      <div class="spotlight-poster">
-        <div class="poster-placeholder">{{ show.title[:2] }}</div>
+        {% endif %}
       </div>
     </article>
     {% endfor %}
   </div>
+  <div class="spotlight-controls">
+    <button type="button" class="spotlight-arrow" id="spotlight-prev" aria-label="Previous">‹</button>
+    <button type="button" class="spotlight-arrow" id="spotlight-next" aria-label="Next">›</button>
+  </div>
   <div class="spotlight-dots">
     {% for show in spotlight %}
-    <button type="button" class="dot {% if loop.first %}active{% endif %}" data-slide="{{ loop.index0 }}"></button>
+    <button type="button" class="dot {% if loop.first %}active{% endif %}" data-slide="{{ loop.index0 }}" aria-label="Slide {{ loop.index }}"></button>
     {% endfor %}
   </div>
 </section>
 
 <div class="home-layout">
   <div class="home-main">
-    {% set section_title = 'Trending' %}
+    {% set section_title = 'Highest MAL score' %}
     {% set section_shows = trending %}
+    {% set section_ranked = true %}
     {% include "partials/section_row.html" %}
 
-    {% set section_title = 'Latest Episode' %}
+    {% if currently_airing %}
+    {% set section_title = 'Currently Airing' %}
+    {% set section_shows = currently_airing %}
+    {% set section_ranked = false %}
+    {% include "partials/section_row.html" %}
+    {% endif %}
+
+    {% set section_title = 'Continue Watching' %}
     {% include "partials/section_latest.html" %}
 
-    {% set section_title = 'New On Ko-Stream' %}
-    {% set section_shows = trending %}
+    {% set section_title = 'Recently added' %}
+    {% set section_shows = new_on_kostream %}
+    {% set section_ranked = false %}
     {% include "partials/section_row.html" %}
   </div>
 

@@ -1,13 +1,24 @@
 <section class="section">
-  <h2 class="section-title">Latest Episode</h2>
+  <h2 class="section-title">{{ section_title | default('Continue Watching') }}</h2>
   <div class="latest-grid">
     {% for show, ep in latest %}
     <a href="{{ url_for('watch', show_id=show.id, episode_id=ep.id) }}" class="latest-card">
-      <div class="latest-poster"><span>{{ show.title[:2] }}</span></div>
+      <div class="latest-poster">
+        {% set poster = poster_for(show) %}
+        {% if poster %}
+        <img src="{{ poster }}" alt="" class="latest-poster-img" loading="lazy">
+        {% else %}
+        <span>{{ show.title[:2] }}</span>
+        {% endif %}
+      </div>
       <div class="latest-info">
         <h3>{{ show.title }}</h3>
-        <p>EP {{ ep.number }} · {{ show.type_label }}</p>
+        <p>Episode {{ ep.number }}{% if show.episodes_watched %} · {{ show.episodes_watched }} watched{% endif %} · {{ show.type_label }}</p>
+        {% if show.genres %}
+        <p class="latest-genre">{{ show.genres[0] }}</p>
+        {% endif %}
       </div>
+      <span class="latest-play">▶</span>
     </a>
     {% endfor %}
   </div>
