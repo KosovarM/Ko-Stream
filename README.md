@@ -1,6 +1,6 @@
 # Ko-Stream
 
-Local series streaming with an **[Aniwatch](https://aniwatch.co.at/)-inspired** UI — for **your own files** on disk.
+Local series streaming — for **your own files** on disk.
 
 ## Disclaimer
 
