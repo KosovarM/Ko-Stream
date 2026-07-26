@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}{{ site_name }}{% endblock %}</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.svg') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -19,12 +21,18 @@
       </a>
       <nav class="header-nav" id="header-nav">
         <a href="{{ url_for('home') }}" class="nav-link">Home</a>
+        <a href="{{ url_for('schedule_page') }}" class="nav-link">Schedule</a>
+        <a href="{{ url_for('manga_page') }}" class="nav-link">Manga</a>
+        <a href="{{ url_for('manhwa_page') }}" class="nav-link">Manhwa</a>
         <a href="{{ url_for('search') }}" class="nav-link">Browse</a>
         <a href="{{ url_for('catalog_page') }}" class="nav-link">Catalog</a>
       </nav>
-      <form class="search-form" action="{{ url_for('search') }}" method="get">
+      <button type="button" class="search-toggle" id="search-toggle" aria-label="Open search" aria-expanded="false" aria-controls="header-search">
+        <span aria-hidden="true">⌕</span>
+      </button>
+      <form class="search-form" id="header-search" action="{{ url_for('search') }}" method="get">
         <span class="search-icon" aria-hidden="true">⌕</span>
-        <input type="search" name="q" placeholder="Search anime..." value="{{ request.args.get('q', '') }}">
+        <input type="search" name="q" placeholder="Search anime..." value="{{ request.args.get('q', '') }}" id="header-search-input">
       </form>
       <a href="{{ url_for('catalog_page') }}" class="btn-header-login">Library</a>
     </div>
@@ -41,9 +49,45 @@
   </footer>
   {% block scripts %}{% endblock %}
   <script>
-    document.getElementById('menu-toggle')?.addEventListener('click', () => {
-      document.getElementById('header-nav')?.classList.toggle('open');
-    });
+    (function () {
+      const nav = document.getElementById('header-nav');
+      const menuToggle = document.getElementById('menu-toggle');
+      const searchForm = document.getElementById('header-search');
+      const searchToggle = document.getElementById('search-toggle');
+      const searchInput = document.getElementById('header-search-input');
+
+      function setSearchOpen(open) {
+        if (!searchForm || !searchToggle) return;
+        searchForm.classList.toggle('is-open', open);
+        searchToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        searchToggle.setAttribute('aria-label', open ? 'Close search' : 'Open search');
+        if (open) {
+          nav?.classList.remove('open');
+          window.setTimeout(() => searchInput?.focus(), 0);
+        }
+      }
+
+      menuToggle?.addEventListener('click', () => {
+        setSearchOpen(false);
+        nav?.classList.toggle('open');
+      });
+
+      searchToggle?.addEventListener('click', () => {
+        const open = !searchForm?.classList.contains('is-open');
+        setSearchOpen(open);
+      });
+
+      document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') setSearchOpen(false);
+      });
+
+      document.addEventListener('click', (event) => {
+        if (!searchForm?.classList.contains('is-open')) return;
+        const target = event.target;
+        if (searchForm.contains(target) || searchToggle?.contains(target)) return;
+        setSearchOpen(false);
+      });
+    })();
   </script>
 </body>
 </html>

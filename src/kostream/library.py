@@ -151,6 +151,7 @@ def _mal_show_for_entry(entry: CatalogEntry, base: Path) -> Show | None:
             ep_count,
             local_episodes,
             display_season=display_season,
+            episode_titles=cached.episode_titles,
         )
         local_n = sum(1 for e in episodes if e.filename != "demo.mp4")
         if local_n:
@@ -201,12 +202,13 @@ def _merge_mal_and_local_episodes(
     local: list[Episode],
     *,
     display_season: int = 1,
+    episode_titles: dict[int, str] | None = None,
 ) -> list[Episode]:
     """Full episode list (MAL count), overlaying local files by episode number.
 
     Season tags in filenames (S01 vs S04) do not create separate rows — they are
     normalized to ``display_season`` so stream-only slots stay aligned.
-    Titles are always ``Episode N``.
+    Titles use MAL names when available, else ``Episode N``.
     """
     season = max(1, display_season)
     by_number: dict[int, Episode] = {}
@@ -217,7 +219,7 @@ def _merge_mal_and_local_episodes(
     merged: list[Episode] = []
     for number in range(1, total + 1):
         local_ep = by_number.get(number)
-        title = f"Episode {number}"
+        title = _mal_episode_display_title(number, episode_titles)
         if local_ep:
             merged.append(
                 Episode(
@@ -241,6 +243,14 @@ def _merge_mal_and_local_episodes(
                 )
             )
     return merged
+
+
+def _mal_episode_display_title(number: int, titles: dict[int, str] | None) -> str:
+    if titles:
+        name = (titles.get(number) or "").strip()
+        if name:
+            return name
+    return f"Episode {number}"
 
 
 def _infer_display_season(
@@ -271,7 +281,7 @@ def _mal_episode_count(cached) -> int:
         total = max(total, watched + 1)
     if total <= 0:
         total = max(watched, 1)
-    return min(total, 300)
+    return total
 
 
 def _mal_episode_list(show_id: str, count: int) -> list[Episode]:
@@ -441,15 +451,20 @@ def _demo_shows() -> list[Show]:
     ]
 
 
-def load_progress(path: Path) -> dict[str, float]:
+def load_progress(path: Path) -> dict:
+    """Episode progress map: id → seconds (legacy) or {seconds, duration}."""
     if not path.exists():
         return {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+    return raw if isinstance(raw, dict) else {}
 
 
-def save_progress(path: Path, data: dict[str, float]) -> None:
+def save_progress(path: Path, data: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
 def _merge_shows(local: list[Show], remote: list[Show]) -> list[Show]:

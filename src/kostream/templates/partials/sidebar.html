@@ -39,15 +39,3 @@
     {% endfor %}
   </ul>
 </div>
-
-<div class="sidebar-block">
-  <h3 class="sidebar-title top10-head">Library list</h3>
-  <ol class="top10">
-    {% for show in top10 %}
-    <li>
-      <span class="top10-rank">{{ '%02d'|format(loop.index) }}</span>
-      <a href="{{ url_for('show_detail', show_id=show.id) }}">{{ show.title }}</a>
-    </li>
-    {% endfor %}
-  </ol>
-</div>

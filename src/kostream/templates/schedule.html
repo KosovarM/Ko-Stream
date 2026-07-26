@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Schedule — {{ site_name }}{% endblock %}
+{% block content %}
+{% set comics_mode = schedule_mode in ('manga', 'manhwa') %}
+{% set comics_label = 'Manhwa' if schedule_mode == 'manhwa' else 'Manga' %}
+{% set comics_endpoint = 'manhwa_page' if schedule_mode == 'manhwa' else 'manga_page' %}
+<section class="page-search schedule-page">
+  <header class="browse-header">
+    <h1>Schedule</h1>
+    <div class="schedule-mode-tabs" role="tablist" aria-label="Schedule type">
+      <a
+        href="{{ url_for('schedule_page', mode='anime') }}"
+        class="schedule-mode-tab{% if schedule_mode == 'anime' %} is-active{% endif %}"
+        role="tab"
+        aria-selected="{{ 'true' if schedule_mode == 'anime' else 'false' }}"
+      >Anime</a>
+      <a
+        href="{{ url_for('schedule_page', mode='manga') }}"
+        class="schedule-mode-tab{% if schedule_mode == 'manga' %} is-active{% endif %}"
+        role="tab"
+        aria-selected="{{ 'true' if schedule_mode == 'manga' else 'false' }}"
+      >Manga</a>
+      <a
+        href="{{ url_for('schedule_page', mode='manhwa') }}"
+        class="schedule-mode-tab{% if schedule_mode == 'manhwa' %} is-active{% endif %}"
+        role="tab"
+        aria-selected="{{ 'true' if schedule_mode == 'manhwa' else 'false' }}"
+      >Manhwa</a>
+    </div>
+    {% if comics_mode %}
+    <p class="browse-meta">
+      Currently publishing titles from your
+      {% if schedule_mode == 'manhwa' %}manhwa list{% else %}mangalist{% endif %}.
+      MAL/Jikan do not provide reliable weekly chapter-drop times, so this list shows ongoing
+      series rather than a day/time grid.
+    </p>
+    {% else %}
+    <p class="browse-meta">
+      Currently airing titles from your library — episode drop day &amp; time in your local timezone
+      (MAL times are JST).
+    </p>
+    {% endif %}
+  </header>
+
+  {% if comics_mode %}
+    {% if not manga_releasing %}
+    <p class="schedule-empty">
+      No currently publishing {{ comics_label|lower }} in your library yet. Sync MAL or enable publishing titles in Catalog.
+    </p>
+    {% else %}
+    <section class="schedule-unknown schedule-manga-releasing">
+      <h2>Currently releasing</h2>
+      <p class="browse-meta">{{ manga_releasing|length }} title{{ 's' if manga_releasing|length != 1 else '' }} · no chapter calendar data available</p>
+      <ul class="schedule-entries">
+        {% for m in manga_releasing %}
+        <li class="schedule-entry">
+          <a href="{{ url_for(comics_endpoint, tab='reading', open=m.id) }}" class="schedule-entry-link">
+            <span class="schedule-poster">
+              {% if m.poster_url %}
+              <img src="{{ m.poster_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
+              {% else %}
+              <span class="schedule-poster-fallback">{{ m.title[:1] }}</span>
+              {% endif %}
+            </span>
+            <span class="schedule-entry-body">
+              <span class="schedule-entry-title">{{ m.title }}</span>
+              <span class="schedule-entry-time">
+                {% if m.num_chapters_read %}{{ m.num_chapters_read }} read{% else %}Publishing{% endif %}
+                {% if m.num_chapters_mal %} · {{ m.num_chapters_mal }} ch{% endif %}
+              </span>
+            </span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </section>
+    {% endif %}
+  {% else %}
+  {% if not schedule_days %}
+  <p class="schedule-empty">No currently airing shows in the library yet. Sync MAL or enable airing titles in Catalog.</p>
+  {% else %}
+  <div class="schedule-week" role="list">
+    {% for day in schedule_days %}
+    <section class="schedule-day{% if day.key == today_key %} is-today{% endif %}" role="listitem" id="day-{{ day.key }}">
+      <header class="schedule-day-head">
+        <h2>{{ day.label }}</h2>
+        {% if day.key == today_key %}<span class="schedule-today-badge">Today</span>{% endif %}
+        <span class="schedule-day-count">{{ day.entries|length }}</span>
+      </header>
+      {% if day.entries %}
+      <ul class="schedule-entries">
+        {% for entry in day.entries %}
+        <li class="schedule-entry">
+          <a href="{{ url_for('show_detail', show_id=entry.show_id) }}" class="schedule-entry-link">
+            <span class="schedule-poster">
+              {% if entry.poster_url %}
+              <img src="{{ entry.poster_url }}" alt="" loading="lazy">
+              {% else %}
+              <span class="schedule-poster-fallback">{{ entry.title[:1] }}</span>
+              {% endif %}
+            </span>
+            <span class="schedule-entry-body">
+              <span class="schedule-entry-title">{{ entry.title }}</span>
+              <span class="schedule-entry-time">
+                <strong>{{ entry.time_local }}</strong>
+                <span class="schedule-jst">{{ entry.time_jst }}</span>
+              </span>
+            </span>
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="schedule-day-empty">No drops</p>
+      {% endif %}
+    </section>
+    {% endfor %}
+  </div>
+
+  {% if schedule_unknown %}
+  <section class="schedule-unknown">
+    <h2>Broadcast time unknown</h2>
+    <p class="browse-meta">Airing shows without MAL broadcast data — re-sync / enrich to fill times.</p>
+    <ul class="schedule-entries">
+      {% for entry in schedule_unknown %}
+      <li class="schedule-entry">
+        <a href="{{ url_for('show_detail', show_id=entry.show_id) }}" class="schedule-entry-link">
+          <span class="schedule-poster">
+            {% if entry.poster_url %}
+            <img src="{{ entry.poster_url }}" alt="" loading="lazy">
+            {% else %}
+            <span class="schedule-poster-fallback">{{ entry.title[:1] }}</span>
+            {% endif %}
+          </span>
+          <span class="schedule-entry-body">
+            <span class="schedule-entry-title">{{ entry.title }}</span>
+            <span class="schedule-entry-time">TBA</span>
+          </span>
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+  {% endif %}
+  {% endif %}
+  {% endif %}
+</section>
+{% endblock %}

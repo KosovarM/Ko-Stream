@@ -75,6 +75,38 @@
     {% set section_title = 'Continue Watching' %}
     {% include "partials/section_latest.html" %}
 
+    {% if currently_reading_manga %}
+    {% set section_title = 'Currently reading · Manga' %}
+    {% set section_manga = currently_reading_manga %}
+    {% set section_tab = 'reading' %}
+    {% set section_library = 'manga' %}
+    {% include "partials/section_manga_row.html" %}
+    {% endif %}
+
+    {% if currently_reading_manhwa %}
+    {% set section_title = 'Currently reading · Manhwa' %}
+    {% set section_manga = currently_reading_manhwa %}
+    {% set section_tab = 'reading' %}
+    {% set section_library = 'manhwa' %}
+    {% include "partials/section_manga_row.html" %}
+    {% endif %}
+
+    {% if currently_releasing_manga %}
+    {% set section_title = 'Currently releasing · Manga' %}
+    {% set section_manga = currently_releasing_manga %}
+    {% set section_tab = 'reading' %}
+    {% set section_library = 'manga' %}
+    {% include "partials/section_manga_row.html" %}
+    {% endif %}
+
+    {% if currently_releasing_manhwa %}
+    {% set section_title = 'Currently releasing · Manhwa' %}
+    {% set section_manga = currently_releasing_manhwa %}
+    {% set section_tab = 'reading' %}
+    {% set section_library = 'manhwa' %}
+    {% include "partials/section_manga_row.html" %}
+    {% endif %}
+
     {% set section_title = 'Recently added' %}
     {% set section_shows = new_on_kostream %}
     {% set section_ranked = false %}

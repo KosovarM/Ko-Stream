@@ -49,17 +49,23 @@
   {% endif %}
   <div class="player-meta">
     <h1>{{ show.title }}</h1>
-    <p>{{ episode.title }}</p>
+    <p class="player-ep-label">{{ episode.title }}</p>
     <div class="player-actions">
-      {% if prev_episode %}
-      <a class="btn-detail" href="{{ url_for('watch', show_id=show.id, episode_id=prev_episode.id) }}">← Previous Episode</a>
-      {% endif %}
-      <button type="button" class="btn-watch" id="mark-complete">
-        ✓ Mark episode watched{% if mal_connected %} · sync MAL{% endif %}
+      <div class="player-nav">
+        {% if prev_episode %}
+        <a class="btn-detail player-nav-btn" href="{{ url_for('watch', show_id=show.id, episode_id=prev_episode.id) }}">← Prev</a>
+        {% else %}
+        <span class="player-nav-btn is-disabled" aria-hidden="true">← Prev</span>
+        {% endif %}
+        {% if next_episode %}
+        <a class="btn-detail player-nav-btn" href="{{ url_for('watch', show_id=show.id, episode_id=next_episode.id) }}">Next →</a>
+        {% else %}
+        <span class="player-nav-btn is-disabled" aria-hidden="true">Next →</span>
+        {% endif %}
+      </div>
+      <button type="button" class="btn-watch player-complete" id="mark-complete">
+        ✓ Complete{% if mal_connected %} on MAL{% endif %}
       </button>
-      {% if next_episode %}
-      <a class="btn-detail" href="{{ url_for('watch', show_id=show.id, episode_id=next_episode.id) }}">Next Episode →</a>
-      {% endif %}
     </div>
   </div>
 </section>
@@ -70,18 +76,20 @@
   const showId = {{ show.id | tojson }};
   const epId = {{ episode.id | tojson }};
 
-  async function markComplete() {
+  async function markComplete(opts) {
+    const stay = !!(opts && opts.stay);
     const resp = await fetch('{{ url_for("api_episode_complete") }}', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({show_id: showId, episode_id: epId}),
     });
-    if (resp.ok) {
+    if (resp.ok && !stay) {
       window.location.href = '{{ url_for("show_detail", show_id=show.id) }}';
     }
+    return resp.ok;
   }
 
-  document.getElementById('mark-complete')?.addEventListener('click', markComplete);
+  document.getElementById('mark-complete')?.addEventListener('click', () => markComplete());
 
   const grabMsg = document.getElementById('grab-override-msg');
   function showGrabError(text) {
@@ -151,14 +159,34 @@
 
   {% if not is_demo %}
   const video = document.getElementById('player');
+  let autoCompleted = false;
+
+  async function maybeAutoCompleteFromProgress() {
+    if (autoCompleted || !video.duration || !isFinite(video.duration)) return;
+    if (video.currentTime < video.duration * 0.9) return;
+    autoCompleted = true;
+    const btn = document.getElementById('mark-complete');
+    if (btn) {
+      btn.disabled = true;
+      btn.textContent = '✓ Completed';
+    }
+    await markComplete({ stay: true });
+  }
+
   video.addEventListener('timeupdate', () => {
+    const payload = {
+      episode_id: epId,
+      seconds: video.currentTime,
+      duration: video.duration || null,
+    };
     if (Math.floor(video.currentTime) % 10 === 0) {
       fetch('{{ url_for("api_progress") }}', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({episode_id: epId, seconds: video.currentTime})
+        body: JSON.stringify(payload)
       });
     }
+    maybeAutoCompleteFromProgress();
   });
   video.addEventListener('ended', () => {
     markComplete();

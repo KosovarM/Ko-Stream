@@ -7,6 +7,17 @@ from kostream.models import Show
 META_GENRES = frozenset({"Local", "Demo", "Catalog", "MAL"})
 PAGE_SIZE = 25
 GRID_COLS = 5
+AVAIL_ALL = "all"
+AVAIL_LOCAL = "local"
+AVAIL_STREAM = "stream"
+AVAIL_OPTIONS = frozenset({AVAIL_ALL, AVAIL_LOCAL, AVAIL_STREAM})
+
+
+def normalize_availability(value: str | None) -> str:
+    v = (value or "").strip().casefold()
+    if v in AVAIL_OPTIONS:
+        return v
+    return AVAIL_ALL
 
 
 def collect_genres(shows: list[Show]) -> list[str]:
@@ -18,7 +29,12 @@ def collect_genres(shows: list[Show]) -> list[str]:
     return sorted(found, key=str.casefold)
 
 
-def filter_shows(shows: list[Show], query: str = "", genre: str = "") -> list[Show]:
+def filter_shows(
+    shows: list[Show],
+    query: str = "",
+    genre: str = "",
+    availability: str = AVAIL_ALL,
+) -> list[Show]:
     result = list(shows)
     q = query.strip().casefold()
     if q:
@@ -30,6 +46,11 @@ def filter_shows(shows: list[Show], query: str = "", genre: str = "") -> list[Sh
     g = genre.strip()
     if g:
         result = [s for s in result if g in (s.genres or [])]
+    avail = normalize_availability(availability)
+    if avail == AVAIL_LOCAL:
+        result = [s for s in result if s.has_local_files]
+    elif avail == AVAIL_STREAM:
+        result = [s for s in result if s.is_stream_only]
     return sorted(result, key=lambda s: s.title.casefold())
 
 

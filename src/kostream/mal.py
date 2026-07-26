@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import base64
+import html as html_lib
 import json
+import re
 import secrets
 import threading
 import time
@@ -27,14 +29,28 @@ TOKEN_FILE = MAL_DATA_DIR / "tokens.json"
 CACHE_DIR = MAL_DATA_DIR / "cache"
 LAST_SYNC_FILE = MAL_DATA_DIR / "last_sync.json"
 USER_AGENT = "Ko-Stream/0.2 (+https://github.com/KosovarM/Ko-Stream; local MAL sync)"
+JIKAN_EPISODES_URL = "https://api.jikan.moe/v4/anime/{mal_id}/episodes"
+# Dummy slug works; MAL serves the canonical episode list page.
+MAL_EPISODES_PAGE_URL = "https://myanimelist.net/anime/{mal_id}/_/episode"
+MAL_EPISODE_TITLE_RE = re.compile(
+    r'<td[^>]*class="[^"]*episode-title[^"]*"[^>]*>\s*'
+    r'<a[^>]+href="[^"]*/episode/(\d+)"[^>]*>\s*([^<]+?)\s*</a>',
+    re.IGNORECASE,
+)
 
 ANIMELIST_FIELDS = (
-    "list_status,num_episodes,synopsis,genres,main_picture,mean,media_type,status,start_date"
+    "list_status,num_episodes,synopsis,genres,main_picture,mean,media_type,status,start_date,broadcast"
+)
+
+MANGALIST_FIELDS = (
+    "list_status,num_volumes,num_chapters,synopsis,genres,main_picture,mean,media_type,status"
 )
 
 ANIME_DETAIL_FIELDS = (
-    "related_anime,synopsis,genres,main_picture,mean,num_episodes,status,media_type,title"
+    "related_anime,synopsis,genres,main_picture,mean,num_episodes,status,media_type,title,broadcast"
 )
+
+MANGA_CACHE_DIR = MAL_DATA_DIR / "manga_cache"
 
 
 class MalError(Exception):
@@ -92,6 +108,28 @@ class MalAnimeEntry:
     score: int
     mean_score: float | None
     related_anime: list[RelatedAnime] = field(default_factory=list)
+    broadcast_day: str | None = None  # monday..sunday (MAL / JST)
+    broadcast_time: str | None = None  # HH:MM JST
+    # Episode number → title (from MAL episode pages via Jikan; official API has none)
+    episode_titles: dict[int, str] = field(default_factory=dict)
+
+
+@dataclass
+class MalMangaEntry:
+    mal_id: int
+    title: str
+    synopsis: str
+    poster_url: str | None
+    genres: list[str]
+    num_volumes: int
+    num_chapters: int
+    list_status: str
+    num_volumes_read: int
+    num_chapters_read: int
+    manga_status: str | None
+    score: int
+    mean_score: float | None
+    media_type: str | None = None  # manga | manhwa | manhua | novel | …
 
 
 def is_connected() -> bool:
@@ -285,6 +323,54 @@ def sync_animelist_to_catalog(
     return len(entries)
 
 
+def sync_mangalist_to_catalog(
+    cfg: MalConfig,
+    *,
+    manga_catalog_path: Path | None = None,
+    manga_media_root: Path | None = None,
+) -> int:
+    """Fetch MAL mangalist into data/manga/selected.json. Returns count synced."""
+    from kostream.manga import MANGA_ROOT
+    from kostream.manga_catalog import (
+        MangaCatalogEntry,
+        MangaCatalogState,
+        load_manga_catalog,
+        match_local_folder,
+        save_manga_catalog,
+        upsert_manga_entry,
+    )
+
+    access_token = get_valid_access_token(cfg)
+    entries = fetch_mangalist(access_token)
+    _write_manga_cache(entries)
+
+    media_root = manga_media_root or MANGA_ROOT
+    state = load_manga_catalog(manga_catalog_path)
+    existing_mal = {t.id: t for t in state.titles if t.source == "mal"}
+    state = MangaCatalogState(titles=[t for t in state.titles if t.source != "mal"])
+
+    for item in entries:
+        entry_id = f"mal-manga-{item.mal_id}"
+        previous = existing_mal.get(entry_id)
+        folder = previous.folder if previous else None
+        if not folder:
+            folder = match_local_folder(media_root, item.title)
+        entry = MangaCatalogEntry(
+            id=entry_id,
+            enabled=previous.enabled if previous is not None else True,
+            source="mal",
+            folder=folder,
+            mal_id=item.mal_id,
+            title=item.title,
+            media_type=item.media_type or (previous.media_type if previous else None),
+            added_at=previous.added_at if previous else None,
+        )
+        state = upsert_manga_entry(state, entry)
+
+    save_manga_catalog(state, manga_catalog_path)
+    return len(entries)
+
+
 def record_last_sync(synced_count: int) -> str:
     """Persist last successful animelist sync timestamp. Returns ISO string."""
     stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -327,7 +413,13 @@ def format_last_sync_label(data: dict[str, Any] | None = None) -> str | None:
 
 
 ENRICH_BATCH_SIZE = 25
+# Keep batches modest: Jikan free tier rate-limits hard; long series eat the budget.
+EPISODE_TITLE_BATCH_SIZE = 30
 ENRICH_REQUEST_TIMEOUT = 12
+JIKAN_PAGE_SLEEP = 0.75
+JIKAN_SHOW_SLEEP = 1.0
+# Keep low so Sync can fall back to MAL HTML without waiting minutes on 504s.
+JIKAN_MAX_RETRIES = 2
 
 
 def enrich_catalog_mal_details(
@@ -348,6 +440,58 @@ def enrich_catalog_mal_details(
         return 0
     access_token = get_valid_access_token(cfg)
     return enrich_mal_details(access_token, mal_ids, limit=limit, force=force)
+
+
+def _episode_title_sync_priority(entry: CatalogEntry) -> tuple[int, int, int]:
+    """Prefer linked local folders and shorter series so Sync fills useful titles first."""
+    has_folder = 0 if (entry.folder or "").strip() else 1
+    cached = load_cached_anime(entry.mal_id) if entry.mal_id else None
+    ep_count = int(cached.num_episodes) if cached and cached.num_episodes else 10_000
+    return (has_folder, ep_count, int(entry.mal_id or 0))
+
+
+def sync_catalog_episode_titles(
+    catalog_path: Path | None = None,
+    *,
+    limit: int | None = EPISODE_TITLE_BATCH_SIZE,
+    enabled_only: bool = True,
+) -> int:
+    """Fetch missing Jikan episode titles into MAL cache for catalog titles.
+
+    Skips ids whose cache is fresh (``episode_titles_need_fetch`` is False).
+    Prioritizes folder-linked / shorter shows. Rate-limits between shows.
+    Returns how many caches gained titles.
+    """
+    catalog = load_catalog(catalog_path)
+    entries = catalog.enabled if enabled_only else catalog.shows
+    pending_entries = [
+        entry
+        for entry in entries
+        if entry.mal_id and episode_titles_need_fetch(entry.mal_id)
+    ]
+    # Dedupe by mal_id, keeping the highest-priority catalog row.
+    best: dict[int, CatalogEntry] = {}
+    for entry in pending_entries:
+        mid = int(entry.mal_id)
+        prev = best.get(mid)
+        if prev is None or _episode_title_sync_priority(entry) < _episode_title_sync_priority(prev):
+            best[mid] = entry
+    pending = [
+        entry.mal_id
+        for entry in sorted(best.values(), key=_episode_title_sync_priority)
+    ]
+    if limit is not None:
+        pending = pending[: max(0, limit)]
+
+    updated = 0
+    for mal_id in pending:
+        try:
+            if ensure_episode_titles(mal_id):
+                updated += 1
+            time.sleep(JIKAN_SHOW_SLEEP)
+        except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError):
+            continue
+    return updated
 
 
 def _resolve_catalog_mal_ids(catalog_path: Path | None = None) -> int:
@@ -405,6 +549,215 @@ def _cache_needs_enrichment(mal_id: int) -> bool:
 
 _enrich_inflight: set[int] = set()
 _enrich_lock = threading.Lock()
+_episode_title_inflight: set[int] = set()
+
+
+def episode_titles_need_fetch(mal_id: int) -> bool:
+    """True when MAL episode titles are missing or likely stale (airing)."""
+    path = CACHE_DIR / f"{mal_id}.json"
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return False
+    titles = data.get("episode_titles") or {}
+    fetched_at = data.get("episode_titles_fetched_at")
+    num_episodes = int(data.get("num_episodes") or 0)
+    status = data.get("anime_status")
+    if data.get("episode_titles_incomplete"):
+        return True
+    if not titles:
+        return not fetched_at
+    # Airing growth, or prior page-cap truncations on long airing series.
+    if status == "currently_airing" and num_episodes > len(titles):
+        return True
+    return False
+
+
+def ensure_episode_titles_async(mal_id: int) -> bool:
+    """Background-fetch episode titles. Returns True if work was scheduled."""
+    if not episode_titles_need_fetch(mal_id):
+        return False
+    with _enrich_lock:
+        if mal_id in _episode_title_inflight:
+            return True
+        _episode_title_inflight.add(mal_id)
+
+    def runner() -> None:
+        try:
+            ensure_episode_titles(mal_id)
+        finally:
+            with _enrich_lock:
+                _episode_title_inflight.discard(mal_id)
+
+    threading.Thread(target=runner, daemon=True, name=f"mal-ep-titles-{mal_id}").start()
+    return True
+
+
+def ensure_episode_titles(mal_id: int, *, force: bool = False) -> bool:
+    """Fetch MAL episode titles into cache (Jikan, then MAL site HTML). Returns True if titles written."""
+    if not force and not episode_titles_need_fetch(mal_id):
+        return False
+    titles: dict[int, str] = {}
+    complete = True
+    try:
+        titles, complete = fetch_episode_titles(mal_id)
+    except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError):
+        titles, complete = {}, False
+    if not titles:
+        try:
+            titles, complete = fetch_episode_titles_from_mal_site(mal_id)
+        except (TimeoutError, OSError, URLError, HTTPError, ValueError):
+            return False
+    if not titles and not force:
+        # Mark empty fetch so we don't hammer providers every page load
+        _store_episode_titles(mal_id, {}, complete=True)
+        return False
+    _store_episode_titles(mal_id, titles, complete=complete)
+    return bool(titles)
+
+
+def _jikan_retry_after_seconds(exc: BaseException, attempt: int) -> float:
+    """Backoff for transient Jikan failures (429 / 5xx / timeouts)."""
+    if isinstance(exc, HTTPError):
+        header = ""
+        try:
+            header = (exc.headers.get("Retry-After") or "") if exc.headers else ""
+        except Exception:
+            header = ""
+        if header.strip().isdigit():
+            return float(header.strip()) + 0.25
+        if exc.code == 429:
+            return min(60.0, 5.0 * (2 ** attempt))
+        if exc.code in (500, 502, 503, 504):
+            return min(45.0, 2.0 * (2 ** attempt))
+    return min(30.0, 1.5 * (2 ** attempt))
+
+
+def _jikan_get_json(url: str) -> dict[str, Any]:
+    """GET JSON from Jikan with retries on rate limits and gateway errors."""
+    last_exc: BaseException | None = None
+    for attempt in range(JIKAN_MAX_RETRIES):
+        req = Request(
+            url,
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            method="GET",
+        )
+        try:
+            with urlopen(req, timeout=25) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except HTTPError as exc:
+            last_exc = exc
+            if exc.code not in (429, 500, 502, 503, 504) or attempt + 1 >= JIKAN_MAX_RETRIES:
+                raise
+            time.sleep(_jikan_retry_after_seconds(exc, attempt))
+        except (TimeoutError, URLError, OSError) as exc:
+            last_exc = exc
+            if attempt + 1 >= JIKAN_MAX_RETRIES:
+                raise
+            time.sleep(_jikan_retry_after_seconds(exc, attempt))
+    assert last_exc is not None
+    raise last_exc
+
+
+def fetch_episode_titles(mal_id: int) -> tuple[dict[int, str], bool]:
+    """Pull episode titles from MAL episode pages (Jikan API mirror).
+
+    Returns ``(titles, complete)``. ``complete`` is False when a later page failed
+    after some titles were collected (caller should mark incomplete so Sync retries).
+    """
+    titles: dict[int, str] = {}
+    page = 1
+    # ~100 eps/page → 200 pages covers ~20k; keep sleeps between pages.
+    max_pages = 200
+    while page <= max_pages:
+        url = JIKAN_EPISODES_URL.format(mal_id=mal_id) + f"?page={page}"
+        try:
+            payload = _jikan_get_json(url)
+        except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError):
+            if titles:
+                return titles, False
+            raise
+        for row in payload.get("data") or []:
+            num = row.get("mal_id")
+            title = (row.get("title") or "").strip()
+            if num is None or not title:
+                continue
+            titles[int(num)] = title
+        pagination = payload.get("pagination") or {}
+        if not pagination.get("has_next_page"):
+            break
+        page += 1
+        time.sleep(JIKAN_PAGE_SLEEP)
+    return titles, True
+
+
+def fetch_episode_titles_from_mal_site(mal_id: int) -> tuple[dict[int, str], bool]:
+    """Scrape episode titles from MAL's public episode list pages.
+
+    Used when Jikan is down or rate-limited. Pages use ``?offset=`` in steps of 100.
+    """
+    titles: dict[int, str] = {}
+    offset = 0
+    max_pages = 50
+    for _ in range(max_pages):
+        url = MAL_EPISODES_PAGE_URL.format(mal_id=mal_id)
+        if offset:
+            url = f"{url}?offset={offset}"
+        req = Request(
+            url,
+            headers={
+                "User-Agent": USER_AGENT,
+                "Accept": "text/html,application/xhtml+xml",
+            },
+            method="GET",
+        )
+        with urlopen(req, timeout=30) as resp:
+            page_html = resp.read().decode("utf-8", errors="replace")
+        page_hits = 0
+        for num_s, raw_title in MAL_EPISODE_TITLE_RE.findall(page_html):
+            title = html_lib.unescape(raw_title).strip()
+            if not title:
+                continue
+            titles[int(num_s)] = title
+            page_hits += 1
+        if page_hits == 0:
+            break
+        # MAL lists ~100 episodes per offset page.
+        if page_hits < 100:
+            return titles, True
+        offset += 100
+        time.sleep(0.5)
+    return titles, bool(titles)
+
+
+def _store_episode_titles(
+    mal_id: int,
+    titles: dict[int, str],
+    *,
+    complete: bool = True,
+) -> None:
+    path = CACHE_DIR / f"{mal_id}.json"
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return
+    # Merge so a partial refetch does not wipe earlier episode names.
+    existing = _episode_titles_from_cache(data.get("episode_titles") or {})
+    existing.update(titles)
+    data["episode_titles"] = {str(k): v for k, v in sorted(existing.items())}
+    if complete:
+        data["episode_titles_fetched_at"] = (
+            datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
+        data.pop("episode_titles_incomplete", None)
+    else:
+        data["episode_titles_incomplete"] = True
+        # Leave fetched_at unset/uncleared so need_fetch stays true via incomplete flag.
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def ensure_anime_details_async(cfg: MalConfig, mal_id: int) -> bool:
@@ -431,12 +784,16 @@ def ensure_anime_details(cfg: MalConfig, mal_id: int) -> MalAnimeEntry | None:
     """Fetch related_anime for one title if missing. Used on show page load."""
     cached = load_cached_anime(mal_id)
     if cached and not _cache_needs_enrichment(mal_id):
-        return cached
+        ensure_episode_titles(mal_id)
+        return load_cached_anime(mal_id) or cached
     try:
         access_token = get_valid_access_token(cfg)
-        return merge_anime_details_into_cache(access_token, mal_id)
+        merge_anime_details_into_cache(access_token, mal_id)
+        ensure_episode_titles(mal_id)
+        return load_cached_anime(mal_id)
     except (MalError, TimeoutError, OSError, URLError):
-        return cached
+        ensure_episode_titles(mal_id)
+        return load_cached_anime(mal_id) or cached
 
 
 def enrich_mal_details(
@@ -455,8 +812,27 @@ def enrich_mal_details(
     for mal_id in pending:
         try:
             merge_anime_details_into_cache(access_token, mal_id)
+            ensure_episode_titles(mal_id)
             enriched += 1
             time.sleep(0.15)
+        except (MalError, TimeoutError, OSError, URLError):
+            continue
+
+    # Episode titles for already-enriched ids use their own budget so a full
+    # relation batch does not starve title sync (see sync_catalog_episode_titles).
+    title_pending = [
+        mid
+        for mid in sorted(mal_ids)
+        if mid not in pending and episode_titles_need_fetch(mid)
+    ]
+    title_limit = EPISODE_TITLE_BATCH_SIZE if limit is not None else None
+    if title_limit is not None:
+        title_pending = title_pending[: max(0, title_limit)]
+    for mal_id in title_pending:
+        try:
+            if ensure_episode_titles(mal_id):
+                enriched += 1
+            time.sleep(JIKAN_SHOW_SLEEP)
         except (MalError, TimeoutError, OSError, URLError):
             continue
     return enriched
@@ -476,6 +852,10 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
     picture = node.get("main_picture") or {}
     genres = [g.get("name", "") for g in (node.get("genres") or []) if g.get("name")]
     related = _parse_related_anime(node)
+    day, btime = _parse_broadcast(node)
+    if day is None and existing:
+        day = existing.broadcast_day
+        btime = existing.broadcast_time
 
     entry = MalAnimeEntry(
         mal_id=mal_id,
@@ -494,6 +874,8 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
         score=existing.score if existing else 0,
         mean_score=node.get("mean") if node.get("mean") is not None else (existing.mean_score if existing else None),
         related_anime=related,
+        broadcast_day=day,
+        broadcast_time=btime,
     )
     write_cached_anime(entry, preserve_relations=False)
     # Always mark as enriched after a successful details fetch (even if no relations).
@@ -531,10 +913,43 @@ def update_episodes_watched(cfg: MalConfig, mal_id: int, num_watched: int, statu
         write_cached_anime(cached)
 
 
+def update_chapters_read(
+    cfg: MalConfig,
+    mal_id: int,
+    num_chapters_read: int,
+    status: str | None = None,
+) -> None:
+    """Push manga chapter progress to MAL (PATCH my_list_status)."""
+    access_token = get_valid_access_token(cfg)
+    form: dict[str, str] = {"num_chapters_read": str(max(0, num_chapters_read))}
+    if status:
+        form["status"] = status
+    try:
+        _api_form_raw(access_token, f"/manga/{mal_id}/my_list_status", form, method="PATCH")
+    except MalError as exc:
+        if "404" not in str(exc):
+            raise
+        put_form = {
+            "status": status or "reading",
+            "num_chapters_read": str(max(0, num_chapters_read)),
+        }
+        _api_form_raw(access_token, f"/manga/{mal_id}/my_list_status", put_form, method="PUT")
+
+    cached = load_cached_manga(mal_id)
+    if cached:
+        cached.num_chapters_read = max(cached.num_chapters_read, num_chapters_read)
+        if status:
+            cached.list_status = status
+        write_cached_manga(cached)
+
+
 def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True) -> None:
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     related = list(entry.related_anime)
     details_enriched = False
+    broadcast_day = entry.broadcast_day
+    broadcast_time = entry.broadcast_time
+    episode_titles = dict(entry.episode_titles)
     existing_path = CACHE_DIR / f"{entry.mal_id}.json"
     if existing_path.exists():
         try:
@@ -542,6 +957,11 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
             details_enriched = bool(old.get("details_enriched"))
             if preserve_relations and not related and old.get("related_anime"):
                 related = _related_anime_from_cache(old.get("related_anime") or [])
+            if not broadcast_day and old.get("broadcast_day"):
+                broadcast_day = old.get("broadcast_day")
+                broadcast_time = old.get("broadcast_time")
+            if not episode_titles and old.get("episode_titles"):
+                episode_titles = _episode_titles_from_cache(old.get("episode_titles") or {})
         except (OSError, json.JSONDecodeError, ValueError):
             pass
     if related:
@@ -558,12 +978,27 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
         "anime_status": entry.anime_status,
         "score": entry.score,
         "mean_score": entry.mean_score,
+        "broadcast_day": broadcast_day,
+        "broadcast_time": broadcast_time,
         "related_anime": [
             {"mal_id": rel.mal_id, "title": rel.title, "relation_type": rel.relation_type}
             for rel in related
         ],
         "details_enriched": details_enriched,
+        "episode_titles": {str(k): v for k, v in sorted(episode_titles.items())},
     }
+    if existing_path.exists():
+        try:
+            old = json.loads(existing_path.read_text(encoding="utf-8"))
+            if old.get("episode_titles_fetched_at"):
+                payload["episode_titles_fetched_at"] = old["episode_titles_fetched_at"]
+            if old.get("episode_titles_incomplete") and not episode_titles:
+                payload["episode_titles_incomplete"] = True
+            elif old.get("episode_titles_incomplete") and episode_titles:
+                # Titles preserved from cache; keep incomplete until a full Jikan pass.
+                payload["episode_titles_incomplete"] = True
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
     existing_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
@@ -594,6 +1029,109 @@ def fetch_animelist(access_token: str) -> list[MalAnimeEntry]:
     return results
 
 
+def fetch_mangalist(access_token: str) -> list[MalMangaEntry]:
+    results: list[MalMangaEntry] = []
+    offset = 0
+    limit = 100
+
+    while True:
+        path = (
+            f"/users/@me/mangalist?fields={MANGALIST_FIELDS}"
+            f"&limit={limit}&offset={offset}&nsfw=true"
+        )
+        payload = _api_get_raw(access_token, path)
+        batch = payload.get("data") or []
+        for row in batch:
+            parsed = _parse_mangalist_row(row)
+            if parsed:
+                results.append(parsed)
+        paging = payload.get("paging") or {}
+        if not paging.get("next"):
+            break
+        offset += limit
+
+    return results
+
+
+def load_cached_manga(mal_id: int) -> MalMangaEntry | None:
+    path = MANGA_CACHE_DIR / f"{mal_id}.json"
+    if not path.exists():
+        return None
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return MalMangaEntry(
+        mal_id=int(data["mal_id"]),
+        title=data["title"],
+        synopsis=data.get("synopsis", ""),
+        poster_url=data.get("poster_url"),
+        genres=data.get("genres", []),
+        num_volumes=int(data.get("num_volumes", 0)),
+        num_chapters=int(data.get("num_chapters", 0)),
+        list_status=data.get("list_status", "plan_to_read"),
+        num_volumes_read=int(data.get("num_volumes_read", 0)),
+        num_chapters_read=int(data.get("num_chapters_read", 0)),
+        manga_status=data.get("manga_status"),
+        score=int(data.get("score", 0)),
+        mean_score=data.get("mean_score"),
+        media_type=(data.get("media_type") or None),
+    )
+
+
+def _write_manga_cache(entries: list[MalMangaEntry]) -> None:
+    MANGA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    for item in entries:
+        write_cached_manga(item)
+
+
+def write_cached_manga(entry: MalMangaEntry) -> None:
+    MANGA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = MANGA_CACHE_DIR / f"{entry.mal_id}.json"
+    payload = {
+        "mal_id": entry.mal_id,
+        "title": entry.title,
+        "synopsis": entry.synopsis,
+        "poster_url": entry.poster_url,
+        "genres": entry.genres,
+        "num_volumes": entry.num_volumes,
+        "num_chapters": entry.num_chapters,
+        "list_status": entry.list_status,
+        "num_volumes_read": entry.num_volumes_read,
+        "num_chapters_read": entry.num_chapters_read,
+        "manga_status": entry.manga_status,
+        "score": entry.score,
+        "mean_score": entry.mean_score,
+        "media_type": entry.media_type,
+    }
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _parse_mangalist_row(row: dict[str, Any]) -> MalMangaEntry | None:
+    node = row.get("node") or {}
+    mal_id = node.get("id")
+    title = node.get("title")
+    if not mal_id or not title:
+        return None
+    picture = node.get("main_picture") or {}
+    genres = [g.get("name", "") for g in (node.get("genres") or []) if g.get("name")]
+    list_status = row.get("list_status") or {}
+    media_type = node.get("media_type")
+    return MalMangaEntry(
+        mal_id=int(mal_id),
+        title=str(title),
+        synopsis=(node.get("synopsis") or "").strip(),
+        poster_url=picture.get("large") or picture.get("medium"),
+        genres=genres[:5],
+        num_volumes=int(node.get("num_volumes") or 0),
+        num_chapters=int(node.get("num_chapters") or 0),
+        list_status=str(list_status.get("status") or "plan_to_read"),
+        num_volumes_read=int(list_status.get("num_volumes_read") or 0),
+        num_chapters_read=int(list_status.get("num_chapters_read") or 0),
+        manga_status=node.get("status"),
+        score=int(list_status.get("score") or 0),
+        mean_score=node.get("mean"),
+        media_type=str(media_type) if media_type else None,
+    )
+
+
 def load_cached_anime(mal_id: int) -> MalAnimeEntry | None:
     path = CACHE_DIR / f"{mal_id}.json"
     if not path.exists():
@@ -612,7 +1150,25 @@ def load_cached_anime(mal_id: int) -> MalAnimeEntry | None:
         score=int(data.get("score", 0)),
         mean_score=data.get("mean_score"),
         related_anime=_related_anime_from_cache(data.get("related_anime") or []),
+        broadcast_day=data.get("broadcast_day"),
+        broadcast_time=data.get("broadcast_time"),
+        episode_titles=_episode_titles_from_cache(data.get("episode_titles") or {}),
     )
+
+
+def _episode_titles_from_cache(raw: dict[str, Any] | list) -> dict[int, str]:
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[int, str] = {}
+    for key, value in raw.items():
+        try:
+            num = int(key)
+        except (TypeError, ValueError):
+            continue
+        title = str(value or "").strip()
+        if title:
+            out[num] = title
+    return out
 
 
 def _write_cache(entries: list[MalAnimeEntry]) -> None:
@@ -631,6 +1187,7 @@ def _parse_animelist_row(row: dict[str, Any]) -> MalAnimeEntry | None:
     picture = node.get("main_picture") or {}
     genres = [g.get("name", "") for g in (node.get("genres") or []) if g.get("name")]
     list_status = row.get("list_status") or {}
+    day, btime = _parse_broadcast(node)
 
     return MalAnimeEntry(
         mal_id=int(mal_id),
@@ -645,7 +1202,32 @@ def _parse_animelist_row(row: dict[str, Any]) -> MalAnimeEntry | None:
         score=int(list_status.get("score") or 0),
         mean_score=node.get("mean"),
         related_anime=[],
+        broadcast_day=day,
+        broadcast_time=btime,
     )
+
+
+def _parse_broadcast(node: dict[str, Any]) -> tuple[str | None, str | None]:
+    raw = node.get("broadcast")
+    if not isinstance(raw, dict):
+        return None, None
+    day = (raw.get("day_of_the_week") or "").strip().lower() or None
+    start = (raw.get("start_time") or "").strip() or None
+    if day and day not in {
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    }:
+        day = None
+    if start and len(start) >= 4 and ":" in start:
+        start = start[:5]
+    else:
+        start = None
+    return day, start
 
 
 def _parse_related_anime(node: dict[str, Any]) -> list[RelatedAnime]:

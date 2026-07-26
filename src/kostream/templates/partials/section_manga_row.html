@@ -1,0 +1,39 @@
+{% if section_manga %}
+{% set section_library = section_library|default('manga') %}
+{% set library_endpoint = 'manhwa_page' if section_library == 'manhwa' else 'manga_page' %}
+{% set type_label = 'Manhwa' if section_library == 'manhwa' else 'Manga' %}
+<section class="section">
+  <div class="section-head">
+    <h2 class="section-title">{{ section_title }}</h2>
+    <div class="section-scroll-hint" aria-hidden="true">‹ ›</div>
+  </div>
+  <div class="card-scroll">
+    {% for m in section_manga %}
+    <a href="{{ url_for(library_endpoint, tab=section_tab|default('reading'), open=m.id) }}" class="anime-card">
+      <div class="card-poster">
+        {% if m.poster_url %}
+        <img src="{{ m.poster_url }}" alt="" class="card-poster-img" loading="lazy" referrerpolicy="no-referrer">
+        {% elif m.cover_chapter_id %}
+        <img
+          src="{{ url_for('manga_page_image', manga_id=m.id, chapter_id=m.cover_chapter_id, page_index=0) }}"
+          alt=""
+          class="card-poster-img"
+          loading="lazy"
+        >
+        {% else %}
+        <span class="card-initials">{{ m.title[:2] }}</span>
+        {% endif %}
+        {% if m.chapter_count %}
+        <span class="card-ep-badge">{{ m.chapter_count }} ch</span>
+        {% elif m.num_chapters_mal %}
+        <span class="card-ep-badge">{{ m.num_chapters_mal }} ch</span>
+        {% endif %}
+        <span class="card-type">{{ type_label }}</span>
+        <div class="card-shade"></div>
+      </div>
+      <h3 class="card-title">{{ m.title }}</h3>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

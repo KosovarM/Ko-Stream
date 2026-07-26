@@ -15,6 +15,7 @@ media/
 # Progress DB
 data/progress.json
 data/completed.json
+data/manga_completed.json
 
 # Grab URL cache / overrides (local)
 data/grab/cache.json
@@ -37,6 +38,10 @@ data/cache/
 
 # Personal catalog selection
 data/catalog/selected.json
+
+# MAL manga catalog + cache
+data/manga/selected.json
+data/mal/manga_cache/
 
 # IDE
 .vscode/

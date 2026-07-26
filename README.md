@@ -36,7 +36,46 @@ ko-stream serve
 
 Open **http://127.0.0.1:5001**
 
+### Heimnetz (Handy / andere PCs)
 
+Same Wi‑Fi/LAN as this PC:
+
+```powershell
+pip install -e ".[lan]"
+ko-stream serve --lan
+```
+
+Easy names (recommended):
+
+| URL | How |
+|-----|-----|
+| `http://kostream.local:5001` | mDNS (needs `pip install -e ".[lan]"`; works on many phones) |
+| `http://kostream.fritz.box:5001` | Fritzbox DNS — set this PC’s network name to **kostream** (see below) |
+| `http://192.168.x.x:5001` | Always works as fallback (printed in the terminal) |
+
+Custom label:
+
+```powershell
+ko-stream serve --lan --name kostream
+# → http://kostream.local:5001
+```
+
+**Why not `KoStream.net`?**  
+`.net` is a real public internet domain. Phones look it up on the public DNS, not in your living room — unless you own that domain and run local DNS (Pi-hole etc.). For home use, prefer **`.local`** or **`.fritz.box`**.
+
+**Fritzbox → `http://kostream.fritz.box:5001`**
+
+1. Fritzbox UI → Heimnetz → Netzwerk → this PC  
+2. Set the device name to **kostream** (or change the Windows computer name to `kostream` and reconnect Wi‑Fi)  
+3. On the phone open `http://kostream.fritz.box:5001`
+
+If it does not load, allow the port in Windows Firewall (Admin PowerShell):
+
+```powershell
+New-NetFirewallRule -DisplayName "Ko-Stream" -Direction Inbound -Protocol TCP -LocalPort 5001 -Action Allow -Profile Private
+```
+
+**Security:** There is no login yet. Use only on a trusted home network (not public Wi‑Fi / not exposed to the internet).
 
 ## Catalog (fast local testing)
 
@@ -145,6 +184,18 @@ Stream-only episodes resolve via Grab (`KOSTREAM_GRAB=1`): paste a URL, or set `
 ### Local episode files
 
 Show page → **Open folder**, then place files as `SxxExx.mp4` (e.g. `S04E03.mp4`), or use **Upload** next to an episode. Refresh the page after adding files.
+
+### Manga
+
+Place titles under `media/manga/`:
+
+```
+media/manga/My Manga/Chapter 01/001.jpg
+media/manga/My Manga/vol2.cbz
+media/manga/OneShot.cbz
+```
+
+Open **Manga** in the nav — click a cover (or a chapter) for the full-screen reader (←/→, Esc, RTL toggle).
 
 ## VS Code
 

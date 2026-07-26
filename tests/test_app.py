@@ -37,6 +37,16 @@ def test_search_genre_filter(tmp_path: Path):
     assert b"Adventure" in resp.data
 
 
+def test_search_availability_tabs(tmp_path: Path):
+    app = _test_app(tmp_path)
+    client = app.test_client()
+    resp = client.get("/search?avail=local")
+    assert resp.status_code == 200
+    assert b"browse-avail-tabs" in resp.data
+    assert b"Stream only" in resp.data
+    assert b'avail=local' in resp.data or b"avail=local" in resp.data
+
+
 def test_catalog_page(tmp_path: Path):
     app = _test_app(tmp_path)
     client = app.test_client()

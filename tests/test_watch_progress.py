@@ -2,6 +2,7 @@ from kostream.watch_progress import (
     episode_completed,
     filter_currently_airing,
     is_currently_airing,
+    mark_show_completed,
     next_unwatched_episode,
     recently_added,
     sort_by_mean_score,
@@ -111,3 +112,16 @@ def test_sort_by_mean_score():
     ]
     result = sort_by_mean_score(shows, limit=10)
     assert [s.id for s in result] == ["b", "a", "c"]
+
+
+
+def test_mark_show_completed(tmp_path):
+    from kostream.watch_progress import load_completed
+
+    path = tmp_path / "completed.json"
+    show = _show(ep_count=5, episodes_watched=1)
+    count = mark_show_completed(show, path)
+    assert count == 5
+    assert show.list_status == "completed"
+    assert load_completed(path)[show.id] == 5
+    assert next_unwatched_episode(show, completed=load_completed(path)) is None

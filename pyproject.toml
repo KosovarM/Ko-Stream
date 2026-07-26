@@ -14,6 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+lan = ["zeroconf>=0.131"]
 
 [project.scripts]
 ko-stream = "kostream.cli:main"

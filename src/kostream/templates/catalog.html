@@ -30,7 +30,7 @@
     {% endif %}
     <p class="catalog-meta" id="mal-sync-status" hidden></p>
     <div class="mal-actions">
-      <button type="button" class="btn-watch" id="mal-sync">Sync animelist + metadata</button>
+      <button type="button" class="btn-watch" id="mal-sync">Sync anime + manga + metadata</button>
       <button type="button" class="btn-detail" id="mal-disconnect">Disconnect</button>
     </div>
     {% else %}
@@ -47,50 +47,10 @@
   </section>
 
   <section class="catalog-section">
-    <h2>Selected shows</h2>
-    {% if catalog.shows %}
-    <ul class="catalog-list">
-      {% for entry in catalog.shows %}
-      <li class="catalog-item">
-        <label class="catalog-toggle">
-          <input type="checkbox" data-id="{{ entry.id }}" {% if entry.enabled %}checked{% endif %}>
-          <span class="catalog-title">{{ entry.title or entry.folder or entry.id }}</span>
-        </label>
-        <span class="catalog-tags">
-          <span class="tag">{{ entry.source }}</span>
-          {% if entry.anilist_id %}<span class="tag">AniList {{ entry.anilist_id }}</span>{% endif %}
-          {% if entry.mal_id %}<span class="tag">MAL {{ entry.mal_id }}</span>{% endif %}
-          {% if entry.folder %}<span class="tag">{{ entry.folder }}</span>{% endif %}
-        </span>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="empty">No entries yet — add a local folder or search AniList below.</p>
-    {% endif %}
-  </section>
-
-  <section class="catalog-section">
-    <h2>Local folders</h2>
-    {% if folders %}
-    <ul class="catalog-list">
-      {% for folder in folders %}
-      <li class="catalog-item">
-        <span>{{ folder }}</span>
-        <button type="button" class="btn-detail btn-add-folder" data-folder="{{ folder }}">Add to catalog</button>
-      </li>
-      {% endfor %}
-    </ul>
-    {% else %}
-    <p class="empty">No folders in <code>media/shows/</code> yet.</p>
-    {% endif %}
-  </section>
-
-  <section class="catalog-section">
     <h2>Search AniList (metadata &amp; posters)</h2>
     <form id="anilist-search" class="catalog-search">
       <input type="search" name="q" placeholder="e.g. Frieren, One Piece" minlength="2" required>
-      <button type="submit">Search</button>
+      <button type="submit" class="btn-watch">Search</button>
     </form>
     <ul id="anilist-results" class="catalog-results"></ul>
   </section>
@@ -99,28 +59,6 @@
 
 {% block scripts %}
 <script>
-  document.querySelectorAll('.catalog-toggle input').forEach((box) => {
-    box.addEventListener('change', async () => {
-      await fetch('{{ url_for("api_catalog_toggle") }}', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({id: box.dataset.id, enabled: box.checked})
-      });
-    });
-  });
-
-  document.querySelectorAll('.btn-add-folder').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const folder = btn.dataset.folder;
-      await fetch('{{ url_for("api_catalog_add") }}', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({source: 'local', folder, id: folder.toLowerCase().replace(/[^a-z0-9]+/g, '-')})
-      });
-      location.reload();
-    });
-  });
-
   document.getElementById('anilist-search').addEventListener('submit', async (event) => {
     event.preventDefault();
     const q = new FormData(event.target).get('q');
@@ -174,12 +112,19 @@
       }
       if (data.running) {
         malSync.disabled = true;
-        malSync.textContent = data.phase === 'enrich' ? 'Enriching metadata…' : 'Syncing list…';
+        malSync.textContent =
+          data.phase === 'episode_titles'
+            ? 'Syncing episode titles…'
+            : data.phase === 'enrich'
+              ? 'Enriching metadata…'
+              : data.phase === 'manga'
+                ? 'Syncing mangalist…'
+                : 'Syncing list…';
         setTimeout(pollStatus, 1200);
         return;
       }
       malSync.disabled = false;
-      malSync.textContent = 'Sync animelist + metadata';
+      malSync.textContent = 'Sync anime + manga + metadata';
       if (data.status === 'done' || data.status === 'error') {
         const msg = data.message || (data.error ? `Sync failed: ${data.error}` : 'Sync finished.');
         location.href = '{{ url_for("catalog_page") }}?mal_message=' + encodeURIComponent(msg);
@@ -199,14 +144,14 @@
         if (!data.ok) {
           alert(data.error || 'Sync failed');
           malSync.disabled = false;
-          malSync.textContent = 'Sync animelist + metadata';
+          malSync.textContent = 'Sync anime + manga + metadata';
           return;
         }
         pollStatus();
       } catch (err) {
         alert('Could not start sync.');
         malSync.disabled = false;
-        malSync.textContent = 'Sync animelist + metadata';
+        malSync.textContent = 'Sync anime + manga + metadata';
       }
     });
 

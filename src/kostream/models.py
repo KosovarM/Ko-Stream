@@ -42,6 +42,8 @@ class Show:
     user_score: int | None = None
     mean_score: float | None = None
     related_anime: list[RelatedAnime] = field(default_factory=list)
+    broadcast_day: str | None = None  # monday..sunday (MAL / JST)
+    broadcast_time: str | None = None  # HH:MM JST
 
     @property
     def episode_count(self) -> int:
@@ -53,6 +55,16 @@ class Show:
         if not self.episodes:
             return True
         return all(ep.filename == "demo.mp4" for ep in self.episodes)
+
+    @property
+    def has_local_files(self) -> bool:
+        """True when at least one episode is a real file under media/shows."""
+        return any(is_local_file_episode(ep) for ep in self.episodes)
+
+    @property
+    def is_stream_only(self) -> bool:
+        """True when there are no local video files (demo/strm/jellyfin/metadata only)."""
+        return not self.has_local_files
 
     @property
     def latest_episode(self) -> Episode | None:

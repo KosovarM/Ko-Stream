@@ -25,10 +25,42 @@ def _effective_watched_count(show: Show, completed: dict[str, int] | None = None
     return max(show.episodes_watched, local)
 
 
+def _progress_seconds(entry: float | dict | None) -> float:
+    if entry is None:
+        return 0.0
+    if isinstance(entry, (int, float)):
+        return float(entry)
+    if isinstance(entry, dict):
+        return float(entry.get("seconds") or 0)
+    return 0.0
+
+
+def _progress_duration(entry: float | dict | None) -> float | None:
+    if isinstance(entry, dict):
+        raw = entry.get("duration")
+        if raw is None:
+            return None
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+    return None
+
+
+def progress_reached_completion(entry: float | dict | None) -> bool:
+    """True when stored watch progress is ≥ COMPLETION_RATIO of duration."""
+    seconds = _progress_seconds(entry)
+    duration = _progress_duration(entry)
+    if duration and duration > 0 and seconds > 0:
+        return seconds >= COMPLETION_RATIO * duration
+    return False
+
+
 def episode_completed(
     show: Show,
     episode: Episode,
-    local_progress: dict[str, float] | None = None,
+    local_progress: dict | None = None,
     completed: dict[str, int] | None = None,
 ) -> bool:
     if show.list_status == "completed":
@@ -39,8 +71,12 @@ def episode_completed(
         if pos and pos <= watched:
             return True
     if local_progress and episode.id in local_progress:
-        seconds = local_progress[episode.id]
-        if seconds > 0 and episode.filename != "demo.mp4":
+        entry = local_progress[episode.id]
+        if progress_reached_completion(entry):
+            return True
+        # Legacy: old progress was seconds-only with a 10‑minute assumption
+        seconds = _progress_seconds(entry)
+        if seconds > 0 and episode.filename != "demo.mp4" and _progress_duration(entry) is None:
             return seconds >= COMPLETION_RATIO * 600
     return False
 
@@ -82,6 +118,20 @@ def mark_episode_watched(show: Show, episode: Episode, path: Path | None = None)
     return show.episodes_watched
 
 
+def mark_show_completed(show: Show, path: Path | None = None) -> int:
+    """Mark the whole show complete locally; returns watched-episode count."""
+    total = max(len(sorted_episodes(show)), show.episode_count or 0, 0)
+    if not total:
+        total = max(_effective_watched_count(show), 1)
+    file_path = path or COMPLETED_FILE
+    data = load_completed(file_path)
+    data[show.id] = max(data.get(show.id, 0), total)
+    save_completed(file_path, data)
+    show.episodes_watched = max(show.episodes_watched, total)
+    show.list_status = "completed"
+    return data[show.id]
+
+
 def is_currently_airing(show: Show) -> bool:
     if show.anime_status != "currently_airing":
         return False
@@ -110,6 +160,8 @@ def apply_mal_metadata(show: Show, cached) -> None:
     show.user_score = cached.score if cached.score else None
     show.mean_score = cached.mean_score
     show.related_anime = list(cached.related_anime or [])
+    show.broadcast_day = getattr(cached, "broadcast_day", None)
+    show.broadcast_time = getattr(cached, "broadcast_time", None)
 
 
 def apply_mal_progress(show: Show, cached) -> None:

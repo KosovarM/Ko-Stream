@@ -1,5 +1,13 @@
-from kostream.browse import PAGE_SIZE, collect_genres, filter_shows, paginate
-from kostream.models import Show
+from kostream.browse import (
+    AVAIL_LOCAL,
+    AVAIL_STREAM,
+    PAGE_SIZE,
+    collect_genres,
+    filter_shows,
+    normalize_availability,
+    paginate,
+)
+from kostream.models import Episode, Show
 
 
 def _shows(count: int, genre: str = "Action") -> list[Show]:
@@ -12,6 +20,24 @@ def _shows(count: int, genre: str = "Action") -> list[Show]:
         )
         for i in range(count)
     ]
+
+
+def _local_show(show_id: str, title: str) -> Show:
+    return Show(
+        id=show_id,
+        title=title,
+        description="has files",
+        episodes=[Episode(f"{show_id}-1", show_id, 1, 1, "EP1", "S01E01.mp4")],
+    )
+
+
+def _stream_show(show_id: str, title: str) -> Show:
+    return Show(
+        id=show_id,
+        title=title,
+        description="stream placeholder",
+        episodes=[Episode(f"{show_id}-1", show_id, 1, 1, "EP1", "demo.mp4")],
+    )
 
 
 def test_collect_genres_excludes_meta_tags():
@@ -31,6 +57,35 @@ def test_filter_shows_by_query_and_genre():
     assert len(filter_shows(shows, query="piece")) == 1
     assert len(filter_shows(shows, genre="Action")) == 2
     assert len(filter_shows(shows, query="ninja", genre="Action")) == 1
+
+
+def test_filter_shows_by_availability():
+    shows = [
+        _local_show("local-1", "Local A"),
+        _stream_show("stream-1", "Stream B"),
+        Show(id="empty-1", title="Empty C", description="no episodes"),
+        Show(
+            id="mixed-1",
+            title="Mixed D",
+            description="local + stream",
+            episodes=[
+                Episode("m1", "mixed-1", 1, 1, "EP1", "S01E01.mp4"),
+                Episode("m2", "mixed-1", 1, 2, "EP2", "demo.mp4"),
+            ],
+        ),
+    ]
+    local = filter_shows(shows, availability=AVAIL_LOCAL)
+    stream = filter_shows(shows, availability=AVAIL_STREAM)
+    assert [s.id for s in local] == ["local-1", "mixed-1"]
+    assert [s.id for s in stream] == ["empty-1", "stream-1"]
+    assert len(filter_shows(shows, availability="all")) == 4
+
+
+def test_normalize_availability():
+    assert normalize_availability(None) == "all"
+    assert normalize_availability("LOCAL") == "local"
+    assert normalize_availability("stream") == "stream"
+    assert normalize_availability("nope") == "all"
 
 
 def test_paginate_25_per_page():

@@ -62,22 +62,30 @@
 
 <section class="section local-media-panel" id="local-media-panel">
   <div class="local-media-header">
-    <div class="local-media-intro">
+    <div class="local-media-title-row">
       <h2 class="section-title">Local files</h2>
-      <p class="local-media-hint">
-        Open the show folder and drop files named
-        <code>SxxExx.mp4</code> (e.g. <code>S04E03.mp4</code>), or use Upload next to an episode.
-      </p>
+      <div class="local-media-actions">
+        <button type="button" class="btn-detail" id="btn-open-folder">Open folder</button>
+      </div>
     </div>
-    <div class="local-media-actions">
-      <button type="button" class="btn-detail" id="btn-open-folder">Open folder</button>
-    </div>
+    <p class="local-media-hint">
+      Open the show folder and drop files named
+      <code>SxxExx.mp4</code> (e.g. <code>S04E03.mp4</code>), or use Upload next to an episode.
+    </p>
   </div>
   <p class="local-media-msg" id="local-media-msg" hidden></p>
 </section>
 
 <section class="section detail-episodes">
-  <h2 class="section-title">Episodes</h2>
+  <div class="detail-episodes-head">
+    <h2 class="section-title">Episodes</h2>
+    {% set show_done = show.list_status == 'completed' or (show.episode_count and show.episodes_watched >= show.episode_count) or (not next_ep and show.episodes) %}
+    {% if not show_done %}
+    <button type="button" class="btn-detail" id="btn-complete-all">Already completed</button>
+    {% else %}
+    <span class="tag tag-completed-show">Completed</span>
+    {% endif %}
+  </div>
 
   {% if relations_pending and not relation_links %}
   <p class="relations-pending" id="relations-pending">Loading prequel / sequel links…</p>
@@ -150,6 +158,17 @@
     </div>
     {% endfor %}
   </div>
+
+  {% if mal_page_url %}
+  <div class="episode-overview-footer">
+    <a
+      class="btn-detail"
+      href="{{ mal_page_url }}"
+      target="_blank"
+      rel="noopener noreferrer"
+    >Open on MAL ↗</a>
+  </div>
+  {% endif %}
 </section>
 {% endblock %}
 
@@ -231,6 +250,22 @@
     });
   });
 
+  document.getElementById('btn-complete-all')?.addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    const resp = await fetch('{{ url_for("api_show_complete_all") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ show_id: showId }),
+    });
+    if (resp.ok) {
+      location.reload();
+    } else {
+      btn.disabled = false;
+      showLocalMsg('Could not mark show completed.', true);
+    }
+  });
+
   {% if relations_pending and not relation_links %}
   let tries = 0;
   const timer = setInterval(async () => {
@@ -248,6 +283,22 @@
       const el = document.getElementById('relations-pending');
       if (el) el.textContent = 'No prequel/sequel links yet. Refresh later if needed.';
     }
+  }, 1500);
+  {% endif %}
+
+  {% if titles_pending %}
+  let titleTries = 0;
+  const titleTimer = setInterval(async () => {
+    titleTries += 1;
+    try {
+      const resp = await fetch('{{ url_for("api_show_episode_titles_ready", show_id=show.id) }}');
+      const data = await resp.json();
+      if (data.ready) {
+        clearInterval(titleTimer);
+        if (data.has_titles) location.reload();
+      }
+    } catch (_) {}
+    if (titleTries > 40) clearInterval(titleTimer);
   }, 1500);
   {% endif %}
 </script>

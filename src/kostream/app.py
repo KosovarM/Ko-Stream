@@ -1,18 +1,26 @@
 from __future__ import annotations
 
+import random
 from pathlib import Path
+from datetime import datetime
 from urllib.error import URLError
 
-from flask import Flask, abort, redirect, render_template, request, send_file, url_for
+from flask import Flask, Response, abort, redirect, render_template, request, send_file, url_for
 
 from kostream.anilist import AniListError, fetch_anime, fetch_mal_id, search_anime
-from kostream.browse import PAGE_SIZE, collect_genres, filter_shows, paginate
+from kostream.browse import (
+    AVAIL_ALL,
+    PAGE_SIZE,
+    collect_genres,
+    filter_shows,
+    normalize_availability,
+    paginate,
+)
 from kostream.catalog import (
     CATALOG_DIR,
     SELECTED_FILE,
     CatalogEntry,
     CatalogState,
-    list_local_folders,
     load_catalog,
     save_catalog,
     toggle_entry,
@@ -45,11 +53,15 @@ from kostream.mal import (
     enrich_catalog_mal_details,
     ensure_anime_details,
     ensure_anime_details_async,
+    ensure_episode_titles_async,
     enrich_mal_details,
     cache_needs_enrichment,
+    episode_titles_need_fetch,
     load_cached_anime,
     merge_anime_details_into_cache,
     sync_animelist_to_catalog,
+    sync_mangalist_to_catalog,
+    update_chapters_read,
     update_episodes_watched,
 )
 from kostream.library import (
@@ -58,6 +70,33 @@ from kostream.library import (
     load_progress,
     save_progress,
     scan_library,
+)
+from kostream.manga import (
+    MANGA_ROOT,
+    MangaError,
+    collect_manga_genres,
+    filter_library_format,
+    get_chapter,
+    get_manga,
+    list_page_refs,
+    load_manga_library,
+    read_page_bytes,
+    title_matches_genre,
+)
+from kostream.manga_catalog import MANGA_SELECTED_FILE
+from kostream.manga_progress import (
+    MANGA_COMPLETED_FILE,
+    chapter_completed,
+    chapter_position,
+    chapters_read_count,
+    filter_currently_publishing,
+    filter_currently_reading,
+    load_manga_completed,
+    manga_reading_status,
+    mark_chapter_read,
+    mark_chapters_read_through,
+    mark_manga_completed,
+    total_chapters_target,
 )
 from kostream.episode_fetch import fetch_episode_from_url
 from kostream.local_media import (
@@ -79,19 +118,21 @@ from kostream.models import (
     slugify,
     strm_target_url,
 )
-from kostream.relations import build_relation_links
+from kostream.relations import build_relation_links, mal_anime_url
 from kostream.proxy import proxy_remote_stream
 from kostream.watch_progress import (
     episode_completed,
     filter_currently_airing,
     load_completed,
     mark_episode_watched,
+    mark_show_completed,
     next_unwatched_episode,
     recently_added,
     save_completed,
     sort_by_mean_score,
 )
 from kostream.sync_jobs import get_sync_job, start_mal_sync
+from kostream.schedule import WEEKDAY_KEYS, build_weekly_schedule
 from kostream.streaming import stream_file_with_range
 
 
@@ -106,11 +147,24 @@ def create_app(
     media_root: Path | None = None,
     catalog_path: Path | None = None,
     grab_base: Path | None = None,
+    manga_root: Path | None = None,
+    manga_catalog_path: Path | None = None,
 ) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["MEDIA_ROOT"] = media_root or MEDIA_ROOT
     app.config["CATALOG_PATH"] = catalog_path or SELECTED_FILE
     app.config["GRAB_DIR"] = grab_base if grab_base is not None else grab_dir()
+    app.config["MANGA_ROOT"] = manga_root if manga_root is not None else MANGA_ROOT
+    app.config["MANGA_CATALOG_PATH"] = (
+        manga_catalog_path if manga_catalog_path is not None else MANGA_SELECTED_FILE
+    )
+    @app.route("/favicon.ico")
+    def favicon():
+        return send_file(
+            Path(app.static_folder) / "favicon.svg",
+            mimetype="image/svg+xml",
+            max_age=86400,
+        )
 
     @app.context_processor
     def inject_globals():
@@ -144,24 +198,310 @@ def create_app(
         progress = load_progress(PROGRESS_FILE)
         completed = load_completed(COMPLETED_FILE)
         currently_airing = filter_currently_airing(shows)
+        manga_titles = load_manga_library(
+            app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        manga_completed = load_manga_completed(MANGA_COMPLETED_FILE)
+        currently_reading = filter_currently_reading(manga_titles, manga_completed)
+        currently_releasing = filter_currently_publishing(manga_titles)
+        reading_manga = filter_library_format(currently_reading, kind="manga")
+        reading_manhwa = filter_library_format(currently_reading, kind="manhwa")
+        releasing_manga = filter_library_format(currently_releasing, kind="manga")
+        releasing_manhwa = filter_library_format(currently_releasing, kind="manhwa")
         return render_template(
             "home.html",
             spotlight=shows[:10],
             trending=sort_by_mean_score(shows, limit=12),
             currently_airing=currently_airing[:12],
             top_airing=currently_airing[:5],
-            most_popular=shows[:5],
+            most_popular=_random_library_sample(shows, limit=5),
             latest=_continue_watching(shows, progress, completed, limit=12),
             new_on_kostream=recently_added(shows, limit=12),
-            top10=shows[:10],
+            currently_reading_manga=reading_manga[:12],
+            currently_reading_manhwa=reading_manhwa[:12],
+            currently_releasing_manga=releasing_manga[:12],
+            currently_releasing_manhwa=releasing_manhwa[:12],
             progress=progress,
             completed=completed,
         )
 
+    @app.route("/schedule")
+    def schedule_page():
+        mode = (request.args.get("mode") or "anime").strip().lower()
+        if mode not in {"anime", "manga", "manhwa"}:
+            mode = "anime"
+        shows = scan_library(app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
+        days, unknown = build_weekly_schedule(shows)
+        today_key = WEEKDAY_KEYS[datetime.now().weekday()]
+        manga_titles = load_manga_library(
+            app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        publishing = filter_currently_publishing(manga_titles)
+        if mode in {"manga", "manhwa"}:
+            manga_releasing = filter_library_format(publishing, kind=mode)
+        else:
+            manga_releasing = []
+        return render_template(
+            "schedule.html",
+            schedule_mode=mode,
+            schedule_days=days,
+            schedule_unknown=unknown,
+            today_key=today_key,
+            manga_releasing=manga_releasing,
+        )
+
+    @app.route("/manga")
+    def manga_page():
+        return _comics_library_page(kind="manga")
+
+    @app.route("/manhwa")
+    def manhwa_page():
+        return _comics_library_page(kind="manhwa")
+
+    def _comics_library_page(*, kind: str):
+        all_titles = load_manga_library(
+            app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        titles = filter_library_format(all_titles, kind=kind)
+        completed = load_manga_completed(MANGA_COMPLETED_FILE)
+        mal_n = sum(1 for t in titles if t.source == "mal")
+        genres = collect_manga_genres(titles)
+        tab = (request.args.get("tab") or "reading").strip().lower()
+        if tab not in {"reading", "completed", "new"}:
+            tab = "reading"
+        avail = (request.args.get("avail") or "all").strip().lower()
+        if avail not in {"all", "local"}:
+            avail = "all"
+        genre = (request.args.get("genre") or "").strip()
+        if genre and genre not in genres:
+            genre = ""
+        open_id = (request.args.get("open") or "").strip()
+        return render_template(
+            "manga.html",
+            titles=titles,
+            mal_manga_count=mal_n,
+            manga_completed=completed,
+            chapter_completed=chapter_completed,
+            manga_reading_status=manga_reading_status,
+            chapters_read_count=chapters_read_count,
+            title_matches_genre=title_matches_genre,
+            active_tab=tab,
+            selected_avail=avail,
+            selected_genre=genre,
+            genres=genres,
+            open_manga_id=open_id,
+            library_kind=kind,
+            library_label="Manhwa" if kind == "manhwa" else "Manga",
+        )
+
+    @app.route("/api/manga/<manga_id>/pages")
+    def api_manga_pages(manga_id: str):
+        manga = get_manga(
+            manga_id, app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        if not manga or not manga.chapters:
+            return {"ok": False, "error": "Manga not found or no local chapters"}, 404
+        chapter = manga.chapters[0]
+        try:
+            pages = list_page_refs(app.config["MANGA_ROOT"], manga, chapter)
+        except MangaError as exc:
+            return {"ok": False, "error": str(exc)}, 400
+        return {
+            "ok": True,
+            "manga_id": manga.id,
+            "chapter_id": chapter.id,
+            "chapter_title": chapter.title,
+            "pages": pages,
+        }
+
+    @app.route("/api/manga/<manga_id>/chapter/<chapter_id>/pages")
+    def api_manga_chapter_pages(manga_id: str, chapter_id: str):
+        manga = get_manga(
+            manga_id, app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        if not manga:
+            return {"ok": False, "error": "Manga not found"}, 404
+        chapter = get_chapter(manga, chapter_id)
+        if not chapter:
+            return {"ok": False, "error": "Chapter not found"}, 404
+        try:
+            pages = list_page_refs(app.config["MANGA_ROOT"], manga, chapter)
+        except MangaError as exc:
+            return {"ok": False, "error": str(exc)}, 400
+        return {
+            "ok": True,
+            "manga_id": manga.id,
+            "chapter_id": chapter.id,
+            "chapter_title": chapter.title,
+            "pages": pages,
+        }
+
+    @app.route("/api/manga/complete", methods=["POST"])
+    def api_manga_complete():
+        payload = request.get_json(silent=True) or {}
+        manga_id = payload.get("manga_id")
+        chapter_id = payload.get("chapter_id")
+        if not manga_id or not chapter_id:
+            abort(400)
+        manga = get_manga(
+            manga_id, app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        if not manga:
+            abort(404)
+        if not get_chapter(manga, chapter_id):
+            abort(404)
+
+        chapters_read = mark_chapter_read(manga, chapter_id, MANGA_COMPLETED_FILE)
+        mal_synced = False
+        mal_error = None
+        cfg = MalConfig.from_env()
+        if cfg and manga.mal_id and mal_is_connected():
+            try:
+                total = manga.num_chapters_mal or manga.chapter_count
+                status = (
+                    "completed"
+                    if total and chapters_read >= total
+                    else "reading"
+                )
+                update_chapters_read(cfg, manga.mal_id, chapters_read, status=status)
+                mal_synced = True
+            except MalError as exc:
+                mal_error = str(exc)
+
+        return {
+            "ok": True,
+            "chapters_read": chapters_read,
+            "mal_synced": mal_synced,
+            "mal_error": mal_error,
+        }
+
+    @app.route("/api/manga/complete-all", methods=["POST"])
+    def api_manga_complete_all():
+        payload = request.get_json(silent=True) or {}
+        manga_id = payload.get("manga_id")
+        if not manga_id:
+            abort(400)
+        manga = get_manga(
+            manga_id, app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        if not manga:
+            abort(404)
+
+        chapters_read = mark_manga_completed(manga, MANGA_COMPLETED_FILE)
+        mal_synced = False
+        mal_error = None
+        cfg = MalConfig.from_env()
+        if cfg and manga.mal_id and mal_is_connected():
+            try:
+                total = max(manga.num_chapters_mal, manga.chapter_count, chapters_read)
+                update_chapters_read(
+                    cfg, manga.mal_id, total, status="completed"
+                )
+                mal_synced = True
+            except MalError as exc:
+                mal_error = str(exc)
+
+        return {
+            "ok": True,
+            "chapters_read": chapters_read,
+            "status": "completed",
+            "mal_synced": mal_synced,
+            "mal_error": mal_error,
+        }
+
+    @app.route("/api/manga/complete-range", methods=["POST"])
+    def api_manga_complete_range():
+        """Mark a contiguous chapter range as read (through ``to`` in list order)."""
+        payload = request.get_json(silent=True) or {}
+        manga_id = payload.get("manga_id")
+        if not manga_id:
+            abort(400)
+        manga = get_manga(
+            manga_id, app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        if not manga:
+            abort(404)
+
+        from_chapter_id = payload.get("from_chapter_id")
+        to_chapter_id = payload.get("to_chapter_id")
+        from_pos = payload.get("from_pos")
+        to_pos = payload.get("to_pos")
+
+        if from_chapter_id and to_chapter_id:
+            if not manga.chapters:
+                abort(400)
+            from_pos = chapter_position(manga, str(from_chapter_id))
+            to_pos = chapter_position(manga, str(to_chapter_id))
+            if not from_pos or not to_pos:
+                abort(404)
+        else:
+            try:
+                from_pos = int(from_pos)
+                to_pos = int(to_pos)
+            except (TypeError, ValueError):
+                abort(400)
+
+        if from_pos > to_pos:
+            from_pos, to_pos = to_pos, from_pos
+        if from_pos < 1 or to_pos < 1:
+            abort(400)
+
+        max_pos = total_chapters_target(manga)
+        if max_pos and to_pos > max_pos:
+            to_pos = max_pos
+        if not max_pos and not manga.chapters:
+            # Metadata-only with unknown chapter total: trust requested end.
+            max_pos = to_pos
+
+        chapters_read = mark_chapters_read_through(
+            manga, to_pos, MANGA_COMPLETED_FILE
+        )
+        mal_synced = False
+        mal_error = None
+        cfg = MalConfig.from_env()
+        if cfg and manga.mal_id and mal_is_connected():
+            try:
+                total = manga.num_chapters_mal or manga.chapter_count
+                status = (
+                    "completed"
+                    if total and chapters_read >= total
+                    else "reading"
+                )
+                update_chapters_read(cfg, manga.mal_id, chapters_read, status=status)
+                mal_synced = True
+            except MalError as exc:
+                mal_error = str(exc)
+
+        return {
+            "ok": True,
+            "chapters_read": chapters_read,
+            "from_pos": from_pos,
+            "to_pos": to_pos,
+            "mal_synced": mal_synced,
+            "mal_error": mal_error,
+        }
+
+    @app.route("/manga-page/<manga_id>/<chapter_id>/<int:page_index>")
+    def manga_page_image(manga_id: str, chapter_id: str, page_index: int):
+        manga = get_manga(
+            manga_id, app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        if not manga:
+            abort(404)
+        chapter = get_chapter(manga, chapter_id)
+        if not chapter:
+            abort(404)
+        try:
+            data, mime = read_page_bytes(
+                app.config["MANGA_ROOT"], manga, chapter, page_index
+            )
+        except MangaError:
+            abort(404)
+        return Response(data, mimetype=mime, headers={"Cache-Control": "public, max-age=3600"})
+
     @app.route("/catalog")
     def catalog_page():
         catalog = load_catalog(app.config["CATALOG_PATH"])
-        folders = list_local_folders(app.config["MEDIA_ROOT"])
         mal_cfg = MalConfig.from_env()
         mal_tokens = mal_load_tokens()
         mal_count = sum(1 for e in catalog.shows if e.source == "mal")
@@ -171,7 +511,6 @@ def create_app(
         return render_template(
             "catalog.html",
             catalog=catalog,
-            folders=folders,
             catalog_path=app.config["CATALOG_PATH"],
             mal_redirect_uri=mal_cfg.redirect_uri if mal_cfg else None,
             mal_client_hint=mal_client_hint,
@@ -212,10 +551,21 @@ def create_app(
         try:
             complete_oauth(cfg, code, state)
             count = sync_animelist_to_catalog(cfg, app.config["CATALOG_PATH"])
+            manga_count = sync_mangalist_to_catalog(
+                cfg,
+                manga_catalog_path=app.config["MANGA_CATALOG_PATH"],
+                manga_media_root=app.config["MANGA_ROOT"],
+            )
         except MalError as exc:
             return redirect(url_for("catalog_page", mal_error=str(exc)))
-        return redirect(url_for("catalog_page", mal_message=f"Connected — synced {count} anime to catalog."))
-
+        return redirect(
+            url_for(
+                "catalog_page",
+                mal_message=(
+                    f"Connected — synced {count} anime · {manga_count} manga to catalog."
+                ),
+            )
+        )
     @app.route("/auth/mal/complete", methods=["POST"])
     def mal_complete_manual():
         cfg = MalConfig.from_env()
@@ -227,10 +577,21 @@ def create_app(
         try:
             complete_oauth_with_code(cfg, raw_code)
             count = sync_animelist_to_catalog(cfg, app.config["CATALOG_PATH"])
+            manga_count = sync_mangalist_to_catalog(
+                cfg,
+                manga_catalog_path=app.config["MANGA_CATALOG_PATH"],
+                manga_media_root=app.config["MANGA_ROOT"],
+            )
         except MalError as exc:
             return redirect(url_for("catalog_page", mal_error=str(exc)))
-        return redirect(url_for("catalog_page", mal_message=f"Connected — synced {count} anime to catalog."))
-
+        return redirect(
+            url_for(
+                "catalog_page",
+                mal_message=(
+                    f"Connected — synced {count} anime · {manga_count} manga to catalog."
+                ),
+            )
+        )
     @app.route("/api/mal/sync", methods=["POST"])
     def api_mal_sync():
         cfg = MalConfig.from_env()
@@ -238,7 +599,12 @@ def create_app(
             return {"ok": False, "error": "MAL not configured"}, 400
         if not mal_is_connected():
             return {"ok": False, "error": "Not connected to MyAnimeList"}, 401
-        job = start_mal_sync(cfg, app.config["CATALOG_PATH"])
+        job = start_mal_sync(
+            cfg,
+            app.config["CATALOG_PATH"],
+            manga_catalog_path=app.config["MANGA_CATALOG_PATH"],
+            manga_media_root=app.config["MANGA_ROOT"],
+        )
         return {"ok": True, "started": True, **job.to_dict()}
 
     @app.route("/api/mal/sync/status")
@@ -257,6 +623,16 @@ def create_app(
             and any(r.relation_type in ("prequel", "sequel") for r in cached.related_anime)
         )
         return {"ready": ready, "has_links": has_links}
+
+    @app.route("/api/show/<show_id>/episode-titles-ready")
+    def api_show_episode_titles_ready(show_id: str):
+        show = get_show(show_id, app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
+        if not show or not show.mal_id:
+            return {"ready": True, "has_titles": False}
+        ready = not episode_titles_need_fetch(show.mal_id)
+        cached = load_cached_anime(show.mal_id)
+        has_titles = bool(cached and cached.episode_titles)
+        return {"ready": ready, "has_titles": has_titles}
 
     @app.route("/api/mal/disconnect", methods=["POST"])
     def api_mal_disconnect():
@@ -315,6 +691,9 @@ def create_app(
                 enriched = True
             except MalError:
                 enriched = False
+        # Jikan episode titles do not need MAL OAuth; kick off when we have an id.
+        if mal_id:
+            ensure_episode_titles_async(mal_id)
 
         return {"ok": True, "id": entry.id, "mal_id": mal_id, "enriched": enriched}
 
@@ -349,18 +728,23 @@ def create_app(
 
         # Lazy-load prequel/sequel without blocking the page (background enrich).
         relations_pending = False
-        if show.mal_id and mal_is_connected():
-            if cache_needs_enrichment(show.mal_id):
-                relations_pending = True
-                cfg = MalConfig.from_env()
-                if cfg:
-                    ensure_anime_details_async(cfg, show.mal_id)
-            else:
-                cached = load_cached_anime(show.mal_id)
-                if cached:
-                    from kostream.watch_progress import apply_mal_metadata
+        titles_pending = False
+        if show.mal_id:
+            if mal_is_connected():
+                if cache_needs_enrichment(show.mal_id):
+                    relations_pending = True
+                    cfg = MalConfig.from_env()
+                    if cfg:
+                        ensure_anime_details_async(cfg, show.mal_id)
+                else:
+                    cached = load_cached_anime(show.mal_id)
+                    if cached:
+                        from kostream.watch_progress import apply_mal_metadata
 
-                    apply_mal_metadata(show, cached)
+                        apply_mal_metadata(show, cached)
+            if episode_titles_need_fetch(show.mal_id):
+                titles_pending = True
+                ensure_episode_titles_async(show.mal_id)
 
         catalog = load_catalog(app.config["CATALOG_PATH"])
         mal_id_to_show_id = {entry.mal_id: entry.id for entry in catalog.shows if entry.mal_id}
@@ -377,7 +761,9 @@ def create_app(
             show=show,
             relation_links=relation_links,
             relations_pending=relations_pending,
+            titles_pending=titles_pending,
             local_info=local_info,
+            mal_page_url=mal_anime_url(show.mal_id) if show.mal_id else None,
         )
 
     @app.route("/api/show/<show_id>/local-info")
@@ -716,7 +1102,20 @@ def create_app(
         if not ep_id or seconds is None:
             abort(400)
         data = load_progress(PROGRESS_FILE)
-        data[ep_id] = float(seconds)
+        duration = payload.get("duration")
+        entry: dict = {"seconds": float(seconds)}
+        if duration is not None:
+            try:
+                dur = float(duration)
+                if dur > 0:
+                    entry["duration"] = dur
+            except (TypeError, ValueError):
+                pass
+        # Preserve prior duration if client omitted it this tick
+        prev = data.get(ep_id)
+        if "duration" not in entry and isinstance(prev, dict) and prev.get("duration"):
+            entry["duration"] = prev["duration"]
+        data[ep_id] = entry
         save_progress(PROGRESS_FILE, data)
         return {"ok": True}
 
@@ -754,10 +1153,42 @@ def create_app(
             "mal_error": mal_error,
         }
 
+    
+    @app.route("/api/show/complete-all", methods=["POST"])
+    def api_show_complete_all():
+        payload = request.get_json(silent=True) or {}
+        show_id = payload.get("show_id")
+        if not show_id:
+            abort(400)
+        show = get_show(show_id, app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
+        if not show:
+            abort(404)
+
+        watched_count = mark_show_completed(show, COMPLETED_FILE)
+        mal_synced = False
+        mal_error = None
+        cfg = MalConfig.from_env()
+        if cfg and show.mal_id and mal_is_connected():
+            try:
+                total = max(show.episode_count or 0, len(show.episodes), watched_count)
+                update_episodes_watched(cfg, show.mal_id, total, status="completed")
+                mal_synced = True
+            except MalError as exc:
+                mal_error = str(exc)
+
+        return {
+            "ok": True,
+            "watched_count": watched_count,
+            "status": "completed",
+            "mal_synced": mal_synced,
+            "mal_error": mal_error,
+        }
+
     @app.route("/search")
     def search():
         q = request.args.get("q", "").strip()
         genre = request.args.get("genre", "").strip()
+        availability = normalize_availability(request.args.get("avail", AVAIL_ALL))
         try:
             page = max(1, int(request.args.get("page", 1)))
         except ValueError:
@@ -765,7 +1196,7 @@ def create_app(
 
         all_shows = scan_library(app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
         genres = collect_genres(all_shows)
-        filtered = filter_shows(all_shows, q, genre)
+        filtered = filter_shows(all_shows, q, genre, availability)
         shows, page, total_pages = paginate(filtered, page, PAGE_SIZE)
 
         return render_template(
@@ -773,6 +1204,7 @@ def create_app(
             shows=shows,
             query=q,
             selected_genre=genre,
+            selected_avail=availability,
             genres=genres,
             page=page,
             total_pages=total_pages,
@@ -858,6 +1290,18 @@ def _resolve_local_poster(base: Path, show_id: str) -> Path | None:
             if candidate.is_file():
                 return candidate
     return None
+
+
+
+def _random_library_sample(shows: list[Show], limit: int = 5) -> list[Show]:
+    """Pick up to `limit` shows at random, preferring titles with posters."""
+    if len(shows) <= limit:
+        return list(shows)
+    with_poster = [s for s in shows if s.poster_url or getattr(s, "poster", None)]
+    without = [s for s in shows if s not in with_poster]
+    random.shuffle(with_poster)
+    random.shuffle(without)
+    return (with_poster + without)[:limit]
 
 
 def _continue_watching(

@@ -1,0 +1,22 @@
+---
+description: After git commit + push/publish, update the Obsidian vault (changelog + notes)
+alwaysApply: true
+---
+
+# Vault sync on commit + push
+
+**When:** You create a git commit **and** publish it (`git push` / open PR that ships work).  
+**What:** Update the Obsidian vault so docs match what was shipped.  
+**Where:** `C:\Users\Kosov\OneDrive\Documents\ObsidianVaults\CodingProjekt1\CodingProjekt`
+
+## Minimum updates
+
+1. **`90 Changelog.md`** — dated entry (what shipped, commit/PR if useful).
+2. **Affected notes** — e.g. `21 Codebase — Ko-Stream.md`, `10 Project.md`, `00 Start.md`, agent notes under `30 Agents/`, or Research/Reviews under `70 Documentation/` when relevant.
+
+## Rules of thumb
+
+- Commit alone without push → vault update optional; **commit + push → vault update required**.
+- Prefer updating the vault in the same turn as the push (or hand off to `@cp1-documenter` / Documenter with the changelog facts).
+- Do not leave the vault behind shipped `main` / published work.
+- Vault path and agent roster: see `AGENTS.md` and vault `30 Agents.md`.

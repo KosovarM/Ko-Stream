@@ -78,7 +78,7 @@ def load_catalog(path: Path | None = None) -> CatalogState:
     file_path = path or SELECTED_FILE
     if not file_path.exists():
         return CatalogState()
-    data = json.loads(file_path.read_text(encoding="utf-8"))
+    data = json.loads(file_path.read_text(encoding="utf-8-sig"))
     shows = [CatalogEntry.from_dict(item) for item in data.get("shows", [])]
     return CatalogState(shows=shows)
 
