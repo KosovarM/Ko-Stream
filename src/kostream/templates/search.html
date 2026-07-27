@@ -1,36 +1,37 @@
 {% extends "base.html" %}
-{% block title %}Browse — {{ site_name }}{% endblock %}
+{% block title %}Animes — {{ site_name }}{% endblock %}
 {% block content %}
 <section class="section page-search browse-page">
   <header class="browse-header">
-    <h1 class="section-title">Browse</h1>
+    <div class="browse-header-row">
+      <h1 class="section-title">Animes</h1>
+      <div class="manga-tabs browse-avail-tabs" role="tablist" aria-label="Availability">
+        <a
+          href="{{ url_for('search', q=query, genre=selected_genre, avail='all') }}"
+          class="manga-tab{% if selected_avail == 'all' %} is-active{% endif %}"
+          role="tab"
+          aria-selected="{{ 'true' if selected_avail == 'all' else 'false' }}"
+        >All</a>
+        <a
+          href="{{ url_for('search', q=query, genre=selected_genre, avail='local') }}"
+          class="manga-tab{% if selected_avail == 'local' %} is-active{% endif %}"
+          role="tab"
+          aria-selected="{{ 'true' if selected_avail == 'local' else 'false' }}"
+        >Local</a>
+        <a
+          href="{{ url_for('search', q=query, genre=selected_genre, avail='stream') }}"
+          class="manga-tab{% if selected_avail == 'stream' %} is-active{% endif %}"
+          role="tab"
+          aria-selected="{{ 'true' if selected_avail == 'stream' else 'false' }}"
+        >Stream only</a>
+      </div>
+    </div>
     <p class="browse-meta">
       {{ total_count }} title{{ 's' if total_count != 1 else '' }}
       {% if query or selected_genre or selected_avail != 'all' %} · filtered{% endif %}
       {% if total_pages > 1 %} · page {{ page }} of {{ total_pages }}{% endif %}
     </p>
   </header>
-
-  <div class="manga-tabs browse-avail-tabs" role="tablist" aria-label="Availability">
-    <a
-      href="{{ url_for('search', q=query, genre=selected_genre, avail='all') }}"
-      class="manga-tab{% if selected_avail == 'all' %} is-active{% endif %}"
-      role="tab"
-      aria-selected="{{ 'true' if selected_avail == 'all' else 'false' }}"
-    >All</a>
-    <a
-      href="{{ url_for('search', q=query, genre=selected_genre, avail='local') }}"
-      class="manga-tab{% if selected_avail == 'local' %} is-active{% endif %}"
-      role="tab"
-      aria-selected="{{ 'true' if selected_avail == 'local' else 'false' }}"
-    >Local</a>
-    <a
-      href="{{ url_for('search', q=query, genre=selected_genre, avail='stream') }}"
-      class="manga-tab{% if selected_avail == 'stream' %} is-active{% endif %}"
-      role="tab"
-      aria-selected="{{ 'true' if selected_avail == 'stream' else 'false' }}"
-    >Stream only</a>
-  </div>
 
   <form class="browse-filters" action="{{ url_for('search') }}" method="get">
     <input type="hidden" name="avail" value="{{ selected_avail }}">
@@ -95,7 +96,7 @@
   </div>
 
   {% if total_pages > 1 %}
-  <nav class="browse-pagination" aria-label="Browse pages">
+        <nav class="browse-pagination" aria-label="Anime pages">
     {% if page > 1 %}
     <a class="browse-page-btn" href="{{ url_for('search', q=query, genre=selected_genre, avail=selected_avail, page=page - 1) }}">‹ Previous</a>
     {% else %}
@@ -118,7 +119,7 @@
     {% if query or selected_genre or selected_avail != 'all' %}
     <a href="{{ url_for('search') }}" class="btn-browse-secondary">Show all titles</a>
     {% else %}
-    <p class="browse-empty-hint">Add shows in Catalog or connect MyAnimeList to populate your library.</p>
+    <p class="browse-empty-hint">Add shows in Library or connect MyAnimeList to populate your library.</p>
     {% endif %}
   </div>
   {% endif %}

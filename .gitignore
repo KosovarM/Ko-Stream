@@ -16,6 +16,7 @@ media/
 data/progress.json
 data/completed.json
 data/manga_completed.json
+data/manga_page_progress.json
 
 # Grab URL cache / overrides (local)
 data/grab/cache.json

@@ -62,7 +62,12 @@ def start_mal_sync(
     manga_catalog_path=None,
     manga_media_root=None,
 ) -> SyncJob:
-    """Start anime + manga list sync + background enrich + episode titles."""
+    """Start anime + manga list sync + background enrich + episode titles.
+
+    Manga/manhwa Sync covers list status and chapter *counts* only. MAL/Jikan
+    do not expose per-chapter titles, so there is no chapter-title phase
+    analogous to ``sync_catalog_episode_titles``.
+    """
     global _job
     with _lock:
         if _job and _job.status == "running":

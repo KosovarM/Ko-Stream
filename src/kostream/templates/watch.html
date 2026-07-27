@@ -27,29 +27,31 @@
     {% endif %}
     {% endif %}
   </div>
-  {% if grab_enabled and episode.filename == 'demo.mp4' %}
-  <div class="grab-actions">
-    {% if grab_has_resolver or grab_demo_enabled %}
-    <button type="button" class="btn-watch" id="grab-resolve">
-      {% if is_demo %}Resolve stream{% else %}Refresh stream URL{% endif %}
-    </button>
-    {% endif %}
-    <form class="grab-override" id="grab-override-form">
-      <label for="grab-url">Direct stream URL (HTTPS .mp4 / .m3u8)</label>
-      <div class="grab-override-row">
-        <input type="url" id="grab-url" name="url" placeholder="https://example.com/episode.m3u8" required>
-        <button type="submit" class="btn-detail" name="action" value="play">Save &amp; play</button>
-        <button type="submit" class="btn-watch" name="action" value="fetch" id="grab-fetch-local">
-          Download to library
-        </button>
-      </div>
-      <p class="grab-override-msg" id="grab-override-msg" hidden></p>
-    </form>
-  </div>
-  {% endif %}
   <div class="player-meta">
     <h1>{{ show.title }}</h1>
     <p class="player-ep-label">{{ episode.title }}</p>
+    {% if grab_enabled and episode.filename == 'demo.mp4' %}
+    <div class="grab-actions">
+      {% if grab_has_resolver or grab_demo_enabled %}
+      <button type="button" class="btn-watch grab-resolve-btn" id="grab-resolve">
+        {% if is_demo %}Resolve stream{% else %}Refresh stream URL{% endif %}
+      </button>
+      {% endif %}
+      <form class="grab-override" id="grab-override-form">
+        <label for="grab-url">Direct stream URL (HTTPS .mp4 / .m3u8)</label>
+        <div class="grab-override-row">
+          <input type="url" id="grab-url" name="url" placeholder="https://example.com/episode.m3u8" required>
+          <button type="submit" class="btn-detail grab-action-btn" name="action" value="play">Save &amp; play</button>
+        </div>
+        <div class="grab-override-tools">
+          <button type="submit" class="btn-watch grab-action-btn" name="action" value="fetch" id="grab-fetch-local">
+            Download to library
+          </button>
+        </div>
+        <p class="grab-override-msg" id="grab-override-msg" hidden></p>
+      </form>
+    </div>
+    {% endif %}
     <div class="player-actions">
       <div class="player-nav">
         {% if prev_episode %}
@@ -160,9 +162,23 @@
   {% if not is_demo %}
   const video = document.getElementById('player');
   let autoCompleted = false;
+  const resumeSeconds = {{ (resume_seconds or 0) | tojson }};
+  const episodeAlreadyComplete = {{ (episode_completed_flag or false) | tojson }};
+  let lastSavedBucket = -1;
+  let resumeApplied = false;
+
+  function applyResume() {
+    if (resumeApplied || episodeAlreadyComplete || !resumeSeconds || resumeSeconds <= 0) return;
+    if (!video.duration || !isFinite(video.duration)) return;
+    if (resumeSeconds >= video.duration * 0.9) return;
+    resumeApplied = true;
+    try {
+      video.currentTime = Math.min(resumeSeconds, Math.max(0, video.duration - 1));
+    } catch (_) {}
+  }
 
   async function maybeAutoCompleteFromProgress() {
-    if (autoCompleted || !video.duration || !isFinite(video.duration)) return;
+    if (autoCompleted || episodeAlreadyComplete || !video.duration || !isFinite(video.duration)) return;
     if (video.currentTime < video.duration * 0.9) return;
     autoCompleted = true;
     const btn = document.getElementById('mark-complete');
@@ -173,21 +189,36 @@
     await markComplete({ stay: true });
   }
 
+  function saveWatchProgress(force) {
+    if (episodeAlreadyComplete || autoCompleted) return;
+    if (!video.duration || !isFinite(video.duration) || video.currentTime <= 0) return;
+    if (video.currentTime >= video.duration * 0.9) return;
+    const bucket = Math.floor(video.currentTime / 5);
+    if (!force && bucket === lastSavedBucket) return;
+    lastSavedBucket = bucket;
+    fetch('{{ url_for("api_progress") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        show_id: showId,
+        episode_id: epId,
+        seconds: video.currentTime,
+        duration: video.duration || null,
+      }),
+    }).catch(() => {});
+  }
+
+  video.addEventListener('loadedmetadata', applyResume);
+  video.addEventListener('canplay', applyResume);
   video.addEventListener('timeupdate', () => {
-    const payload = {
-      episode_id: epId,
-      seconds: video.currentTime,
-      duration: video.duration || null,
-    };
-    if (Math.floor(video.currentTime) % 10 === 0) {
-      fetch('{{ url_for("api_progress") }}', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(payload)
-      });
-    }
+    saveWatchProgress(false);
     maybeAutoCompleteFromProgress();
   });
+  video.addEventListener('pause', () => saveWatchProgress(true));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') saveWatchProgress(true);
+  });
+  window.addEventListener('pagehide', () => saveWatchProgress(true));
   video.addEventListener('ended', () => {
     markComplete();
   });

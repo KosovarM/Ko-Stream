@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from kostream.manga import MangaChapter, MangaTitle
 
 MANGA_COMPLETED_FILE = Path(__file__).resolve().parents[2] / "data" / "manga_completed.json"
+MANGA_PAGE_PROGRESS_FILE = (
+    Path(__file__).resolve().parents[2] / "data" / "manga_page_progress.json"
+)
 
 MangaReadingStatus = Literal["reading", "completed", "new"]
 
@@ -40,6 +43,146 @@ def save_manga_completed(path: Path, data: dict[str, int]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
+
+def load_manga_page_progress(path: Path | None = None) -> dict[str, dict[str, Any]]:
+    """Map manga_id → {last_chapter_id, pages: {chapter_id: page_index}}."""
+    file_path = path or MANGA_PAGE_PROGRESS_FILE
+    if not file_path.exists():
+        return {}
+    try:
+        raw = json.loads(file_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for manga_id, entry in raw.items():
+        if not isinstance(entry, dict):
+            continue
+        pages_raw = entry.get("pages") or {}
+        pages: dict[str, int] = {}
+        if isinstance(pages_raw, dict):
+            for ch_id, page in pages_raw.items():
+                try:
+                    idx = int(page)
+                except (TypeError, ValueError):
+                    continue
+                if idx >= 0:
+                    pages[str(ch_id)] = idx
+        last = entry.get("last_chapter_id")
+        out[str(manga_id)] = {
+            "last_chapter_id": str(last) if last else None,
+            "pages": pages,
+        }
+    return out
+
+
+def save_manga_page_progress(path: Path, data: dict[str, dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
+def get_chapter_page_index(
+    manga_id: str,
+    chapter_id: str,
+    path: Path | None = None,
+) -> int | None:
+    """Return saved 0-based page index for a chapter, or None."""
+    entry = load_manga_page_progress(path).get(str(manga_id))
+    if not entry:
+        return None
+    pages = entry.get("pages") or {}
+    if chapter_id not in pages:
+        return None
+    return int(pages[chapter_id])
+
+
+def set_chapter_page_index(
+    manga_id: str,
+    chapter_id: str,
+    page_index: int,
+    path: Path | None = None,
+) -> int:
+    """Persist 0-based page index; updates last_chapter_id. Returns clamped index."""
+    page_index = max(0, int(page_index))
+    file_path = path or MANGA_PAGE_PROGRESS_FILE
+    data = load_manga_page_progress(file_path)
+    entry = data.setdefault(
+        str(manga_id),
+        {"last_chapter_id": None, "pages": {}},
+    )
+    pages = entry.setdefault("pages", {})
+    pages[str(chapter_id)] = page_index
+    entry["last_chapter_id"] = str(chapter_id)
+    save_manga_page_progress(file_path, data)
+    return page_index
+
+
+def clear_chapter_page_index(
+    manga_id: str,
+    chapter_id: str,
+    path: Path | None = None,
+) -> None:
+    """Remove saved page for one chapter (e.g. after marking read)."""
+    file_path = path or MANGA_PAGE_PROGRESS_FILE
+    data = load_manga_page_progress(file_path)
+    entry = data.get(str(manga_id))
+    if not entry:
+        return
+    pages = entry.get("pages") or {}
+    if str(chapter_id) not in pages:
+        return
+    pages.pop(str(chapter_id), None)
+    if entry.get("last_chapter_id") == str(chapter_id):
+        entry["last_chapter_id"] = None
+    if not pages and not entry.get("last_chapter_id"):
+        data.pop(str(manga_id), None)
+    save_manga_page_progress(file_path, data)
+
+
+def clear_page_progress_through(
+    manga: MangaTitle,
+    through: int,
+    path: Path | None = None,
+) -> None:
+    """Clear page bookmarks for chapters 1..through (after mark-read)."""
+    through = max(0, int(through))
+    if through <= 0 or not manga.chapters:
+        return
+    file_path = path or MANGA_PAGE_PROGRESS_FILE
+    data = load_manga_page_progress(file_path)
+    entry = data.get(manga.id)
+    if not entry:
+        return
+    pages = entry.get("pages") or {}
+    changed = False
+    for idx, ch in enumerate(sorted_chapters(manga), start=1):
+        if idx <= through and ch.id in pages:
+            pages.pop(ch.id, None)
+            changed = True
+            if entry.get("last_chapter_id") == ch.id:
+                entry["last_chapter_id"] = None
+    if not changed:
+        return
+    if not pages and not entry.get("last_chapter_id"):
+        data.pop(manga.id, None)
+    save_manga_page_progress(file_path, data)
+
+
+def resume_point(
+    manga_id: str,
+    path: Path | None = None,
+) -> dict[str, Any] | None:
+    """Last chapter + page for Continue, or None."""
+    entry = load_manga_page_progress(path).get(str(manga_id))
+    if not entry:
+        return None
+    chapter_id = entry.get("last_chapter_id")
+    if not chapter_id:
+        return None
+    pages = entry.get("pages") or {}
+    page_index = int(pages.get(chapter_id, 0))
+    return {"chapter_id": str(chapter_id), "page_index": page_index}
 
 def effective_chapters_read(
     manga: MangaTitle,
@@ -95,23 +238,26 @@ def mark_chapter_read(
     manga: MangaTitle,
     chapter_id: str,
     path: Path | None = None,
+    page_path: Path | None = None,
 ) -> int:
     """Record chapter as read locally; returns new chapters-read count."""
     pos = chapter_position(manga, chapter_id)
     if not pos:
         return effective_chapters_read(manga)
-    return mark_chapters_read_through(manga, pos, path)
+    return mark_chapters_read_through(manga, pos, path, page_path)
 
 
 def mark_chapters_read_through(
     manga: MangaTitle,
     through: int,
     path: Path | None = None,
+    page_path: Path | None = None,
 ) -> int:
     """Mark chapters 1..through as read locally; returns new chapters-read count.
 
     Progress is cumulative (highest 1-based position), matching MAL
     ``num_chapters_read``. Already-read chapters in the range are no-ops.
+    Clears in-chapter page bookmarks for chapters now marked read.
     """
     through = max(0, int(through))
     if through <= 0:
@@ -121,12 +267,14 @@ def mark_chapters_read_through(
     data[manga.id] = max(data.get(manga.id, 0), through)
     save_manga_completed(file_path, data)
     manga.num_chapters_read = max(manga.num_chapters_read, through)
+    clear_page_progress_through(manga, through, page_path)
     return data[manga.id]
 
 
 def mark_manga_completed(
     manga: MangaTitle,
     path: Path | None = None,
+    page_path: Path | None = None,
 ) -> int:
     """Mark the whole title complete locally; returns chapters-read count."""
     total = total_chapters_target(manga)
@@ -138,6 +286,7 @@ def mark_manga_completed(
     save_manga_completed(file_path, data)
     manga.num_chapters_read = max(manga.num_chapters_read, total)
     manga.list_status = "completed"
+    clear_page_progress_through(manga, total, page_path)
     return data[manga.id]
 
 

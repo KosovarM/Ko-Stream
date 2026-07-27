@@ -86,16 +86,20 @@ from kostream.manga import (
 from kostream.manga_catalog import MANGA_SELECTED_FILE
 from kostream.manga_progress import (
     MANGA_COMPLETED_FILE,
+    MANGA_PAGE_PROGRESS_FILE,
     chapter_completed,
     chapter_position,
     chapters_read_count,
     filter_currently_publishing,
     filter_currently_reading,
+    get_chapter_page_index,
     load_manga_completed,
+    load_manga_page_progress,
     manga_reading_status,
     mark_chapter_read,
     mark_chapters_read_through,
     mark_manga_completed,
+    set_chapter_page_index,
     total_chapters_target,
 )
 from kostream.episode_fetch import fetch_episode_from_url
@@ -113,6 +117,7 @@ from kostream.models import (
     Episode,
     Show,
     is_jellyfin_episode,
+    is_local_file_episode,
     is_strm_episode,
     jellyfin_item_id,
     slugify,
@@ -128,7 +133,9 @@ from kostream.watch_progress import (
     mark_show_completed,
     next_unwatched_episode,
     recently_added,
+    resume_seconds_for_episode,
     save_completed,
+    should_persist_watch_progress,
     sort_by_mean_score,
 )
 from kostream.sync_jobs import get_sync_job, start_mal_sync
@@ -264,6 +271,7 @@ def create_app(
         )
         titles = filter_library_format(all_titles, kind=kind)
         completed = load_manga_completed(MANGA_COMPLETED_FILE)
+        page_progress = load_manga_page_progress(MANGA_PAGE_PROGRESS_FILE)
         mal_n = sum(1 for t in titles if t.source == "mal")
         genres = collect_manga_genres(titles)
         tab = (request.args.get("tab") or "reading").strip().lower()
@@ -281,6 +289,7 @@ def create_app(
             titles=titles,
             mal_manga_count=mal_n,
             manga_completed=completed,
+            manga_page_progress=page_progress,
             chapter_completed=chapter_completed,
             manga_reading_status=manga_reading_status,
             chapters_read_count=chapters_read_count,
@@ -306,12 +315,16 @@ def create_app(
             pages = list_page_refs(app.config["MANGA_ROOT"], manga, chapter)
         except MangaError as exc:
             return {"ok": False, "error": str(exc)}, 400
+        saved = get_chapter_page_index(
+            manga.id, chapter.id, MANGA_PAGE_PROGRESS_FILE
+        )
         return {
             "ok": True,
             "manga_id": manga.id,
             "chapter_id": chapter.id,
             "chapter_title": chapter.title,
             "pages": pages,
+            "page_index": saved if saved is not None else 0,
         }
 
     @app.route("/api/manga/<manga_id>/chapter/<chapter_id>/pages")
@@ -328,13 +341,47 @@ def create_app(
             pages = list_page_refs(app.config["MANGA_ROOT"], manga, chapter)
         except MangaError as exc:
             return {"ok": False, "error": str(exc)}, 400
+        saved = get_chapter_page_index(
+            manga.id, chapter.id, MANGA_PAGE_PROGRESS_FILE
+        )
         return {
             "ok": True,
             "manga_id": manga.id,
             "chapter_id": chapter.id,
             "chapter_title": chapter.title,
             "pages": pages,
+            "page_index": saved if saved is not None else 0,
         }
+
+    @app.route("/api/manga/page-progress", methods=["POST"])
+    def api_manga_page_progress():
+        """Save last page index (0-based) for a manga chapter."""
+        payload = request.get_json(silent=True) or {}
+        manga_id = payload.get("manga_id")
+        chapter_id = payload.get("chapter_id")
+        page_index = payload.get("page_index")
+        if not manga_id or not chapter_id or page_index is None:
+            abort(400)
+        try:
+            page_index = int(page_index)
+        except (TypeError, ValueError):
+            abort(400)
+        if page_index < 0:
+            abort(400)
+        manga = get_manga(
+            manga_id, app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        if not manga:
+            abort(404)
+        chapter = get_chapter(manga, chapter_id)
+        if not chapter:
+            abort(404)
+        if chapter.page_count:
+            page_index = min(page_index, max(chapter.page_count - 1, 0))
+        saved = set_chapter_page_index(
+            manga.id, chapter.id, page_index, MANGA_PAGE_PROGRESS_FILE
+        )
+        return {"ok": True, "page_index": saved}
 
     @app.route("/api/manga/complete", methods=["POST"])
     def api_manga_complete():
@@ -518,6 +565,7 @@ def create_app(
             mal_last_sync=format_last_sync_label(load_last_sync()),
             mal_message=request.args.get("mal_message"),
             mal_error=request.args.get("mal_error"),
+            library_stats=_library_stats(app),
         )
 
     @app.route("/auth/mal/connect")
@@ -926,6 +974,12 @@ def create_app(
                 grab_source = grabbed.source if grabbed else None
             except GrabResolveError:
                 grab_source = None
+        progress = load_progress(PROGRESS_FILE)
+        completed = load_completed(COMPLETED_FILE)
+        ep_done = episode_completed(show, episode, progress, completed)
+        resume_at = resume_seconds_for_episode(
+            progress.get(episode.id), is_completed=ep_done
+        )
         return render_template(
             "watch.html",
             show=show,
@@ -937,6 +991,8 @@ def create_app(
             is_grab=is_grab,
             is_external=is_external,
             grab_source=grab_source,
+            resume_seconds=resume_at,
+            episode_completed_flag=ep_done,
         )
 
     @app.route("/media/<show_id>/<path:filename>")
@@ -1098,26 +1154,58 @@ def create_app(
     def api_progress():
         payload = request.get_json(silent=True) or {}
         ep_id = payload.get("episode_id")
+        show_id = payload.get("show_id")
         seconds = payload.get("seconds")
         if not ep_id or seconds is None:
             abort(400)
-        data = load_progress(PROGRESS_FILE)
+        try:
+            seconds_f = float(seconds)
+        except (TypeError, ValueError):
+            abort(400)
+
+        duration_f: float | None = None
         duration = payload.get("duration")
-        entry: dict = {"seconds": float(seconds)}
         if duration is not None:
             try:
                 dur = float(duration)
                 if dur > 0:
-                    entry["duration"] = dur
+                    duration_f = dur
             except (TypeError, ValueError):
-                pass
-        # Preserve prior duration if client omitted it this tick
+                duration_f = None
+
+        data = load_progress(PROGRESS_FILE)
         prev = data.get(ep_id)
-        if "duration" not in entry and isinstance(prev, dict) and prev.get("duration"):
-            entry["duration"] = prev["duration"]
+        if duration_f is None and isinstance(prev, dict) and prev.get("duration"):
+            try:
+                duration_f = float(prev["duration"])
+            except (TypeError, ValueError):
+                duration_f = None
+
+        is_done = False
+        if show_id:
+            show = get_show(
+                str(show_id), app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"]
+            )
+            if show:
+                episode = next((e for e in show.episodes if e.id == ep_id), None)
+                if episode:
+                    completed = load_completed(COMPLETED_FILE)
+                    is_done = episode_completed(show, episode, data, completed)
+
+        if not should_persist_watch_progress(
+            seconds_f, duration_f, is_completed=is_done
+        ):
+            if ep_id in data:
+                data.pop(ep_id, None)
+                save_progress(PROGRESS_FILE, data)
+            return {"ok": True, "saved": False}
+
+        entry: dict = {"seconds": seconds_f}
+        if duration_f is not None:
+            entry["duration"] = duration_f
         data[ep_id] = entry
         save_progress(PROGRESS_FILE, data)
-        return {"ok": True}
+        return {"ok": True, "saved": True}
 
     @app.route("/api/episodes/complete", methods=["POST"])
     def api_episode_complete():
@@ -1134,6 +1222,12 @@ def create_app(
             abort(404)
 
         watched_count = mark_episode_watched(show, episode, COMPLETED_FILE)
+        # Drop in-episode resume once marked complete
+        progress = load_progress(PROGRESS_FILE)
+        if episode_id in progress:
+            progress.pop(episode_id, None)
+            save_progress(PROGRESS_FILE, progress)
+
         mal_synced = False
         mal_error = None
         cfg = MalConfig.from_env()
@@ -1214,6 +1308,26 @@ def create_app(
 
     return app
 
+
+def _library_stats(app: Flask) -> dict[str, int]:
+    """Totals shown on the Library (catalog) page."""
+    shows = scan_library(app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
+    anime_episodes = sum(
+        1 for show in shows for ep in show.episodes if is_local_file_episode(ep)
+    )
+    comics = load_manga_library(
+        app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+    )
+    manga = filter_library_format(comics, kind="manga")
+    manhwa = filter_library_format(comics, kind="manhwa")
+    return {
+        "anime_titles": len(shows),
+        "anime_episodes": anime_episodes,
+        "manga_titles": len(manga),
+        "manga_chapters": sum(t.chapter_count for t in manga),
+        "manhwa_titles": len(manhwa),
+        "manhwa_chapters": sum(t.chapter_count for t in manhwa),
+    }
 
 
 def _poster_for(show: Show) -> str | None:

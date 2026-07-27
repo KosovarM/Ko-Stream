@@ -1,14 +1,30 @@
 {% extends "base.html" %}
-{% block title %}Catalog — {{ site_name }}{% endblock %}
+{% block title %}Library — {{ site_name }}{% endblock %}
 {% block content %}
 <section class="catalog-page">
   <header class="catalog-header">
-    <h1>Catalog</h1>
+    <h1>Library</h1>
     <p>
       Only <strong>enabled</strong> entries load on the home page — fast for local testing.
       Config file: <code>{{ catalog_path }}</code>
     </p>
     <p class="catalog-meta">{{ catalog_count }} enabled · {{ catalog.shows|length }} total{% if mal_count %} · {{ mal_count }} from MAL{% endif %}</p>
+    {% if library_stats %}
+    <ul class="library-stats" aria-label="Library totals">
+      <li>
+        <span class="library-stats-label">Anime</span>
+        <span class="library-stats-value">{{ library_stats.anime_titles }} title{{ 's' if library_stats.anime_titles != 1 else '' }} · {{ library_stats.anime_episodes }} episode{{ 's' if library_stats.anime_episodes != 1 else '' }}</span>
+      </li>
+      <li>
+        <span class="library-stats-label">Manga</span>
+        <span class="library-stats-value">{{ library_stats.manga_titles }} title{{ 's' if library_stats.manga_titles != 1 else '' }} · {{ library_stats.manga_chapters }} chapter{{ 's' if library_stats.manga_chapters != 1 else '' }}</span>
+      </li>
+      <li>
+        <span class="library-stats-label">Manhwa</span>
+        <span class="library-stats-value">{{ library_stats.manhwa_titles }} title{{ 's' if library_stats.manhwa_titles != 1 else '' }} · {{ library_stats.manhwa_chapters }} chapter{{ 's' if library_stats.manhwa_chapters != 1 else '' }}</span>
+      </li>
+    </ul>
+    {% endif %}
     {% if mal_message %}
     <p class="catalog-success">{{ mal_message }}</p>
     {% endif %}

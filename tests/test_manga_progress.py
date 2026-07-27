@@ -134,3 +134,62 @@ def test_currently_publishing():
     assert filter_currently_publishing([manga]) == [manga]
     manga.manga_status = "finished"
     assert not is_currently_publishing(manga)
+
+
+def test_chapter_page_progress_save_load(tmp_path: Path):
+    from kostream.manga_progress import (
+        clear_chapter_page_index,
+        get_chapter_page_index,
+        resume_point,
+        set_chapter_page_index,
+    )
+
+    path = tmp_path / "manga_page_progress.json"
+    assert get_chapter_page_index("mal-manga-1", "c1", path) is None
+    assert set_chapter_page_index("mal-manga-1", "c1", 19, path) == 19
+    assert get_chapter_page_index("mal-manga-1", "c1", path) == 19
+    assert resume_point("mal-manga-1", path) == {
+        "chapter_id": "c1",
+        "page_index": 19,
+    }
+    set_chapter_page_index("mal-manga-1", "c2", 3, path)
+    assert resume_point("mal-manga-1", path)["chapter_id"] == "c2"
+    clear_chapter_page_index("mal-manga-1", "c2", path)
+    assert get_chapter_page_index("mal-manga-1", "c2", path) is None
+    assert resume_point("mal-manga-1", path) is None
+    assert get_chapter_page_index("mal-manga-1", "c1", path) == 19
+
+
+def test_mark_read_clears_page_progress(tmp_path: Path):
+    from kostream.manga_progress import (
+        get_chapter_page_index,
+        mark_chapters_read_through,
+        set_chapter_page_index,
+    )
+
+    completed = tmp_path / "manga_completed.json"
+    pages = tmp_path / "manga_page_progress.json"
+    manga = _manga()
+    set_chapter_page_index(manga.id, "c1", 7, pages)
+    set_chapter_page_index(manga.id, "c2", 4, pages)
+    mark_chapters_read_through(manga, 1, completed, pages)
+    assert get_chapter_page_index(manga.id, "c1", pages) is None
+    assert get_chapter_page_index(manga.id, "c2", pages) == 4
+    mark_chapter_read(manga, "c2", completed, pages)
+    assert get_chapter_page_index(manga.id, "c2", pages) is None
+
+
+def test_chapters_payload_includes_page_index():
+    manga = _manga()
+    page_progress = {
+        manga.id: {"last_chapter_id": "c1", "pages": {"c1": 5, "c2": 2}}
+    }
+    payload = manga.chapters_payload_with_progress({}, page_progress)
+    assert payload[0]["page_index"] == 5
+    assert payload[1]["page_index"] == 2
+    # Done chapters omit page_index
+    completed = {manga.id: 1}
+    payload2 = manga.chapters_payload_with_progress(completed, page_progress)
+    assert payload2[0]["done"] is True
+    assert "page_index" not in payload2[0]
+    assert payload2[1].get("page_index") == 2

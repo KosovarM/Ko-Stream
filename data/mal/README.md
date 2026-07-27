@@ -60,6 +60,8 @@ Ko-Stream must still be running and you must have opened Connect within the last
 
 On the Catalog page: **Sync animelist now**
 
+Sync also refreshes your mangalist and (for anime) batches **episode titles** from Jikan / MAL HTML into `data/mal/cache/`. Manga and manhwa do **not** get chapter titles from Sync: neither the official MAL API nor Jikan exposes per-chapter names (only `num_chapters`). Local chapter labels come from folder/CBZ filenames and optional `ComicInfo.xml` inside CBZ files.
+
 ## Security
 
 - Tokens stored locally in `data/mal/tokens.json` (gitignored)

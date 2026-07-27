@@ -57,6 +57,39 @@ def progress_reached_completion(entry: float | dict | None) -> bool:
     return False
 
 
+def resume_seconds_for_episode(
+    entry: float | dict | None,
+    *,
+    is_completed: bool = False,
+) -> float:
+    """Seconds to seek on open; 0 if completed or past the 90% threshold."""
+    if is_completed:
+        return 0.0
+    seconds = _progress_seconds(entry)
+    if seconds <= 0:
+        return 0.0
+    duration = _progress_duration(entry)
+    if duration and duration > 0 and seconds >= COMPLETION_RATIO * duration:
+        return 0.0
+    return seconds
+
+
+def should_persist_watch_progress(
+    seconds: float,
+    duration: float | None,
+    *,
+    is_completed: bool = False,
+) -> bool:
+    """False when episode is done or playback is at/past completion ratio."""
+    if is_completed:
+        return False
+    if seconds <= 0:
+        return False
+    if duration and duration > 0 and seconds >= COMPLETION_RATIO * duration:
+        return False
+    return True
+
+
 def episode_completed(
     show: Show,
     episode: Episode,

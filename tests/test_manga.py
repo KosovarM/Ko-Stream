@@ -4,6 +4,7 @@ from pathlib import Path
 import zipfile
 
 from kostream.manga import (
+    chapter_display_title,
     filter_library_format,
     get_manga,
     list_page_refs,
@@ -42,6 +43,64 @@ def test_scan_folder_images(tmp_path: Path):
     assert titles[0].title == "Demo Title"
     assert titles[0].chapter_count == 1
     assert titles[0].chapters[0].page_count == 2
+
+
+def test_chapter_order_half_chapters(tmp_path: Path):
+    """Half chapters (.5) must sort after the integer chapter (7 < 7.5)."""
+    from kostream.manga import _natural_key
+
+    names = [
+        "Chapter 08.cbz",
+        "Chapter 07.5.cbz",
+        "Chapter 06.cbz",
+        "Chapter 07.cbz",
+        "Chapter 00.5.cbz",
+    ]
+    assert sorted(names, key=_natural_key) == [
+        "Chapter 00.5.cbz",
+        "Chapter 06.cbz",
+        "Chapter 07.cbz",
+        "Chapter 07.5.cbz",
+        "Chapter 08.cbz",
+    ]
+
+    root = tmp_path / "manga"
+    title = root / "Fate Extra CCC Fox Tail"
+    title.mkdir(parents=True)
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
+        "de0000000c4944415408d763f8ffff3f0005fe02fea5725f160000000049454e44ae426082"
+    )
+    for name in names:
+        with zipfile.ZipFile(title / name, "w") as zf:
+            zf.writestr("page1.png", png)
+
+    titles = scan_manga_library(root)
+    assert len(titles) == 1
+    assert [c.relative for c in titles[0].chapters] == [
+        "Chapter 00.5.cbz",
+        "Chapter 06.cbz",
+        "Chapter 07.cbz",
+        "Chapter 07.5.cbz",
+        "Chapter 08.cbz",
+    ]
+
+
+def test_chapter_order_half_chapters_dirs(tmp_path: Path):
+    root = tmp_path / "manga"
+    title = root / "Half Chapters"
+    for name in ("Chapter 06", "Chapter 07.5", "Chapter 07", "Chapter 08", "Chapter 00.5"):
+        ch = title / name
+        ch.mkdir(parents=True)
+        _write_png(ch / "01.png")
+    titles = scan_manga_library(root)
+    assert [c.title for c in titles[0].chapters] == [
+        "Chapter 00.5",
+        "Chapter 06",
+        "Chapter 07",
+        "Chapter 07.5",
+        "Chapter 08",
+    ]
 
 
 def test_scan_cbz(tmp_path: Path):
@@ -542,3 +601,58 @@ def test_manga_genre_filter_ui(tmp_path: Path, monkeypatch):
     article_start = html.rfind("<article", 0, action_idx)
     article_snip = html[article_start : action_idx + 80]
     assert "hidden" in article_snip
+
+
+def test_chapter_display_title_from_filename():
+    assert chapter_display_title("Chapter 01") == "Chapter 01"
+    assert chapter_display_title("Chapter 01 - The Beginning") == "Chapter 01: The Beginning"
+    assert chapter_display_title("Ch.12: Reunion") == "Chapter 12: Reunion"
+    assert chapter_display_title("c003 — Extra") == "Chapter 003: Extra"
+    assert chapter_display_title("42 - Cliffhanger") == "Chapter 42: Cliffhanger"
+
+
+def test_chapter_display_title_prefers_comicinfo():
+    assert (
+        chapter_display_title("Chapter 05.cbz", comic_title="Light Yagami")
+        == "Chapter 05: Light Yagami"
+    )
+    assert (
+        chapter_display_title("Chapter 05.cbz", comic_title="Chapter 5 - Named")
+        == "Chapter 5: Named"
+    )
+
+
+def test_scan_cbz_uses_comicinfo_and_filename_title(tmp_path: Path):
+    root = tmp_path / "manga"
+    title = root / "Demo Series"
+    title.mkdir(parents=True)
+    png = bytes.fromhex(
+        "89504e470d0a1a0a0000000d4948445200000001000000010802000000907753"
+        "de0000000c4944415408d763f8ffff3f0005fe02fea5725f160000000049454e44ae426082"
+    )
+    with_info = title / "Chapter 01.cbz"
+    with zipfile.ZipFile(with_info, "w") as zf:
+        zf.writestr("page1.png", png)
+        zf.writestr(
+            "ComicInfo.xml",
+            '<?xml version="1.0"?><ComicInfo><Title>Bored at Home</Title>'
+            "<Number>1</Number></ComicInfo>",
+        )
+    named = title / "Chapter 02 - School Arc.cbz"
+    with zipfile.ZipFile(named, "w") as zf:
+        zf.writestr("page1.png", png)
+
+    titles = scan_manga_library(root)
+    assert len(titles) == 1
+    by_rel = {c.relative: c.title for c in titles[0].chapters}
+    assert by_rel["Chapter 01.cbz"] == "Chapter 01: Bored at Home"
+    assert by_rel["Chapter 02 - School Arc.cbz"] == "Chapter 02: School Arc"
+
+
+def test_scan_folder_chapter_title_from_dirname(tmp_path: Path):
+    root = tmp_path / "manga"
+    ch = root / "Demo" / "Chapter 03 - Finale"
+    ch.mkdir(parents=True)
+    _write_png(ch / "01.png")
+    titles = scan_manga_library(root)
+    assert titles[0].chapters[0].title == "Chapter 03: Finale"

@@ -87,6 +87,7 @@
         data-chapter-count="{{ m.chapter_count }}"
         data-num-chapters-mal="{{ m.num_chapters_mal }}"
         data-chapters-read="{{ chapters_read_count(m, manga_completed) }}"
+        data-resume-chapter="{% if manga_page_progress is defined and manga_page_progress.get(m.id) %}{{ manga_page_progress[m.id].get('last_chapter_id') or '' }}{% endif %}"
         aria-label="Open {{ m.title }}"
       >
         <span class="manga-card-cover" aria-hidden="true">
@@ -120,7 +121,7 @@
           {% endif %}
         </span>
       </button>
-      <script type="application/json" class="manga-chapter-data" data-for="{{ m.id }}">{{ m.chapters_payload_with_progress(manga_completed) | tojson }}</script>
+      <script type="application/json" class="manga-chapter-data" data-for="{{ m.id }}">{{ m.chapters_payload_with_progress(manga_completed, manga_page_progress) | tojson }}</script>
     </article>
     {% endfor %}
   </div>
@@ -146,6 +147,9 @@
         <p id="overview-meta" class="manga-overview-meta"></p>
         <p id="overview-synopsis" class="manga-overview-synopsis"></p>
         <div class="manga-overview-actions">
+          <button type="button" class="btn-watch manga-overview-continue" id="overview-continue" hidden>
+            Continue
+          </button>
           <button type="button" class="btn-detail manga-overview-complete-all" id="overview-complete-all" hidden
             title="{% if mal_connected %}Mark the whole title completed and sync to MAL{% else %}Mark the whole title as completed{% endif %}">
             Mark title completed{% if mal_connected %} on MAL{% endif %}
@@ -233,6 +237,7 @@
   const openMangaId = {{ open_manga_id | tojson }};
   const overview = document.getElementById('manga-overview');
   const overviewCompleteAll = document.getElementById('overview-complete-all');
+  const overviewContinue = document.getElementById('overview-continue');
   const overviewActionStatus = document.getElementById('overview-action-status');
   const overviewTitle = document.getElementById('overview-title');
   const overviewMeta = document.getElementById('overview-meta');
@@ -249,9 +254,13 @@
   const genreSelect = document.getElementById('manga-genre');
   const chaptersReadMap = {};
   const malChaptersMap = {};
+  const lastChapterMap = {};
   document.querySelectorAll('[data-open-overview]').forEach((btn) => {
     chaptersReadMap[btn.dataset.mangaId] = Number(btn.dataset.chaptersRead || 0) || 0;
     malChaptersMap[btn.dataset.mangaId] = Number(btn.dataset.numChaptersMal || 0) || 0;
+    if (btn.dataset.resumeChapter) {
+      lastChapterMap[btn.dataset.mangaId] = btn.dataset.resumeChapter;
+    }
   });
 
   const overlay = document.getElementById('manga-reader');
@@ -374,9 +383,56 @@
   let chapterDone = false;
   let completing = false;
   let stepping = false;
+  let pageSaveTimer = null;
+  let lastSavedPageKey = '';
 
   function chapterFullyRead() {
     return pages.length > 0 && viewedPages.size >= pages.length;
+  }
+
+  function clearPageSaveTimer() {
+    if (pageSaveTimer) {
+      clearTimeout(pageSaveTimer);
+      pageSaveTimer = null;
+    }
+  }
+
+  function savePageProgress(opts) {
+    const immediate = !!(opts && opts.immediate);
+    if (!activeMangaId || !activeChapterId || !pages.length) return;
+    const pageIndex = Math.max(0, Math.min(index, pages.length - 1));
+    const key = activeMangaId + '|' + activeChapterId + '|' + pageIndex;
+    if (key === lastSavedPageKey && !immediate) return;
+
+    const list = chapterMap[activeMangaId] || [];
+    const row = list.find((c) => c.id === activeChapterId);
+    if (row) {
+      if (chapterDone || pageIndex <= 0) {
+        delete row.page_index;
+      } else {
+        row.page_index = pageIndex;
+      }
+    }
+    lastChapterMap[activeMangaId] = activeChapterId;
+
+    const doSave = () => {
+      pageSaveTimer = null;
+      lastSavedPageKey = key;
+      fetch('{{ url_for("api_manga_page_progress") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          manga_id: activeMangaId,
+          chapter_id: activeChapterId,
+          page_index: pageIndex,
+        }),
+        keepalive: true,
+      }).catch(() => {});
+    };
+
+    clearPageSaveTimer();
+    if (immediate) doSave();
+    else pageSaveTimer = setTimeout(doSave, 400);
   }
 
   function adjacentChapters() {
@@ -416,6 +472,8 @@
       const list = chapterMap[activeMangaId] || [];
       const idx = list.findIndex((c) => c.id === activeChapterId);
       if (idx >= 0) {
+        const row = list[idx];
+        if (row) delete row.page_index;
         applyRangeDoneLocally(activeMangaId, idx + 1);
       } else if (data.chapters_read) {
         chaptersReadMap[activeMangaId] = Math.max(
@@ -423,11 +481,13 @@
           data.chapters_read
         );
       }
+      lastSavedPageKey = '';
       if (completeBtn) {
         completeBtn.disabled = true;
         completeBtn.textContent = 'Chapter marked read';
       }
       refreshOverviewDoneState();
+      syncContinueButton(activeMangaId);
       if (!silent && overlay.hidden) {
         setOverviewStatus('Chapter marked read' + (data.mal_synced ? ' · synced to MAL' : ''), false);
       }
@@ -502,6 +562,7 @@
     if (prevBtn) prevBtn.disabled = rtl ? !canGoForward : !canGoBack;
     if (nextBtn) nextBtn.disabled = rtl ? !canGoBack : !canGoForward;
     syncRtlUi();
+    savePageProgress();
   }
 
   async function step(delta) {
@@ -545,14 +606,50 @@
       btn.classList.toggle('is-done', !!(row && row.done));
       const badge = btn.querySelector('.manga-overview-ch-done');
       if (badge) badge.hidden = !(row && row.done);
+      const resumeEl = btn.querySelector('.manga-overview-ch-resume');
+      if (resumeEl) {
+        const showResume = !!(row && !row.done && row.page_index > 0);
+        resumeEl.hidden = !showResume;
+        if (showResume) {
+          resumeEl.textContent =
+            'p. ' + (row.page_index + 1) + '/' + (row.page_count || '?');
+        }
+      }
       const rowEl = btn.closest('.manga-overview-chapter-row');
       const mark = rowEl && rowEl.querySelector('.manga-overview-mark');
       if (mark) {
         const done = !!(row && row.done);
+        mark.hidden = done;
         mark.disabled = done;
-        mark.textContent = done ? 'Read' : markChapterLabel;
+        if (!done) mark.textContent = markChapterLabel;
       }
     });
+    syncContinueButton(activeMangaId);
+  }
+
+  function continueTarget(mid) {
+    const list = chapterMap[mid] || [];
+    const lastId = lastChapterMap[mid];
+    if (lastId) {
+      const last = list.find((ch) => ch.id === lastId && !ch.done && ch.page_index > 0);
+      if (last) return last;
+    }
+    return list.find((ch) => !ch.done && ch.page_index > 0) || null;
+  }
+
+  function syncContinueButton(mid) {
+    if (!overviewContinue) return;
+    const target = mid ? continueTarget(mid) : null;
+    if (!target || !(target.page_index > 0)) {
+      overviewContinue.hidden = true;
+      overviewContinue.dataset.chapterId = '';
+      return;
+    }
+    overviewContinue.hidden = false;
+    overviewContinue.dataset.mangaId = mid;
+    overviewContinue.dataset.chapterId = target.id;
+    overviewContinue.textContent =
+      'Continue · ' + target.title + ' p. ' + (target.page_index + 1);
   }
 
   function rangeOptionsFor(mid) {
@@ -618,8 +715,15 @@
   function applyRangeDoneLocally(mid, throughPos) {
     const list = chapterMap[mid] || [];
     list.forEach((ch, idx) => {
-      if (idx + 1 <= throughPos) ch.done = true;
+      if (idx + 1 <= throughPos) {
+        ch.done = true;
+        delete ch.page_index;
+      }
     });
+    if (lastChapterMap[mid]) {
+      const last = list.find((c) => c.id === lastChapterMap[mid]);
+      if (last && last.done) delete lastChapterMap[mid];
+    }
     chaptersReadMap[mid] = Math.max(chaptersReadMap[mid] || 0, throughPos);
     const cardBtn = document.querySelector('[data-open-overview][data-manga-id="' + mid + '"]');
     if (cardBtn) cardBtn.dataset.chaptersRead = String(chaptersReadMap[mid]);
@@ -685,43 +789,50 @@
         b.className = 'manga-overview-chapter-btn' + (ch.done ? ' is-done' : '');
         b.dataset.chapterId = ch.id;
         b.setAttribute('aria-label', 'Read ' + ch.title);
+        const showResume = !ch.done && ch.page_index > 0;
         b.innerHTML =
           '<span class="manga-overview-ch-title"></span>' +
           '<span class="manga-overview-ch-meta">' +
           '<span class="manga-overview-ch-done"' + (ch.done ? '' : ' hidden') + '>Read</span>' +
+          '<span class="manga-overview-ch-resume"' + (showResume ? '' : ' hidden') + '></span>' +
           '<span class="manga-overview-ch-pages"></span>' +
           '</span>';
         b.querySelector('.manga-overview-ch-title').textContent = ch.title;
         b.querySelector('.manga-overview-ch-pages').textContent = ch.page_count + ' pages';
+        if (showResume) {
+          b.querySelector('.manga-overview-ch-resume').textContent =
+            'p. ' + (ch.page_index + 1) + '/' + (ch.page_count || '?');
+        }
         b.addEventListener('click', () => openReader(mid, ch.id, title, ch.title));
-        const mark = document.createElement('button');
-        mark.type = 'button';
-        mark.className = 'manga-overview-mark';
-        mark.title = malConnected
-          ? 'Mark this chapter read and sync to MAL'
-          : 'Mark this chapter as read';
-        mark.textContent = ch.done ? 'Read' : markChapterLabel;
-        mark.disabled = !!ch.done;
-        mark.addEventListener('click', async (event) => {
-          event.stopPropagation();
-          activeMangaId = mid;
-          activeChapterId = ch.id;
-          activeChapterTitle = ch.title;
-          chapterDone = !!ch.done;
-          setOverviewStatus('Saving…', false);
-          const ok = await markChapterComplete({ silent: false });
-          if (ok) {
-            mark.disabled = true;
-            mark.textContent = 'Read';
-          }
-        });
         li.appendChild(b);
-        li.appendChild(mark);
+        if (!ch.done) {
+          const mark = document.createElement('button');
+          mark.type = 'button';
+          mark.className = 'manga-overview-mark';
+          mark.title = malConnected
+            ? 'Mark this chapter read and sync to MAL'
+            : 'Mark this chapter as read';
+          mark.textContent = markChapterLabel;
+          mark.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            activeMangaId = mid;
+            activeChapterId = ch.id;
+            activeChapterTitle = ch.title;
+            chapterDone = !!ch.done;
+            setOverviewStatus('Saving…', false);
+            const ok = await markChapterComplete({ silent: false });
+            if (ok) {
+              mark.hidden = true;
+            }
+          });
+          li.appendChild(mark);
+        }
         overviewChapters.appendChild(li);
       });
     }
 
     setupRangeControls(mid);
+    syncContinueButton(mid);
 
     if (overviewCompleteAll) {
       const st = statusMap[mid] || btn.dataset.status || '';
@@ -746,6 +857,7 @@
   async function openReader(mid, chapterId, mangaTitle, chapterTitle, opts) {
     // Leaving a fully-read chapter → autocomplete before switching
     if (activeChapterId && activeChapterId !== chapterId) {
+      savePageProgress({ immediate: true });
       await maybeAutoComplete();
     }
 
@@ -759,6 +871,8 @@
     viewedPages = new Set();
     pages = [];
     index = 0;
+    lastSavedPageKey = '';
+    clearPageSaveTimer();
 
     titleEl.textContent = activeMangaTitle;
     chapterEl.textContent = activeChapterTitle;
@@ -784,14 +898,28 @@
     pages = data.pages || [];
     if (data.chapter_title) {
       activeChapterTitle = data.chapter_title;
-      chapterEl.textContent = data.chapter_title;
+      chapterEl.textContent = activeChapterTitle;
     }
     if (!activeChapterId && data.chapter_id) activeChapterId = data.chapter_id;
-    index = opts && opts.startAtEnd && pages.length ? pages.length - 1 : 0;
+
+    if (opts && opts.startAtEnd && pages.length) {
+      index = pages.length - 1;
+    } else if (opts && typeof opts.startPage === 'number') {
+      index = opts.startPage;
+    } else if (chapterDone) {
+      index = 0;
+    } else if (typeof data.page_index === 'number' && data.page_index > 0) {
+      index = data.page_index;
+    } else if (row && row.page_index > 0) {
+      index = row.page_index;
+    } else {
+      index = 0;
+    }
     showPage();
   }
 
   async function closeReader() {
+    savePageProgress({ immediate: true });
     await maybeAutoComplete();
     overlay.hidden = true;
     overlay.setAttribute('aria-hidden', 'true');
@@ -799,6 +927,9 @@
     pages = [];
     viewedPages = new Set();
     img.removeAttribute('src');
+    if (activeMangaId && !overview.hidden) {
+      refreshOverviewDoneState();
+    }
   }
 
   document.querySelectorAll('[data-open-overview]').forEach((btn) => {
@@ -819,8 +950,28 @@
   });
   completeBtn?.addEventListener('click', () => markChapterComplete({ silent: false }));
 
+  overviewContinue?.addEventListener('click', () => {
+    const mid = overviewContinue.dataset.mangaId || activeMangaId;
+    const chapterId = overviewContinue.dataset.chapterId;
+    if (!mid || !chapterId) return;
+    const list = chapterMap[mid] || [];
+    const row = list.find((c) => c.id === chapterId);
+    openReader(mid, chapterId, activeMangaTitle, row ? row.title : '', {
+      startPage: row && row.page_index > 0 ? row.page_index : undefined,
+    });
+  });
+
   overlay?.querySelectorAll('[data-reader-close]').forEach((el) => {
     el.addEventListener('click', () => closeReader());
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden' && !overlay.hidden) {
+      savePageProgress({ immediate: true });
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    if (!overlay.hidden) savePageProgress({ immediate: true });
   });
 
   document.addEventListener('keydown', (event) => {

@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>{% block title %}{{ site_name }}{% endblock %}</title>
-  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.svg') }}">
+  <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.png') }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -15,17 +15,16 @@
   <header class="site-header">
     <div class="header-inner">
       <button type="button" class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
-      <a href="{{ url_for('home') }}" class="logo">
-        <span class="logo-mark">▶</span>
-        <span class="logo-text"><span class="logo-ko">Ko</span><span class="logo-stream">-Stream</span></span>
+      <a href="{{ url_for('home') }}" class="logo" aria-label="Ko-Stream">
+        <img class="logo-mark" src="{{ url_for('static', filename='logo-mark.png') }}" width="52" height="52" alt="" decoding="async">
+        <span class="logo-stream" aria-hidden="true">stream</span>
       </a>
       <nav class="header-nav" id="header-nav">
         <a href="{{ url_for('home') }}" class="nav-link">Home</a>
         <a href="{{ url_for('schedule_page') }}" class="nav-link">Schedule</a>
+        <a href="{{ url_for('search') }}" class="nav-link">Animes</a>
         <a href="{{ url_for('manga_page') }}" class="nav-link">Manga</a>
         <a href="{{ url_for('manhwa_page') }}" class="nav-link">Manhwa</a>
-        <a href="{{ url_for('search') }}" class="nav-link">Browse</a>
-        <a href="{{ url_for('catalog_page') }}" class="nav-link">Catalog</a>
       </nav>
       <button type="button" class="search-toggle" id="search-toggle" aria-label="Open search" aria-expanded="false" aria-controls="header-search">
         <span aria-hidden="true">⌕</span>

@@ -47,10 +47,6 @@
     </article>
     {% endfor %}
   </div>
-  <div class="spotlight-controls">
-    <button type="button" class="spotlight-arrow" id="spotlight-prev" aria-label="Previous">‹</button>
-    <button type="button" class="spotlight-arrow" id="spotlight-next" aria-label="Next">›</button>
-  </div>
   <div class="spotlight-dots">
     {% for show in spotlight %}
     <button type="button" class="dot {% if loop.first %}active{% endif %}" data-slide="{{ loop.index0 }}" aria-label="Slide {{ loop.index }}"></button>

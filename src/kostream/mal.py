@@ -329,7 +329,13 @@ def sync_mangalist_to_catalog(
     manga_catalog_path: Path | None = None,
     manga_media_root: Path | None = None,
 ) -> int:
-    """Fetch MAL mangalist into data/manga/selected.json. Returns count synced."""
+    """Fetch MAL mangalist into data/manga/selected.json. Returns count synced.
+
+    MAL (official API) and Jikan only provide series metadata such as
+    ``num_chapters`` — there is no per-chapter title list analogous to anime
+    ``/anime/{id}/episodes``. Chapter labels in the reader come from local
+    folder/CBZ names and optional ComicInfo.xml (see ``kostream.manga``).
+    """
     from kostream.manga import MANGA_ROOT
     from kostream.manga_catalog import (
         MangaCatalogEntry,

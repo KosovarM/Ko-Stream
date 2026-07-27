@@ -1,8 +1,15 @@
-"""Local manga library — scan media/manga and serve page images (folders + CBZ)."""
+"""Local manga library — scan media/manga and serve page images (folders + CBZ).
+
+Chapter display titles come from local filenames / CBZ ``ComicInfo.xml`` only.
+MAL and Jikan expose manga ``num_chapters`` but not per-chapter titles (unlike
+anime episode lists), so Sync cannot populate chapter names the way it does for
+anime. See ``chapter_display_title`` / ``_comicinfo_title_from_cbz``.
+"""
 
 from __future__ import annotations
 
 import re
+import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,7 +19,26 @@ MANGA_ROOT = Path(__file__).resolve().parents[2] / "media" / "manga"
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp"}
 CBZ_EXTENSIONS = {".cbz", ".zip"}
 
-_NAT_SPLIT = re.compile(r"(\d+)")
+# Split on integers *or* decimals so "7.5" sorts as one number (not 7 then 5).
+_NAT_SPLIT = re.compile(r"(\d+(?:\.\d+)?)")
+_NUM_TOKEN = re.compile(r"^\d+(?:\.\d+)?$")
+
+# "Chapter 01 - Title", "Ch.2: Title", "c012 — Title", "012 - Title"
+_CHAPTER_TITLE_SPLIT = re.compile(
+    r"""(?ix)
+    ^
+    (?:
+        (?:chapter|ch\.?|c(?=\d))\s*\#?\s*(?P<num>\d+(?:\.\d+)?)
+        |(?P<num2>\d+(?:\.\d+)?)
+    )
+    \s*[-–—:|]\s*
+    (?P<title>.+)
+    $
+    """
+)
+_COMICINFO_TITLE_RE = re.compile(
+    r"<Title[^>]*>(.*?)</Title>", re.IGNORECASE | re.DOTALL
+)
 
 
 @dataclass(frozen=True)
@@ -68,20 +94,36 @@ class MangaTitle:
     def chapters_payload_with_progress(
         self,
         completed: dict[str, int] | None = None,
+        page_progress: dict | None = None,
     ) -> list[dict]:
         from kostream.manga_progress import chapter_completed
 
-        return [
-            {
+        pages_map: dict = {}
+        if page_progress and isinstance(page_progress, dict):
+            entry = page_progress.get(self.id) or {}
+            if isinstance(entry, dict):
+                pages_map = entry.get("pages") or {}
+
+        payload = []
+        for c in self.chapters:
+            done = chapter_completed(
+                self, c.id, completed, self.num_chapters_read
+            )
+            row: dict = {
                 "id": c.id,
                 "title": c.title,
                 "page_count": c.page_count,
-                "done": chapter_completed(
-                    self, c.id, completed, self.num_chapters_read
-                ),
+                "done": done,
             }
-            for c in self.chapters
-        ]
+            if not done and c.id in pages_map:
+                try:
+                    idx = int(pages_map[c.id])
+                except (TypeError, ValueError):
+                    idx = -1
+                if idx > 0:
+                    row["page_index"] = idx
+            payload.append(row)
+        return payload
 
 
 class MangaError(Exception):
@@ -89,20 +131,129 @@ class MangaError(Exception):
 
 
 def _natural_key(name: str) -> list:
+    """Sort key: decimal chapter numbers as floats (6 < 7 < 7.5 < 8)."""
     parts = _NAT_SPLIT.split(name)
     key: list = []
     for part in parts:
-        if part.isdigit():
-            key.append(int(part))
+        if not part:
+            continue
+        if _NUM_TOKEN.fullmatch(part):
+            key.append(float(part))
         else:
             key.append(part.casefold())
     return key
+
+
+def _chapter_sort_key(chapter: MangaChapter) -> tuple:
+    """Order chapters by numeric chapter number (float), then natural name."""
+    name = chapter.relative if chapter.relative not in (".", "") else chapter.title
+    num_s = _chapter_number_from_stem(name)
+    if num_s is not None:
+        return (0, float(num_s), _natural_key(name))
+    return (1, 0.0, _natural_key(name))
 
 
 def _slugify(name: str) -> str:
     slug = re.sub(r"[^\w\s-]", "", name, flags=re.UNICODE)
     slug = re.sub(r"[-\s]+", "-", slug.strip()).casefold()
     return slug or "manga"
+
+
+def chapter_display_title(
+    raw_name: str,
+    *,
+    comic_title: str | None = None,
+) -> str:
+    """Best local chapter label from ComicInfo and/or folder/CBZ stem.
+
+    Prefers ``ComicInfo.xml`` ``<Title>`` when present. Otherwise extracts a
+    human title after a chapter-number prefix (``Chapter 01 - Foo`` →
+    ``Chapter 01: Foo``). Plain stems like ``Chapter 01`` stay unchanged.
+    """
+    comic = (comic_title or "").strip()
+    if comic:
+        parsed = _CHAPTER_TITLE_SPLIT.match(comic)
+        if parsed:
+            num = parsed.group("num") or parsed.group("num2")
+            name = (parsed.group("title") or "").strip(" .-–—:_")
+            if num and name:
+                return f"Chapter {num}: {name}"
+        # ComicInfo often stores just the chapter name (no "Chapter N").
+        if not re.fullmatch(r"(?i)(?:chapter|ch\.?|c)?\s*\#?\s*\d+(?:\.\d+)?", comic):
+            stem_num = _chapter_number_from_stem(raw_name)
+            if stem_num is not None:
+                return f"Chapter {stem_num}: {comic}"
+            return comic
+
+    stem = _chapter_label_stem(raw_name) or "Chapter"
+    parsed = _CHAPTER_TITLE_SPLIT.match(stem)
+    if parsed:
+        num = parsed.group("num") or parsed.group("num2")
+        name = (parsed.group("title") or "").strip(" .-–—:_")
+        if num and name:
+            return f"Chapter {num}: {name}"
+    return stem
+
+
+def _chapter_label_stem(raw_name: str) -> str:
+    """Basename without archive suffix only (keep dots in ``Ch.12``)."""
+    name = (raw_name or "").strip()
+    if not name:
+        return ""
+    # Path.name drops directories; avoid Path.stem which treats ``.12`` as a suffix.
+    base = Path(name).name
+    lower = base.casefold()
+    for ext in (".cbz", ".zip", ".cbr"):
+        if lower.endswith(ext):
+            return base[: -len(ext)]
+    return base
+
+
+def _chapter_number_from_stem(raw_name: str) -> str | None:
+    stem = _chapter_label_stem(raw_name)
+    m = re.match(
+        r"(?i)^(?:chapter|ch\.?|c(?=\d))\s*\#?\s*(\d+(?:\.\d+)?)\b",
+        stem,
+    )
+    if m:
+        return m.group(1)
+    m = re.match(r"^(\d+(?:\.\d+)?)\b", stem)
+    return m.group(1) if m else None
+
+
+def _comicinfo_title_from_cbz(path: Path) -> str | None:
+    """Read ``<Title>`` from ComicInfo.xml inside a CBZ/ZIP, if present."""
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            comicinfo_name = next(
+                (
+                    n
+                    for n in zf.namelist()
+                    if Path(n.replace("\\", "/")).name.casefold() == "comicinfo.xml"
+                ),
+                None,
+            )
+            if not comicinfo_name:
+                return None
+            raw = zf.read(comicinfo_name)
+    except (OSError, zipfile.BadZipFile, KeyError):
+        return None
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("utf-8", errors="replace")
+    # Prefer ElementTree; fall back to a light regex for slightly broken XML.
+    try:
+        root = ET.fromstring(text)
+        for el in root.iter():
+            tag = el.tag.rsplit("}", 1)[-1]
+            if tag.casefold() == "title" and (el.text or "").strip():
+                return el.text.strip()
+    except ET.ParseError:
+        m = _COMICINFO_TITLE_RE.search(text)
+        if m:
+            return re.sub(r"\s+", " ", m.group(1)).strip() or None
+    return None
 
 
 def _is_under(child: Path, root: Path) -> bool:
@@ -153,9 +304,10 @@ def scan_manga_library(root: Path | None = None) -> list[MangaTitle]:
             if not pages:
                 continue
             title_id = f"file-{_slugify(path.stem)}"
+            comic_title = _comicinfo_title_from_cbz(path)
             chapter = MangaChapter(
                 id="main",
-                title=path.stem,
+                title=chapter_display_title(path.name, comic_title=comic_title),
                 page_count=len(pages),
                 kind="cbz",
                 relative=path.name,
@@ -333,7 +485,7 @@ def _scan_title_folder(folder: Path) -> list[MangaChapter]:
         chapters.append(
             MangaChapter(
                 id=f"dir-{_slugify(sub.name)}",
-                title=sub.name,
+                title=chapter_display_title(sub.name),
                 page_count=len(images),
                 kind="dir",
                 relative=sub.name,
@@ -347,17 +499,19 @@ def _scan_title_folder(folder: Path) -> list[MangaChapter]:
         pages = _list_images_in_cbz(path)
         if not pages:
             continue
+        comic_title = _comicinfo_title_from_cbz(path)
         chapters.append(
             MangaChapter(
                 id=f"cbz-{_slugify(path.stem)}",
-                title=path.stem,
+                title=chapter_display_title(path.name, comic_title=comic_title),
                 page_count=len(pages),
                 kind="cbz",
                 relative=path.name,
             )
         )
 
-    # Prefer chapter folders/cbz over duplicate root if both exist and root looks like covers only
+    # Interleave dirs + CBZs by chapter number (6 < 7 < 7.5 < 8).
+    chapters.sort(key=_chapter_sort_key)
     return chapters
 
 
