@@ -1,4 +1,5 @@
 from kostream.browse import (
+    AVAIL_COOKIE,
     AVAIL_LOCAL,
     AVAIL_STREAM,
     KIND_ANIMES,
@@ -13,6 +14,7 @@ from kostream.browse import (
     normalize_availability,
     normalize_browse_kind,
     paginate,
+    resolve_request_availability,
 )
 from kostream.models import Episode, Show
 
@@ -93,6 +95,25 @@ def test_normalize_availability():
     assert normalize_availability("LOCAL") == "local"
     assert normalize_availability("stream") == "stream"
     assert normalize_availability("nope") == "all"
+
+
+def test_resolve_request_availability():
+    assert resolve_request_availability(
+        has_avail_param=True,
+        avail_param="local",
+        cookie_value="stream",
+    ) == ("local", True)
+    assert resolve_request_availability(
+        has_avail_param=False,
+        avail_param=None,
+        cookie_value="stream",
+    ) == ("stream", False)
+    assert resolve_request_availability(
+        has_avail_param=False,
+        avail_param=None,
+        cookie_value=None,
+    ) == ("all", False)
+    assert AVAIL_COOKIE == "kostream_avail"
 
 
 def test_format_type_label():

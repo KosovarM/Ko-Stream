@@ -1,63 +1,63 @@
 {% extends "base.html" %}
-{% block title %}{{ browse_label }} — {{ site_name }}{% endblock %}
+{% block title %}{{ _(browse_label) }} — {{ site_name }}{% endblock %}
 {% block content %}
 <section class="section page-search browse-page">
   <header class="browse-header">
     <div class="browse-header-row">
-      <h1 class="section-title">{{ browse_label }}</h1>
-      <div class="manga-tabs browse-avail-tabs" role="tablist" aria-label="Availability">
+      <h1 class="section-title">{{ _(browse_label) }}</h1>
+      <div class="manga-tabs browse-avail-tabs" role="tablist" aria-label="{{ _('Availability') }}">
         <a
           href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail='all') }}"
           class="manga-tab{% if selected_avail == 'all' %} is-active{% endif %}"
           role="tab"
           aria-selected="{{ 'true' if selected_avail == 'all' else 'false' }}"
-        >All</a>
+        >{{ _('All') }}</a>
         <a
           href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail='local') }}"
           class="manga-tab{% if selected_avail == 'local' %} is-active{% endif %}"
           role="tab"
           aria-selected="{{ 'true' if selected_avail == 'local' else 'false' }}"
-        >Available</a>
+        >{{ _('Available') }}</a>
         <a
           href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail='stream') }}"
           class="manga-tab{% if selected_avail == 'stream' %} is-active{% endif %}"
           role="tab"
           aria-selected="{{ 'true' if selected_avail == 'stream' else 'false' }}"
-        >Stream only</a>
+        >{{ _('Stream only') }}</a>
       </div>
     </div>
     <p class="browse-meta">
-      {{ total_count }} title{{ 's' if total_count != 1 else '' }}
-      {% if query or selected_genre or selected_avail != 'all' %} · filtered{% endif %}
-      {% if total_pages > 1 %} · page {{ page }} of {{ total_pages }}{% endif %}
+      {{ total_count }} {{ _('titles') if total_count != 1 else _('title') }}
+      {% if query or selected_genre or selected_avail != 'all' %} · {{ _('filtered') }}{% endif %}
+      {% if total_pages > 1 %} · {{ _('Page') }} {{ page }} {{ _('of') }} {{ total_pages }}{% endif %}
     </p>
   </header>
 
   <form class="browse-filters" action="{{ url_for(browse_endpoint) }}" method="get">
     <input type="hidden" name="avail" value="{{ selected_avail }}">
     <label class="browse-field browse-field-search">
-      <span class="browse-label">Search</span>
+      <span class="browse-label">{{ _('Search') }}</span>
       <input
         type="search"
         name="q"
         value="{{ query }}"
-        placeholder="Filter by title or description…"
+        placeholder="{{ _('Filter by title or description…') }}"
         autocomplete="off"
       >
     </label>
     <label class="browse-field browse-field-genre">
-      <span class="browse-label">Genre</span>
+      <span class="browse-label">{{ _('Genre') }}</span>
       <select name="genre">
-        <option value="">All genres</option>
+        <option value="">{{ _('All genres') }}</option>
         {% for g in genres %}
         <option value="{{ g }}" {% if g == selected_genre %}selected{% endif %}>{{ g }}</option>
         {% endfor %}
       </select>
     </label>
     <div class="browse-actions">
-      <button type="submit" class="btn-browse">Apply</button>
+      <button type="submit" class="btn-browse">{{ _('Apply') }}</button>
       {% if query or selected_genre or selected_avail != 'all' %}
-      <a href="{{ url_for(browse_endpoint) }}" class="btn-browse-secondary">Clear</a>
+      <a href="{{ url_for(browse_endpoint, avail='all') }}" class="btn-browse-secondary">{{ _('Clear') }}</a>
       {% endif %}
     </div>
   </form>
@@ -96,30 +96,30 @@
   </div>
 
   {% if total_pages > 1 %}
-        <nav class="browse-pagination" aria-label="{{ browse_label }} pages">
+        <nav class="browse-pagination" aria-label="{{ _(browse_label) }} pages">
     {% if page > 1 %}
-    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail=selected_avail, page=page - 1) }}">‹ Previous</a>
+    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail=selected_avail, page=page - 1) }}">‹ {{ _('Previous') }}</a>
     {% else %}
-    <span class="browse-page-btn disabled">‹ Previous</span>
+    <span class="browse-page-btn disabled">‹ {{ _('Previous') }}</span>
     {% endif %}
 
-    <span class="browse-page-status">Page {{ page }} of {{ total_pages }}</span>
+    <span class="browse-page-status">{{ _('Page') }} {{ page }} {{ _('of') }} {{ total_pages }}</span>
 
     {% if page < total_pages %}
-    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail=selected_avail, page=page + 1) }}">Next ›</a>
+    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail=selected_avail, page=page + 1) }}">{{ _('Next') }} ›</a>
     {% else %}
-    <span class="browse-page-btn disabled">Next ›</span>
+    <span class="browse-page-btn disabled">{{ _('Next') }} ›</span>
     {% endif %}
   </nav>
   {% endif %}
 
   {% else %}
   <div class="browse-empty">
-    <p class="empty">No titles match your filters.</p>
+    <p class="empty">{{ _('No titles match your filters.') }}</p>
     {% if query or selected_genre or selected_avail != 'all' %}
-    <a href="{{ url_for(browse_endpoint) }}" class="btn-browse-secondary">Show all titles</a>
+    <a href="{{ url_for(browse_endpoint, avail='all') }}" class="btn-browse-secondary">{{ _('Show all titles') }}</a>
     {% else %}
-    <p class="browse-empty-hint">Add shows in Library or connect MyAnimeList to populate your library.</p>
+    <p class="browse-empty-hint">{{ _('Add shows in Library or connect MyAnimeList to populate your library.') }}</p>
     {% endif %}
   </div>
   {% endif %}

@@ -1,7 +1,7 @@
 from unittest.mock import patch
+import json
 
 from kostream.mal import MalAnimeEntry, merge_anime_details_into_cache, write_cached_anime
-from kostream.models import RelatedAnime
 
 
 def test_merge_anime_details_writes_related_anime(tmp_path, monkeypatch):
@@ -49,8 +49,7 @@ def test_merge_anime_details_writes_related_anime(tmp_path, monkeypatch):
     with patch("kostream.mal._api_get_raw", return_value=api_payload):
         entry = merge_anime_details_into_cache("token", 9919)
 
-    assert entry.num_episodes_watched == 5
-    assert entry.score == 8
+    assert entry.title == "Ao no Exorcist"
     assert len(entry.related_anime) == 2
     assert entry.related_anime[1].relation_type == "sequel"
     assert entry.related_anime[1].mal_id == 53889
@@ -58,3 +57,6 @@ def test_merge_anime_details_writes_related_anime(tmp_path, monkeypatch):
     reloaded = mal_mod.load_cached_anime(9919)
     assert reloaded is not None
     assert len(reloaded.related_anime) == 2
+    raw = json.loads((tmp_path / "9919.json").read_text(encoding="utf-8"))
+    assert "list_status" not in raw
+    assert "num_episodes_watched" not in raw

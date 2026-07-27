@@ -101,15 +101,45 @@ def test_filter_currently_airing():
     assert result[0].anime_status == "currently_airing"
 
 
-def test_recently_added_sorts_by_added_at():
+def test_recently_added_sorts_by_latest_local_mtime():
+    local_ep = lambda sid: [
+        Episode(f"{sid}-e1", sid, 1, 1, "Episode 1", "S01E01.mp4")
+    ]
     shows = [
-        Show(id="old", title="Old", description="", added_at="2026-01-01T00:00:00Z"),
-        Show(id="new", title="New", description="", added_at="2026-07-25T00:00:00Z"),
-        Show(id="mid", title="Mid", description="", added_at="2026-03-01T00:00:00Z"),
-        Show(id="none", title="None", description=""),
+        Show(
+            id="old",
+            title="Old",
+            description="",
+            episodes=local_ep("old"),
+            latest_local_mtime=100.0,
+            added_at="2026-07-25T00:00:00Z",
+        ),
+        Show(
+            id="new",
+            title="New",
+            description="",
+            episodes=local_ep("new"),
+            latest_local_mtime=300.0,
+            added_at="2026-01-01T00:00:00Z",
+        ),
+        Show(
+            id="mid",
+            title="Mid",
+            description="",
+            episodes=local_ep("mid"),
+            latest_local_mtime=200.0,
+        ),
+        Show(id="none", title="None", description="", added_at="2026-07-20T00:00:00Z"),
+        Show(
+            id="demo-only",
+            title="Demo",
+            description="",
+            episodes=[Episode("d-e1", "demo-only", 1, 1, "Episode 1", "demo.mp4")],
+            latest_local_mtime=999.0,
+        ),
     ]
     result = recently_added(shows, limit=10)
-    assert [s.id for s in result] == ["new", "mid", "old", "none"]
+    assert [s.id for s in result] == ["new", "mid", "old"]
 
 
 def test_sort_by_mean_score():

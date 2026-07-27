@@ -1,18 +1,18 @@
 {% extends "base.html" %}
-{% block title %}{{ site_name }} — Your library{% endblock %}
+{% block title %}{{ site_name }} — {{ _('Your library') }}{% endblock %}
 {% block content %}
 <section class="spotlight-section">
   <div class="spotlight-carousel" id="spotlight">
     {% for show in spotlight %}
     {% set poster = poster_for(show) %}
-    {% set bg = show.banner_url or poster %}
+    {% set bg = backdrop_for(show) %}
     {% set watch_ep = next_unwatched_episode(show, progress, completed) %}
     <article class="spotlight-slide {% if loop.first %}active{% endif %}" data-index="{{ loop.index0 }}">
       <div class="spotlight-bg" {% if bg %}style="background-image: url('{{ bg }}')"{% endif %}></div>
       <div class="spotlight-shade"></div>
       <div class="spotlight-layout">
         <div class="spotlight-content">
-          <span class="spotlight-rank">Featured · {{ loop.index }}</span>
+          <span class="spotlight-rank">{{ _('Featured') }} · {{ loop.index }}</span>
           <h1>{{ show.title }}</h1>
           <div class="meta-tags">
             <span class="tag tag-icon">▶ {{ show.type_label }}</span>
@@ -22,7 +22,7 @@
             <span class="tag tag-icon">⏱ EP {{ show.latest_episode.number }}</span>
             {% endif %}
             {% if show.is_metadata_only %}
-            <span class="tag tag-meta">Metadata only</span>
+            <span class="tag tag-meta">{{ _('Metadata only') }}</span>
             {% endif %}
             {% if show.episode_count %}
             <span class="tag">{{ show.episode_count }} EP</span>
@@ -32,10 +32,10 @@
           <div class="spotlight-actions">
             {% if watch_ep %}
             <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=watch_ep.id) }}">
-              ▶ {% if show.episodes_watched %}Continue{% else %}Open{% endif %}
+              ▶ {% if show.episodes_watched %}{{ _('Continue') }}{% else %}{{ _('Open') }}{% endif %}
             </a>
             {% endif %}
-            <a class="btn-detail" href="{{ url_for('show_detail', show_id=show.id) }}">Detail ›</a>
+            <a class="btn-detail" href="{{ url_for('show_detail', show_id=show.id) }}">{{ _('Detail ›') }}</a>
           </div>
         </div>
         {% if poster %}
@@ -56,23 +56,25 @@
 
 <div class="home-layout">
   <div class="home-main">
-    {% set section_title = 'Highest MAL score' %}
+    {% set section_title = _('Highest MAL score') %}
     {% set section_shows = trending %}
     {% set section_ranked = true %}
     {% include "partials/section_row.html" %}
 
     {% if currently_airing %}
-    {% set section_title = 'Currently Airing' %}
+    {% set section_title = _('Currently Airing') %}
     {% set section_shows = currently_airing %}
     {% set section_ranked = false %}
     {% include "partials/section_row.html" %}
     {% endif %}
 
-    {% set section_title = 'Continue Watching' %}
+    {% set section_title = _('Continue Watching') %}
     {% include "partials/section_latest.html" %}
 
+    {% include "partials/section_family_recs.html" %}
+
     {% if currently_reading_manga %}
-    {% set section_title = 'Currently reading · Manga' %}
+    {% set section_title = _('Currently reading · Manga') %}
     {% set section_manga = currently_reading_manga %}
     {% set section_tab = 'reading' %}
     {% set section_library = 'manga' %}
@@ -80,30 +82,14 @@
     {% endif %}
 
     {% if currently_reading_manhwa %}
-    {% set section_title = 'Currently reading · Manhwa' %}
+    {% set section_title = _('Currently reading · Manhwa') %}
     {% set section_manga = currently_reading_manhwa %}
     {% set section_tab = 'reading' %}
     {% set section_library = 'manhwa' %}
     {% include "partials/section_manga_row.html" %}
     {% endif %}
 
-    {% if currently_releasing_manga %}
-    {% set section_title = 'Currently releasing · Manga' %}
-    {% set section_manga = currently_releasing_manga %}
-    {% set section_tab = 'reading' %}
-    {% set section_library = 'manga' %}
-    {% include "partials/section_manga_row.html" %}
-    {% endif %}
-
-    {% if currently_releasing_manhwa %}
-    {% set section_title = 'Currently releasing · Manhwa' %}
-    {% set section_manga = currently_releasing_manhwa %}
-    {% set section_tab = 'reading' %}
-    {% set section_library = 'manhwa' %}
-    {% include "partials/section_manga_row.html" %}
-    {% endif %}
-
-    {% set section_title = 'Recently added' %}
+    {% set section_title = _('Recently added') %}
     {% set section_shows = new_on_kostream %}
     {% set section_ranked = false %}
     {% include "partials/section_row.html" %}

@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ lang|default('en') }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -12,18 +12,18 @@
   <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <header class="site-header">
     <div class="header-inner">
-      <button type="button" class="menu-toggle" id="menu-toggle" aria-label="Menu">☰</button>
+      <button type="button" class="menu-toggle" id="menu-toggle" aria-label="{{ _('Menu') }}">☰</button>
       <a href="{{ url_for('home') }}" class="logo" aria-label="Ko-Stream">
         <img class="logo-mark" src="{{ url_for('static', filename='logo-mark.png') }}" width="52" height="52" alt="" decoding="async">
         <span class="logo-stream" aria-hidden="true">stream</span>
       </a>
       {% set animes_active = request.endpoint in ('search', 'movies_page', 'specials_page') %}
       <nav class="header-nav" id="header-nav">
-        <a href="{{ url_for('home') }}" class="nav-link{% if request.endpoint == 'home' %} is-active{% endif %}">Home</a>
-        <a href="{{ url_for('schedule_page') }}" class="nav-link{% if request.endpoint == 'schedule_page' %} is-active{% endif %}">Schedule</a>
+        <a href="{{ url_for('home') }}" class="nav-link{% if request.endpoint == 'home' %} is-active{% endif %}">{{ _('Home') }}</a>
+        <a href="{{ url_for('schedule_page') }}" class="nav-link{% if request.endpoint == 'schedule_page' %} is-active{% endif %}">{{ _('Schedule') }}</a>
         <div class="nav-dropdown{% if animes_active %} is-current{% endif %}" id="nav-animes">
           <button
             type="button"
@@ -33,26 +33,103 @@
             aria-controls="nav-animes-menu"
             aria-haspopup="true"
           >
-            Animes
+            {{ _('Animes') }}
             <span class="nav-caret" aria-hidden="true"></span>
           </button>
           <div class="nav-dropdown-menu" id="nav-animes-menu" role="menu" hidden>
-            <a href="{{ url_for('search') }}" class="nav-dropdown-link{% if request.endpoint == 'search' %} is-active{% endif %}" role="menuitem">Series</a>
-            <a href="{{ url_for('movies_page') }}" class="nav-dropdown-link{% if request.endpoint == 'movies_page' %} is-active{% endif %}" role="menuitem">Movies</a>
-            <a href="{{ url_for('specials_page') }}" class="nav-dropdown-link{% if request.endpoint == 'specials_page' %} is-active{% endif %}" role="menuitem">Specials</a>
+            <a href="{{ url_for('search') }}" class="nav-dropdown-link{% if request.endpoint == 'search' %} is-active{% endif %}" role="menuitem">{{ _('Series') }}</a>
+            <a href="{{ url_for('movies_page') }}" class="nav-dropdown-link{% if request.endpoint == 'movies_page' %} is-active{% endif %}" role="menuitem">{{ _('Movies') }}</a>
+            <a href="{{ url_for('specials_page') }}" class="nav-dropdown-link{% if request.endpoint == 'specials_page' %} is-active{% endif %}" role="menuitem">{{ _('Specials') }}</a>
           </div>
         </div>
-        <a href="{{ url_for('manga_page') }}" class="nav-link{% if request.endpoint == 'manga_page' %} is-active{% endif %}">Manga</a>
-        <a href="{{ url_for('manhwa_page') }}" class="nav-link{% if request.endpoint == 'manhwa_page' %} is-active{% endif %}">Manhwa</a>
+        <a href="{{ url_for('manga_page') }}" class="nav-link{% if request.endpoint == 'manga_page' %} is-active{% endif %}">{{ _('Manga') }}</a>
+        <a href="{{ url_for('manhwa_page') }}" class="nav-link{% if request.endpoint == 'manhwa_page' %} is-active{% endif %}">{{ _('Manhwa') }}</a>
       </nav>
-      <button type="button" class="search-toggle" id="search-toggle" aria-label="Open search" aria-expanded="false" aria-controls="header-search">
+      <button type="button" class="search-toggle" id="search-toggle" aria-label="{{ _('Open search') }}" aria-expanded="false" aria-controls="header-search" data-label-open="{{ _('Open search') }}" data-label-close="{{ _('Close search') }}">
         <span aria-hidden="true">⌕</span>
       </button>
       <form class="search-form" id="header-search" action="{{ url_for('search') }}" method="get">
         <span class="search-icon" aria-hidden="true">⌕</span>
-        <input type="search" name="q" placeholder="Search anime..." value="{{ request.args.get('q', '') }}" id="header-search-input">
+        <input type="search" name="q" placeholder="{{ _('Search anime...') }}" value="{{ request.args.get('q', '') }}" id="header-search-input">
       </form>
-      <a href="{{ url_for('catalog_page') }}" class="btn-header-login">Library</a>
+      <div class="lang-switch" role="group" aria-label="{{ _('Language') }}">
+        <a
+          href="{{ url_for('set_locale', lang='de', next=request.full_path.rstrip('?')) }}"
+          class="lang-switch-btn{% if lang == 'de' %} is-active{% endif %}"
+          hreflang="de"
+          lang="de"
+          {% if lang == 'de' %}aria-current="true"{% endif %}
+        >DE</a>
+        <a
+          href="{{ url_for('set_locale', lang='en', next=request.full_path.rstrip('?')) }}"
+          class="lang-switch-btn{% if lang == 'en' %} is-active{% endif %}"
+          hreflang="en"
+          lang="en"
+          {% if lang == 'en' %}aria-current="true"{% endif %}
+        >EN</a>
+      </div>
+      {% if current_user %}
+      <div class="header-account" id="header-account">
+        <div
+          class="header-notifications"
+          id="header-notifications"
+          data-i18n-empty="{{ _('No notifications yet.') }}"
+          data-i18n-notification="{{ _('Notification') }}"
+          data-i18n-notifications="{{ _('Notifications') }}"
+        >
+          <button
+            type="button"
+            class="header-notify-toggle"
+            id="header-notify-toggle"
+            aria-expanded="false"
+            aria-controls="header-notify-tray"
+            aria-haspopup="true"
+            aria-label="{{ _('Notifications') }}"
+            title="{{ _('Notifications') }}"
+          >
+            <svg class="header-notify-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false">
+              <path fill="currentColor" d="M12 22a2.5 2.5 0 0 0 2.45-2h-4.9A2.5 2.5 0 0 0 12 22Zm8-5v-1.2c0-2.4-.9-4.6-2.4-6.3V8a5.6 5.6 0 0 0-4.7-5.5V2a.9.9 0 1 0-1.8 0v.5A5.6 5.6 0 0 0 6.4 8v1.5C4.9 11.2 4 13.4 4 15.8V17l-1.4 1.4c-.3.3-.1.8.3.8h18.2c.4 0 .6-.5.3-.8L20 17Z"/>
+            </svg>
+            <span class="header-notify-badge" id="header-notify-badge" hidden>0</span>
+          </button>
+          <div class="header-notify-tray" id="header-notify-tray" role="region" aria-label="{{ _('Notifications') }}" hidden>
+            <div class="header-notify-tray-head">
+              <span class="header-notify-tray-title">{{ _('Notifications') }}</span>
+              <button type="button" class="header-notify-mark-all" id="header-notify-mark-all" hidden>{{ _('Mark all read') }}</button>
+            </div>
+            <div class="header-notify-list" id="header-notify-list">
+              <p class="header-notify-empty">{{ _('No notifications yet.') }}</p>
+            </div>
+          </div>
+        </div>
+        <div class="header-user-menu" id="header-user-menu">
+          <button
+            type="button"
+            class="header-user-toggle"
+            id="header-user-toggle"
+            aria-expanded="false"
+            aria-controls="header-user-menu-panel"
+            aria-haspopup="true"
+            title="{{ current_user.username }}"
+          >
+            <span class="header-user-name">{{ current_user.display_name or current_user.username }}</span>
+            <span class="nav-caret" aria-hidden="true"></span>
+          </button>
+          <div class="header-user-menu-panel" id="header-user-menu-panel" role="menu" hidden>
+            {% if current_user.role == 'master' %}
+            <a href="{{ url_for('admin_users') }}" class="header-user-menu-link{% if request.endpoint and request.endpoint.startswith('admin_') %} is-active{% endif %}" role="menuitem">{{ _('Admin') }}</a>
+            {% endif %}
+            <a href="{{ url_for('catalog_page') }}" class="header-user-menu-link{% if request.endpoint == 'catalog_page' %} is-active{% endif %}" role="menuitem">{{ _('Library') }}</a>
+            <form method="post" action="{{ url_for('logout') }}" class="header-logout-form">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="header-user-menu-link header-user-menu-logout" role="menuitem">{{ _('Log out') }}</button>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% else %}
+      <a href="{{ url_for('catalog_page') }}" class="btn-header-login">{{ _('Library') }}</a>
+      {% endif %}
     </div>
   </header>
 
@@ -61,9 +138,9 @@
   </main>
 
   <footer class="site-footer">
-    <p>Ko-Stream · private local library · MAL metadata · your own files only</p>
-    {% if jellyfin_connected %}<p class="footer-badge">Jellyfin connected</p>{% endif %}
-    {% if mal_connected %}<p class="footer-badge">MAL connected{% if mal_username %} · {{ mal_username }}{% endif %}</p>{% endif %}
+    <p>{{ _('Ko-Stream · private local library · MAL metadata · your own files only') }}</p>
+    {% if jellyfin_connected %}<p class="footer-badge">{{ _('Jellyfin connected') }}</p>{% endif %}
+    {% if mal_connected %}<p class="footer-badge">{{ _('MAL connected') }}{% if mal_username %} · {{ mal_username }}{% endif %}</p>{% endif %}
   </footer>
   {% block scripts %}{% endblock %}
   <script>
@@ -109,12 +186,38 @@
       const animesDropdown = document.getElementById('nav-animes');
       const animesToggle = document.getElementById('nav-animes-toggle');
       const animesMenu = document.getElementById('nav-animes-menu');
+      const userMenu = document.getElementById('header-user-menu');
+      const userToggle = document.getElementById('header-user-toggle');
+      const userPanel = document.getElementById('header-user-menu-panel');
+      const notifyRoot = document.getElementById('header-notifications');
+      const notifyToggle = document.getElementById('header-notify-toggle');
+      const notifyTray = document.getElementById('header-notify-tray');
+      const notifyBadge = document.getElementById('header-notify-badge');
+      const notifyList = document.getElementById('header-notify-list');
+      const notifyMarkAll = document.getElementById('header-notify-mark-all');
 
       function setAnimesOpen(open) {
         if (!animesDropdown || !animesToggle || !animesMenu) return;
         animesDropdown.classList.toggle('is-open', open);
         animesToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
         animesMenu.hidden = !open;
+      }
+
+      function setUserMenuOpen(open) {
+        if (!userMenu || !userToggle || !userPanel) return;
+        userMenu.classList.toggle('is-open', open);
+        userToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        userPanel.hidden = !open;
+      }
+
+      function setNotifyOpen(open) {
+        if (!notifyRoot || !notifyToggle || !notifyTray) return;
+        notifyRoot.classList.toggle('is-open', open);
+        notifyToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        notifyTray.hidden = !open;
+        if (open) {
+          loadNotifications({ markOnOpen: true });
+        }
       }
 
       function setNavOpen(open) {
@@ -127,21 +230,168 @@
         if (!searchForm || !searchToggle) return;
         searchForm.classList.toggle('is-open', open);
         searchToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-        searchToggle.setAttribute('aria-label', open ? 'Close search' : 'Open search');
+        const openLabel = searchToggle.dataset.labelOpen || 'Open search';
+        const closeLabel = searchToggle.dataset.labelClose || 'Close search';
+        searchToggle.setAttribute('aria-label', open ? closeLabel : openLabel);
         if (open) {
           setNavOpen(false);
+          setUserMenuOpen(false);
+          setNotifyOpen(false);
           window.setTimeout(() => searchInput?.focus(), 0);
         }
+      }
+
+      function updateBadge(count) {
+        if (!notifyBadge) return;
+        const n = Number(count) || 0;
+        const notifyLabel = notifyRoot?.dataset.i18nNotifications || 'Notifications';
+        if (n > 0) {
+          notifyBadge.hidden = false;
+          notifyBadge.textContent = n > 99 ? '99+' : String(n);
+          notifyToggle?.setAttribute('aria-label', `${notifyLabel}, ${n}`);
+        } else {
+          notifyBadge.hidden = true;
+          notifyBadge.textContent = '0';
+          notifyToggle?.setAttribute('aria-label', notifyLabel);
+        }
+      }
+
+      function escapeHtml(value) {
+        return String(value || '')
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;');
+      }
+
+      function formatWhen(iso) {
+        if (!iso) return '';
+        const d = new Date(iso);
+        if (Number.isNaN(d.getTime())) return '';
+        try {
+          return d.toLocaleString(undefined, {
+            month: 'short',
+            day: 'numeric',
+            hour: 'numeric',
+            minute: '2-digit',
+          });
+        } catch (_) {
+          return d.toISOString().slice(0, 16).replace('T', ' ');
+        }
+      }
+
+      function renderNotifications(items) {
+        if (!notifyList) return;
+        const emptyMsg = notifyRoot?.dataset.i18nEmpty || 'No notifications yet.';
+        const fallbackTitle = notifyRoot?.dataset.i18nNotification || 'Notification';
+        const rows = Array.isArray(items) ? items : [];
+        if (notifyMarkAll) {
+          notifyMarkAll.hidden = !rows.some((n) => !n.read);
+        }
+        if (!rows.length) {
+          notifyList.innerHTML = `<p class="header-notify-empty">${escapeHtml(emptyMsg)}</p>`;
+          return;
+        }
+        notifyList.innerHTML = rows.map((n) => {
+          const unread = !n.read;
+          const title = escapeHtml(n.title || fallbackTitle);
+          const body = escapeHtml(n.body || '');
+          const when = escapeHtml(formatWhen(n.created_at));
+          const href = n.href ? escapeHtml(n.href) : '';
+          const cls = 'header-notify-item' + (unread ? ' is-unread' : '');
+          const inner = `
+            <span class="header-notify-item-title">${title}</span>
+            <span class="header-notify-item-body">${body}</span>
+            <span class="header-notify-item-time">${when}</span>
+          `;
+          if (href) {
+            return `<a class="${cls}" href="${href}" data-id="${escapeHtml(n.id || '')}">${inner}</a>`;
+          }
+          return `<div class="${cls}" data-id="${escapeHtml(n.id || '')}">${inner}</div>`;
+        }).join('');
+      }
+
+      async function markNotifications({ all = false, ids = [] } = {}) {
+        const payload = all ? { all: true } : { ids };
+        try {
+          const resp = await fetch('/api/notifications/read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (resp.ok && data.ok) {
+            updateBadge(data.unread_count || 0);
+            return true;
+          }
+        } catch (_) {}
+        return false;
+      }
+
+      async function loadNotifications({ markOnOpen = false } = {}) {
+        if (!notifyList) return;
+        try {
+          const resp = await fetch('/api/notifications');
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) return;
+          const items = data.notifications || [];
+          renderNotifications(items);
+          updateBadge(data.unread_count || 0);
+          if (markOnOpen && (data.unread_count || 0) > 0) {
+            const ok = await markNotifications({ all: true });
+            if (ok) {
+              items.forEach((n) => { n.read = true; });
+              renderNotifications(items);
+              updateBadge(0);
+            }
+          }
+        } catch (_) {}
       }
 
       animesToggle?.addEventListener('click', (event) => {
         event.stopPropagation();
         const open = !animesDropdown?.classList.contains('is-open');
         setAnimesOpen(open);
+        if (open) {
+          setUserMenuOpen(false);
+          setNotifyOpen(false);
+        }
+      });
+
+      userToggle?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const open = !userMenu?.classList.contains('is-open');
+        setUserMenuOpen(open);
+        if (open) {
+          setAnimesOpen(false);
+          setSearchOpen(false);
+          setNavOpen(false);
+          setNotifyOpen(false);
+        }
+      });
+
+      notifyToggle?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const open = !notifyRoot?.classList.contains('is-open');
+        setNotifyOpen(open);
+        if (open) {
+          setAnimesOpen(false);
+          setSearchOpen(false);
+          setNavOpen(false);
+          setUserMenuOpen(false);
+        }
+      });
+
+      notifyMarkAll?.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const ok = await markNotifications({ all: true });
+        if (ok) loadNotifications();
       });
 
       menuToggle?.addEventListener('click', () => {
         setSearchOpen(false);
+        setUserMenuOpen(false);
+        setNotifyOpen(false);
         const open = !nav?.classList.contains('open');
         setNavOpen(open);
         if (open && animesDropdown?.classList.contains('is-current')) {
@@ -158,6 +408,8 @@
         if (event.key !== 'Escape') return;
         setSearchOpen(false);
         setAnimesOpen(false);
+        setUserMenuOpen(false);
+        setNotifyOpen(false);
       });
 
       document.addEventListener('click', (event) => {
@@ -172,7 +424,21 @@
             setAnimesOpen(false);
           }
         }
+        if (userMenu?.classList.contains('is-open')) {
+          if (!userMenu.contains(target)) {
+            setUserMenuOpen(false);
+          }
+        }
+        if (notifyRoot?.classList.contains('is-open')) {
+          if (!notifyRoot.contains(target)) {
+            setNotifyOpen(false);
+          }
+        }
       });
+
+      if (notifyToggle) {
+        loadNotifications();
+      }
     })();
   </script>
 </body>

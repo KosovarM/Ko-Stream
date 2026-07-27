@@ -1,11 +1,11 @@
 from unittest.mock import patch
 
-from tests.test_app import _test_app
+from tests.test_app import _logged_in_client, _test_app
 
 
 def test_anilist_search_api(tmp_path):
     app = _test_app(tmp_path)
-    client = app.test_client()
+    client = _logged_in_client(app)
     with patch("kostream.app.search_anime") as mock_search:
         from kostream.anilist import AniListMedia
 

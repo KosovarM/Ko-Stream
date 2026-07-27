@@ -26,20 +26,22 @@ def _cached(mal_id: int, watched: int) -> MalAnimeEntry:
 
 
 def test_update_episodes_watched_never_below_cache_floor(monkeypatch, tmp_path):
-    cached = _cached(21, 8)
     sent: list[dict] = []
 
     def fake_api(token, path, form, method="POST"):
         sent.append(dict(form))
         return b"{}"
 
-    monkeypatch.setattr("kostream.mal.get_valid_access_token", lambda cfg: "tok")
-    monkeypatch.setattr("kostream.mal.load_cached_anime", lambda mid: cached)
-    monkeypatch.setattr("kostream.mal.write_cached_anime", lambda entry: None)
+    monkeypatch.setattr("kostream.mal.get_valid_access_token", lambda cfg, user_id: "tok")
+    monkeypatch.setattr(
+        "kostream.mal.get_anime_list_row",
+        lambda user_id, mal_id: {"num_episodes_watched": 8, "list_status": "watching", "score": 0},
+    )
+    monkeypatch.setattr("kostream.mal.upsert_anime_list_row", lambda *a, **k: {})
     monkeypatch.setattr("kostream.mal._api_form_raw", fake_api)
 
     cfg = MagicMock()
-    update_episodes_watched(cfg, 21, 3)  # try to send below floor
+    update_episodes_watched(cfg, 21, 3, user_id="u_test")  # try to send below floor
     assert sent
     assert sent[0]["num_watched_episodes"] == "8"
 
@@ -98,11 +100,13 @@ def test_reconcile_patches_mal_upward_only(tmp_path, monkeypatch):
     )
     patched: list[tuple] = []
 
-    def fake_update(cfg, mal_id, num, status=None):
-        patched.append((mal_id, num, status))
+    def fake_update(cfg, mal_id, num, status=None, *, user_id):
+        patched.append((mal_id, num, status, user_id))
 
     monkeypatch.setattr("kostream.mal.update_episodes_watched", fake_update)
     cfg = MagicMock()
-    merged = reconcile_anime_progress(show, completed_path=completed, mal_cfg=cfg)
+    merged = reconcile_anime_progress(
+        show, completed_path=completed, mal_cfg=cfg, user_id="u_test"
+    )
     assert merged == 7
-    assert patched == [(42, 7, None)]
+    assert patched == [(42, 7, None, "u_test")]

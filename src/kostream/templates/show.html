@@ -2,9 +2,10 @@
 {% block title %}{{ show.title }} — {{ site_name }}{% endblock %}
 {% block content %}
 {% set poster = poster_for(show) %}
-{% set bg = show.banner_url or poster %}
+{% set bg = backdrop_for(show) %}
+{% set bg_is_poster = bg and (not show.banner_url) and bg == poster %}
 {% set next_ep = next_unwatched_episode(show, progress, completed) %}
-<section class="detail-banner" {% if bg %}style="background-image: url('{{ bg }}')"{% endif %}>
+<section class="detail-banner{% if bg_is_poster %} detail-banner--poster{% endif %}" {% if bg %}style="background-image: url('{{ bg }}')"{% endif %}>
   <div class="detail-banner-shade"></div>
   <div class="detail-hero">
     <div class="detail-poster">
@@ -74,11 +75,68 @@
         data-local-count="{{ show_local_count }}"
         data-expected-count="{{ show_expected_count }}"
         {% if already_requested %}disabled aria-disabled="true"{% endif %}
-      >{% if already_requested %}Requested{% else %}Request missing{% endif %}</button>
+      >{% if already_requested %}{{ _('Requested') }}{% else %}{{ _('Request missing') }}{% endif %}</button>
+      {% endif %}
+      <button
+        type="button"
+        class="btn-detail btn-recommend{% if user_recommended_this %} is-recommended{% endif %}{% if recommend_blocked_all_completed and not user_recommended_this %} is-recommend-blocked{% endif %}"
+        id="btn-recommend"
+        title="{% if user_recommended_this %}Remove your recommendation{% elif recommend_blocked_all_completed %}{{ recommend_blocked_reason }}{% else %}Recommend to family{% endif %}"
+        aria-label="{% if user_recommended_this %}Remove recommendation{% elif recommend_blocked_all_completed %}{{ recommend_blocked_reason }}{% else %}Recommend to family{% endif %}"
+        data-kind="{{ show_recommend_kind }}"
+        data-show-id="{{ show.id }}"
+        data-title="{{ show.title }}"
+        data-mal-id="{{ show.mal_id or '' }}"
+        data-poster-url="{{ poster or '' }}"
+        data-recommended="{% if user_recommended_this %}1{% else %}0{% endif %}"
+        data-blocked="{% if recommend_blocked_all_completed %}1{% else %}0{% endif %}"
+        {% if recommend_blocked_all_completed and not user_recommended_this %}disabled aria-disabled="true"{% endif %}
+      >{% if user_recommended_this %}Remove recommendation{% else %}↻ Recommend{% endif %}</button>
+      {% if recommend_blocked_all_completed and not user_recommended_this %}
+      <span class="recommend-blocked-hint" id="recommend-blocked-hint">{{ recommend_blocked_reason }}</span>
+      {% else %}
+      <span class="recommend-blocked-hint" id="recommend-blocked-hint" hidden></span>
+      {% endif %}
+      {% if show.mal_id %}
+      <div class="mal-list-status">
+        <label for="mal-list-status-select" class="mal-list-status-label">MAL list status</label>
+        {% if mal_connected %}
+        <select
+          id="mal-list-status-select"
+          class="mal-list-status-select"
+          data-show-id="{{ show.id }}"
+          aria-describedby="mal-list-status-msg"
+        >
+          {% if not show.list_status %}
+          <option value="" selected disabled>Not on list</option>
+          {% endif %}
+          <option value="plan_to_watch"{% if show.list_status == 'plan_to_watch' %} selected{% endif %}>Planned to Watch</option>
+          <option value="watching"{% if show.list_status == 'watching' %} selected{% endif %}>Watching</option>
+          <option value="completed"{% if show.list_status == 'completed' %} selected{% endif %}>Completed</option>
+          <option value="dropped"{% if show.list_status == 'dropped' %} selected{% endif %}>Dropped</option>
+          <option value="on_hold"{% if show.list_status == 'on_hold' %} selected{% endif %}>On-Hold</option>
+        </select>
+        <span id="mal-list-status-msg" class="mal-list-status-msg" hidden></span>
+        {% else %}
+        <p class="mal-list-status-hint">Connect MAL to set list status.</p>
+        {% endif %}
+      </div>
       {% endif %}
     </div>
   </div>
 </section>
+
+<div id="recommend-swap-modal" class="recommend-swap" hidden aria-hidden="true">
+  <div class="recommend-swap-backdrop" data-recommend-close></div>
+  <div class="recommend-swap-panel" role="dialog" aria-modal="true" aria-labelledby="recommend-swap-title">
+    <h2 id="recommend-swap-title" class="recommend-swap-heading">Replace recommendation?</h2>
+    <p id="recommend-swap-body" class="recommend-swap-body"></p>
+    <div class="recommend-swap-actions">
+      <button type="button" class="btn-detail" data-recommend-close>Cancel</button>
+      <button type="button" class="btn-watch" id="recommend-swap-confirm">Replace</button>
+    </div>
+  </div>
+</div>
 
 <section class="section detail-episodes">
   <p class="local-media-msg" id="local-media-msg" hidden></p>
@@ -120,15 +178,14 @@
     {% set is_next = next_ep and ep.id == next_ep.id %}
     {% set stream_only = ep.filename == 'demo.mp4' %}
     {% set is_local = ep.filename != 'demo.mp4' and not ep.filename.startswith('strm:') and not ep.filename.startswith('jellyfin:') %}
-    {% set expected = 'S%02dE%02d.mp4'|format(ep.season, ep.number) %}
     <div class="episode-row{% if done %} ep-completed{% endif %}{% if is_next %} ep-next{% endif %}{% if stream_only %} ep-meta{% endif %}{% if is_local %} ep-local{% endif %}">
       <a href="{{ url_for('watch', show_id=show.id, episode_id=ep.id) }}" class="episode-item">
         <span class="ep-num">S{{ '%02d'|format(ep.season) }}E{{ '%02d'|format(ep.number) }}</span>
         <span class="ep-title">{{ ep.title }}</span>
         {% if is_local %}
-        <span class="ep-badge ep-local-badge">Available</span>
+        <span class="ep-badge ep-local-badge">{{ _('Available') }}</span>
         {% elif stream_only %}
-        <span class="ep-badge ep-stream-badge">stream only</span>
+        <span class="ep-badge ep-stream-badge">{{ _('Stream only')|lower }}</span>
         {% endif %}
         {% if done %}
         <span class="ep-badge ep-completed-badge">✓ Completed</span>
@@ -138,19 +195,6 @@
         <span class="ep-progress">Resume</span>
         {% endif %}
       </a>
-      {% if stream_only or not is_local %}
-      <label class="ep-upload-btn" title="Upload file as {{ expected }}">
-        Upload
-        <input
-          type="file"
-          accept="video/mp4,video/webm,video/x-matroska,.mp4,.webm,.mkv"
-          data-episode-id="{{ ep.id }}"
-          data-expected="{{ expected }}"
-          class="ep-upload-input"
-          hidden
-        >
-      </label>
-      {% endif %}
       {% if not done %}
       <button
         type="button"
@@ -164,14 +208,25 @@
     {% endfor %}
   </div>
 
-  {% if mal_page_url %}
-  <div class="episode-overview-footer">
+  {% if mal_page_url or (current_user and current_user.role == 'master') %}
+  <div class="episode-overview-footer" aria-label="Series actions">
+    {% if mal_page_url %}
     <a
       class="btn-detail"
       href="{{ mal_page_url }}"
       target="_blank"
       rel="noopener noreferrer"
-    >Open on MAL ↗</a>
+    >{{ _('Open on MAL ↗') }}</a>
+    {% endif %}
+    {% if current_user and current_user.role == 'master' %}
+    <button
+      type="button"
+      class="btn-detail btn-catalog-remove"
+      id="btn-catalog-remove"
+      data-show-id="{{ show.id }}"
+      data-show-title="{{ show.title }}"
+    >{{ _('Remove from catalog') }}</button>
+    {% endif %}
   </div>
   {% endif %}
 </section>
@@ -188,33 +243,6 @@
     localMsg.textContent = text;
     localMsg.classList.toggle('is-error', !!isError);
   }
-
-  async function uploadEpisode(episodeId, file) {
-    const body = new FormData();
-    body.append('episode_id', episodeId);
-    body.append('file', file);
-    const resp = await fetch(`/api/show/${encodeURIComponent(showId)}/upload-episode`, {
-      method: 'POST',
-      body,
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || !data.ok) {
-      showLocalMsg(data.error || 'Upload failed.', true);
-      return false;
-    }
-    showLocalMsg(`Saved as ${data.filename}`);
-    return true;
-  }
-
-  document.querySelectorAll('.ep-upload-input').forEach((input) => {
-    input.addEventListener('change', async () => {
-      const file = input.files && input.files[0];
-      if (!file) return;
-      const ok = await uploadEpisode(input.dataset.episodeId, file);
-      input.value = '';
-      if (ok) location.reload();
-    });
-  });
 
   document.querySelectorAll('.ep-mark-btn').forEach((btn) => {
     btn.addEventListener('click', async (event) => {
@@ -251,6 +279,62 @@
       showLocalMsg('Could not mark show completed.', true);
     }
   });
+
+  {% if show.mal_id and mal_connected %}
+  const malStatusSelect = document.getElementById('mal-list-status-select');
+  const malStatusMsg = document.getElementById('mal-list-status-msg');
+  if (malStatusSelect) {
+    let lastStatus = malStatusSelect.value;
+    malStatusSelect.addEventListener('change', async () => {
+      const status = malStatusSelect.value;
+      if (!status) return;
+      malStatusSelect.disabled = true;
+      if (malStatusMsg) {
+        malStatusMsg.hidden = true;
+        malStatusMsg.textContent = '';
+        malStatusMsg.classList.remove('is-error');
+      }
+      try {
+        const resp = await fetch('{{ url_for("api_show_mal_status") }}', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            show_id: malStatusSelect.dataset.showId || showId,
+            status,
+          }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          malStatusSelect.value = lastStatus;
+          if (malStatusMsg) {
+            malStatusMsg.textContent = data.error || 'Could not update MAL status.';
+            malStatusMsg.classList.add('is-error');
+            malStatusMsg.hidden = false;
+          }
+          return;
+        }
+        lastStatus = data.status || status;
+        malStatusSelect.value = lastStatus;
+        const empty = malStatusSelect.querySelector('option[value=""]');
+        if (empty) empty.remove();
+        if (malStatusMsg) {
+          malStatusMsg.textContent = 'Saved.';
+          malStatusMsg.classList.remove('is-error');
+          malStatusMsg.hidden = false;
+        }
+      } catch (_) {
+        malStatusSelect.value = lastStatus;
+        if (malStatusMsg) {
+          malStatusMsg.textContent = 'Could not update MAL status.';
+          malStatusMsg.classList.add('is-error');
+          malStatusMsg.hidden = false;
+        }
+      } finally {
+        malStatusSelect.disabled = false;
+      }
+    });
+  }
+  {% endif %}
 
   {% if relations_pending and not relation_links %}
   let tries = 0;
@@ -324,5 +408,199 @@
       }
     });
   }
+
+  const recommendBtn = document.getElementById('btn-recommend');
+  const recommendHint = document.getElementById('recommend-blocked-hint');
+  const recommendModal = document.getElementById('recommend-swap-modal');
+  const recommendBody = document.getElementById('recommend-swap-body');
+  const recommendConfirm = document.getElementById('recommend-swap-confirm');
+  const recommendClearUrl = {{ url_for('api_recommendations_clear', kind=show_recommend_kind) | tojson }};
+  const recommendBlockedReason = {{ (recommend_blocked_reason or 'Everyone has already completed this.') | tojson }};
+  let pendingRecommendPayload = null;
+
+  function setRecommendIdle() {
+    if (!recommendBtn) return;
+    recommendBtn.dataset.recommended = '0';
+    recommendBtn.classList.remove('is-recommended');
+    if (recommendBtn.dataset.blocked === '1') {
+      recommendBtn.classList.add('is-recommend-blocked');
+      recommendBtn.textContent = '↻ Recommend';
+      recommendBtn.disabled = true;
+      recommendBtn.setAttribute('aria-disabled', 'true');
+      recommendBtn.title = recommendBlockedReason;
+      recommendBtn.setAttribute('aria-label', recommendBlockedReason);
+      if (recommendHint) {
+        recommendHint.hidden = false;
+        recommendHint.textContent = recommendBlockedReason;
+      }
+    } else {
+      recommendBtn.classList.remove('is-recommend-blocked');
+      recommendBtn.textContent = '↻ Recommend';
+      recommendBtn.disabled = false;
+      recommendBtn.removeAttribute('aria-disabled');
+      recommendBtn.title = 'Recommend to family';
+      recommendBtn.setAttribute('aria-label', 'Recommend to family');
+      if (recommendHint) {
+        recommendHint.hidden = true;
+        recommendHint.textContent = '';
+      }
+    }
+  }
+
+  function setRecommendOwn() {
+    if (!recommendBtn) return;
+    recommendBtn.dataset.recommended = '1';
+    recommendBtn.classList.add('is-recommended');
+    recommendBtn.classList.remove('is-recommend-blocked');
+    recommendBtn.textContent = 'Remove recommendation';
+    recommendBtn.disabled = false;
+    recommendBtn.removeAttribute('aria-disabled');
+    recommendBtn.title = 'Remove your recommendation';
+    recommendBtn.setAttribute('aria-label', 'Remove recommendation');
+    if (recommendHint) {
+      recommendHint.hidden = true;
+      recommendHint.textContent = '';
+    }
+  }
+
+  function closeRecommendModal() {
+    if (!recommendModal) return;
+    recommendModal.hidden = true;
+    recommendModal.setAttribute('aria-hidden', 'true');
+    pendingRecommendPayload = null;
+  }
+
+  function openRecommendModal(currentTitle, newTitle) {
+    if (!recommendModal || !recommendBody) return;
+    recommendBody.textContent =
+      'You already recommend “' + (currentTitle || 'another title') +
+      '” in this category. Replace it with “' + (newTitle || 'this title') + '”?';
+    recommendModal.hidden = false;
+    recommendModal.setAttribute('aria-hidden', 'false');
+  }
+
+  async function postRecommendation(payload) {
+    const resp = await fetch('{{ url_for("api_recommendations_set") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    return {resp, data};
+  }
+
+  async function clearRecommendation() {
+    const resp = await fetch(recommendClearUrl, {method: 'DELETE'});
+    const data = await resp.json().catch(() => ({}));
+    return {resp, data};
+  }
+
+  if (recommendBtn) {
+    recommendBtn.addEventListener('click', async () => {
+      if (recommendBtn.dataset.blocked === '1' && recommendBtn.dataset.recommended !== '1') {
+        return;
+      }
+      if (recommendBtn.dataset.recommended === '1') {
+        recommendBtn.disabled = true;
+        try {
+          const {resp, data} = await clearRecommendation();
+          if (!resp.ok || !data.ok) {
+            alert(data.error || 'Could not remove recommendation');
+            recommendBtn.disabled = false;
+            return;
+          }
+          setRecommendIdle();
+        } catch (_) {
+          alert('Could not remove recommendation');
+          recommendBtn.disabled = false;
+        }
+        return;
+      }
+      const malId = recommendBtn.dataset.malId;
+      const payload = {
+        kind: recommendBtn.dataset.kind,
+        show_id: recommendBtn.dataset.showId,
+        title: recommendBtn.dataset.title,
+        poster_url: recommendBtn.dataset.posterUrl || null,
+      };
+      if (malId) payload.mal_id = Number(malId);
+      recommendBtn.disabled = true;
+      try {
+        const {resp, data} = await postRecommendation(payload);
+        if (resp.status === 409 && data.needs_swap) {
+          pendingRecommendPayload = Object.assign({}, payload, {replace: true});
+          openRecommendModal((data.current && data.current.title) || '', payload.title);
+          recommendBtn.disabled = false;
+          return;
+        }
+        if (!resp.ok || !data.ok) {
+          alert(data.error || 'Could not save recommendation');
+          recommendBtn.disabled = false;
+          return;
+        }
+        setRecommendOwn();
+      } catch (_) {
+        alert('Could not save recommendation');
+        recommendBtn.disabled = false;
+      }
+    });
+  }
+
+  recommendConfirm?.addEventListener('click', async () => {
+    if (!pendingRecommendPayload) return;
+    const payload = pendingRecommendPayload;
+    recommendConfirm.disabled = true;
+    try {
+      const {resp, data} = await postRecommendation(payload);
+      if (!resp.ok || !data.ok) {
+        alert(data.error || 'Could not replace recommendation');
+        recommendConfirm.disabled = false;
+        return;
+      }
+      closeRecommendModal();
+      setRecommendOwn();
+    } catch (_) {
+      alert('Could not replace recommendation');
+      recommendConfirm.disabled = false;
+    }
+  });
+
+  recommendModal?.querySelectorAll('[data-recommend-close]').forEach((el) => {
+    el.addEventListener('click', () => {
+      closeRecommendModal();
+      if (recommendBtn && recommendBtn.dataset.recommended !== '1' && recommendBtn.dataset.blocked !== '1') {
+        recommendBtn.disabled = false;
+      }
+      if (recommendConfirm) recommendConfirm.disabled = false;
+    });
+  });
+
+  {% if current_user and current_user.role == 'master' %}
+  document.getElementById('btn-catalog-remove')?.addEventListener('click', async (event) => {
+    const btn = event.currentTarget;
+    const title = btn.dataset.showTitle || 'this series';
+    if (!confirm(`Remove “${title}” from the catalog?\n\nMedia files on disk will not be deleted.`)) {
+      return;
+    }
+    btn.disabled = true;
+    try {
+      const resp = await fetch('{{ url_for("api_catalog_remove") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({id: btn.dataset.showId || showId}),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) {
+        alert(data.error || 'Could not remove from catalog');
+        btn.disabled = false;
+        return;
+      }
+      location.href = data.redirect || '{{ url_for("catalog_page") }}';
+    } catch (_) {
+      alert('Could not remove from catalog');
+      btn.disabled = false;
+    }
+  });
+  {% endif %}
 </script>
 {% endblock %}

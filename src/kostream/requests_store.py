@@ -136,6 +136,16 @@ def manga_needs_request(manga: MangaTitle) -> bool:
     return local_count < expected
 
 
+def is_open_request(row: dict[str, Any]) -> bool:
+    """True when the request has not been manually fulfilled."""
+    return not row.get("fulfilled_at")
+
+
+def open_requests(path: Path | None = None) -> list[dict[str, Any]]:
+    """Open (unfulfilled) requests only."""
+    return [row for row in load_requests(path) if is_open_request(row)]
+
+
 def has_request(kind: str, media_id: str, path: Path | None = None) -> bool:
     """True when this title is already in the open requests list."""
     media_id = (media_id or "").strip()
@@ -143,7 +153,7 @@ def has_request(kind: str, media_id: str, path: Path | None = None) -> bool:
         return False
     kind_n = normalize_kind(kind)
     key = request_key(kind_n, media_id)
-    for row in load_requests(path):
+    for row in open_requests(path):
         if row.get("id") == key:
             return True
         if normalize_kind(str(row.get("kind") or "")) == kind_n and row.get("media_id") == media_id:
@@ -155,7 +165,7 @@ def requested_ids(path: Path | None = None) -> set[str]:
     """Set of request id keys (`kind:media_id`) currently open."""
     return {
         str(row.get("id") or request_key(str(row.get("kind") or ""), str(row.get("media_id") or "")))
-        for row in load_requests(path)
+        for row in open_requests(path)
         if row.get("media_id")
     }
 
@@ -186,11 +196,12 @@ def clear_fulfilled_requests(
         allow_kinds = manga_kinds
     else:
         allow_kinds = show_kinds | manga_kinds
+    open_items = [r for r in items if is_open_request(r)]
     need_shows = show_kinds & allow_kinds and any(
-        normalize_kind(str(r.get("kind") or "")) in show_kinds for r in items
+        normalize_kind(str(r.get("kind") or "")) in show_kinds for r in open_items
     )
     need_manga = manga_kinds & allow_kinds and any(
-        normalize_kind(str(r.get("kind") or "")) in manga_kinds for r in items
+        normalize_kind(str(r.get("kind") or "")) in manga_kinds for r in open_items
     )
 
     shows_by_id: dict[str, Show] = {}
@@ -213,6 +224,9 @@ def clear_fulfilled_requests(
     kept: list[dict[str, Any]] = []
     removed = 0
     for row in items:
+        if not is_open_request(row):
+            kept.append(row)
+            continue
         kind = normalize_kind(str(row.get("kind") or ""))
         media_id = str(row.get("media_id") or "").strip()
         if kind not in allow_kinds:
@@ -279,6 +293,8 @@ def upsert_request(
     type_label: str | None = None,
     local_count: int | None = None,
     expected_count: int | None = None,
+    requester_id: str | None = None,
+    requester_username: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Insert or refresh a request. Returns (entry, created)."""
     media_id = (media_id or "").strip()
@@ -292,6 +308,7 @@ def upsert_request(
         if existing.get("id") == key or (
             existing.get("kind") == kind_n and existing.get("media_id") == media_id
         ):
+            was_fulfilled = bool(existing.get("fulfilled_at"))
             existing["id"] = key
             existing["kind"] = kind_n
             existing["media_id"] = media_id
@@ -309,8 +326,19 @@ def upsert_request(
             existing["updated_at"] = now
             if not existing.get("created_at"):
                 existing["created_at"] = now
+            if was_fulfilled:
+                existing["fulfilled_at"] = None
+                existing["fulfilled_by"] = None
+                if requester_id is not None:
+                    existing["requester_id"] = requester_id
+                if requester_username is not None:
+                    existing["requester_username"] = requester_username
+            elif not existing.get("requester_id") and requester_id is not None:
+                existing["requester_id"] = requester_id
+                if requester_username is not None:
+                    existing["requester_username"] = requester_username
             save_requests(items, path)
-            return existing, False
+            return existing, was_fulfilled
 
     entry: dict[str, Any] = {
         "id": key,
@@ -319,6 +347,10 @@ def upsert_request(
         "title": title or media_id,
         "created_at": now,
         "updated_at": now,
+        "requester_id": requester_id,
+        "requester_username": requester_username,
+        "fulfilled_at": None,
+        "fulfilled_by": None,
     }
     if mal_id is not None:
         entry["mal_id"] = mal_id
@@ -333,6 +365,36 @@ def upsert_request(
     items.append(entry)
     save_requests(items, path)
     return entry, True
+
+
+def fulfill_request(
+    request_id: str,
+    *,
+    fulfilled_by: str,
+    path: Path | None = None,
+) -> tuple[dict[str, Any] | None, bool]:
+    """Mark an open request fulfilled.
+
+    Returns ``(entry, newly_fulfilled)``. ``entry`` is None when not found.
+    ``newly_fulfilled`` is True only when this call set ``fulfilled_at``.
+    """
+    rid = (request_id or "").strip()
+    by = (fulfilled_by or "").strip()
+    if not rid or not by:
+        return None, False
+    items = load_requests(path)
+    now = _utc_now()
+    for row in items:
+        if row.get("id") != rid:
+            continue
+        if not is_open_request(row):
+            return row, False
+        row["fulfilled_at"] = now
+        row["fulfilled_by"] = by
+        row["updated_at"] = now
+        save_requests(items, path)
+        return row, True
+    return None, False
 
 
 def remove_request(request_id: str, path: Path | None = None) -> bool:
@@ -351,7 +413,7 @@ def remove_request(request_id: str, path: Path | None = None) -> bool:
 
 
 def group_requests(items: list[dict[str, Any]] | None = None) -> dict[str, list[dict[str, Any]]]:
-    rows = items if items is not None else load_requests()
+    rows = items if items is not None else open_requests()
     grouped: dict[str, list[dict[str, Any]]] = {k: [] for k in KIND_LABELS}
     for row in rows:
         kind = normalize_kind(str(row.get("kind") or ""))

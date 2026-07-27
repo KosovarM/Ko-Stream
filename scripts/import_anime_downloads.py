@@ -6,6 +6,7 @@ import json
 import os
 import re
 import shutil
+import time
 from pathlib import Path
 
 INBOX_ROOT = Path(os.environ.get("KOSTREAM_INBOX_ROOT", r"D:\UnsortedFiles\KoStream"))
@@ -19,6 +20,12 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
         "Bleach TYBW Kashin-tan",
         "mal-60636",
     ),
+    "Bleach_sub": ("Bleach", "mal-269"),
+    # First cour (Sennen Kessen-hen / Arc)
+    "Bleach__Thousand_Year_Blood_War_Arc_sub": (
+        "Bleach TYBW",
+        "mal-41467",
+    ),
     "Bleach__Thousand_Year_Blood_War___The_Conflict_sub": (
         "Bleach TYBW Soukoku-tan",
         "mal-56784",
@@ -27,6 +34,8 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
         "Bleach TYBW Ketsubetsu-tan",
         "mal-53998",
     ),
+    "Ragna_Crimson_sub": ("Ragna Crimson", "mal-51297"),
+    "Black_Clover_sub": ("Black Clover", "mal-34572"),
     "Fate_Grand_Order__Absolute_Demonic_Front___Babylonia_sub": (
         "Fate Grand Order Babylonia",
         "mal-38084",
@@ -120,6 +129,11 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
         "Re Zero Hyouketsu no Kizuna",
         "mal-38414",
     ),
+    # Season 4 may already live under anime root (no inbox folder required for link repair)
+    "Re_ZERO__Starting_Life_in_Another_World__Season_4_sub": (
+        "Re Zero Season 4",
+        "mal-61316",
+    ),
     "Sakamoto_Days_Part_2_sub": ("Sakamoto Days", "mal-58939", 11),
     "Sakamoto_Days_sub": ("Sakamoto Days", "mal-58939", 0),
     "Steins_Gate__The_Movie___Load_Region_of_D_j__Vu_sub": (
@@ -145,6 +159,85 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
         "Tensei Slime Season 1",
         "mal-37430",
     ),
+    # --- 2026-07-27 inbox batch ---
+    "Akame_ga_Kill_sub": ("Akame ga Kill!", "mal-22199"),
+    "KonoSuba__God_s_Blessing_on_This_Wonderful_World__sub": (
+        "KonoSuba Season 1",
+        "mal-30831",
+    ),
+    "KonoSuba__God_s_Blessing_on_This_Wonderful_World____God_s_Blessing_on_This_Wonderful_Choker__sub": (
+        "KonoSuba Choker OVA",
+        "mal-32380",  # was wrongly mal-31964 (Boku no Hero Academia)
+    ),
+    "KonoSuba__God_s_Blessing_on_This_Wonderful_World__2_sub": (
+        "KonoSuba Season 2",
+        "mal-32937",
+    ),
+    "KonoSuba__God_s_Blessing_on_This_Wonderful_World__2___God_s_Blessing_on_This_Wonderful_Art__sub": (
+        "KonoSuba Art OVA",
+        "mal-34626",
+    ),
+    "KonoSuba__God_s_Blessing_on_This_Wonderful_World____Legend_of_Crimson_sub": (
+        "KonoSuba Legend of Crimson",
+        "mal-38040",
+    ),
+    "KonoSuba__An_Explosion_on_This_Wonderful_World__sub": (
+        "KonoSuba An Explosion on This Wonderful World",
+        "mal-51958",
+    ),
+    "KonoSuba__God_s_Blessing_on_This_Wonderful_World__3_sub": (
+        "KonoSuba Season 3",
+        "mal-49458",
+    ),
+    "KonoSuba__God_s_Blessing_on_This_Wonderful_World__3_OVA_sub": (
+        "KonoSuba Season 3 OVA",
+        "mal-55701",
+    ),
+    "Chainsaw_Man_sub": ("Chainsaw Man", "mal-44511"),
+    "Code_Geass__Lelouch_of_the_Rebellion_sub": (
+        "Code Geass Lelouch of the Rebellion",
+        "mal-1575",
+    ),
+    "Code_Geass__Lelouch_of_the_Rebellion_R2_sub": (
+        "Code Geass Lelouch of the Rebellion R2",
+        "mal-2904",
+    ),
+    "Code_Geass__Roz__of_the_Recapture_sub": (
+        "Code Geass Roze of the Recapture",
+        "mal-56835",
+    ),
+    "Gintama_sub": ("Gintama", "mal-918"),
+    "Gintama_Season_2_sub": ("Gintama Season 2", "mal-9969"),
+    "Gintama_Season_4_sub": ("Gintama Season 4", "mal-28977"),
+    "Gintama_Season_5_sub": ("Gintama Season 5", "mal-34096"),
+    "Gintama__Enchousen_sub": ("Gintama Enchousen", "mal-15417"),
+    "Gintama__The_Final_sub": ("Gintama The Final", "mal-39486"),
+    "Gintama__The_Semi_Final_sub": ("Gintama The Semi-Final", "mal-44087"),
+    "Gintama___Silver_Soul_Arc_sub": (
+        "Gintama Silver Soul Arc",
+        "mal-36838",
+    ),
+    "Gintama___Silver_Soul_Arc___Second_Half_War_sub": (
+        "Gintama Silver Soul Arc Second Half",
+        "mal-37491",
+    ),
+    "Gintama__3_Z_Ginpachi_Sensei_sub": (
+        "Gintama 3-Z Ginpachi-sensei",
+        "mal-60572",
+    ),
+    "Frieren__Beyond_Journey_s_End_sub": (
+        "Frieren Beyond Journeys End",
+        "mal-52991",
+    ),
+    "Frieren__Beyond_Journey_s_End_Season_2_sub": (
+        "Frieren Beyond Journeys End Season 2",
+        "mal-58567",
+    ),
+    "Mob_Psycho_100_sub": ("Mob Psycho 100", "mal-32182"),
+    "Mob_Psycho_100_II_sub": ("Mob Psycho 100 II", "mal-37514"),
+    "Mob_Psycho_100_III_sub": ("Mob Psycho 100 III", "mal-50172"),
+    "Vinland_Saga_sub": ("Vinland Saga", "mal-37521"),
+    "Vinland_Saga__2nd_Season_sub": ("Vinland Saga Season 2", "mal-49387"),
 }
 
 EP_PATTERN = re.compile(r"^(\d+)Ep\.(\w+)$", re.IGNORECASE)
@@ -210,9 +303,77 @@ def ensure_catalog_folder(catalog_id: str | None, folder_name: str) -> bool:
     return updated
 
 
-def import_all() -> dict:
+def clear_catalog_folder_if(catalog_id: str, folder_name: str) -> bool:
+    """Clear a wrongly attached folder (e.g. after a bad FOLDER_MAP id)."""
+    data = load_catalog()
+    updated = False
+    for show in data.get("shows", []):
+        if show.get("id") == catalog_id and show.get("folder") == folder_name:
+            show.pop("folder", None)
+            updated = True
+            break
+    if updated:
+        save_catalog(data)
+    return updated
+
+
+def repair_catalog_folders(*, media_root: Path | None = None) -> dict:
+    """Link catalog entries to existing anime folders via FOLDER_MAP (no file copies)."""
+    root = media_root or MEDIA_ROOT
+    linked: list[str] = []
+    created: list[str] = []
+    unchanged: list[str] = []
+    skipped_missing_dir: list[str] = []
+
+    # Undo known bad link from previous Choker OVA -> mal-31964 typo
+    if clear_catalog_folder_if("mal-31964", "KonoSuba Choker OVA"):
+        linked.append("cleared mal-31964 <- KonoSuba Choker OVA")
+
+    for _src, val in FOLDER_MAP.items():
+        folder_name, catalog_id, _off = _map_entry(val)
+        if not catalog_id:
+            continue
+        if not (root / folder_name).is_dir():
+            skipped_missing_dir.append(f"{catalog_id} -> {folder_name}")
+            continue
+
+        data = load_catalog()
+        existing = next(
+            (s for s in data.get("shows", []) if s.get("id") == catalog_id),
+            None,
+        )
+        existed = existing is not None
+        already = bool(existing and existing.get("folder") == folder_name)
+        if already:
+            unchanged.append(f"{catalog_id} -> {folder_name}")
+            continue
+        if ensure_catalog_folder(catalog_id, folder_name):
+            if existed:
+                linked.append(f"{catalog_id} -> {folder_name}")
+            else:
+                created.append(f"{catalog_id} -> {folder_name}")
+
+    return {
+        "linked": linked,
+        "created": created,
+        "unchanged": unchanged,
+        "skipped_missing_dir": skipped_missing_dir,
+    }
+
+
+def _delete_source(src_file: Path, deleted: list[str], conflicts: list[str]) -> None:
+    try:
+        src_file.unlink()
+        deleted.append(str(src_file))
+        print(f" - deleted source {src_file.name}", flush=True)
+    except OSError as err:
+        conflicts.append(f"delete failed {src_file}: {err}")
+
+
+def import_all(*, delete_after_copy: bool = False) -> dict:
     imported: list[str] = []
     skipped: list[str] = []
+    deleted: list[str] = []
     conflicts: list[str] = []
     unmapped: list[str] = []
     catalog_updates: list[str] = []
@@ -248,18 +409,56 @@ def import_all() -> dict:
             if dest_file.exists():
                 if dest_file.stat().st_size == src_size:
                     skipped.append(str(dest_file.name) + f" ({folder_name})")
+                    # Duplicate in inbox — remove source when requested
+                    if delete_after_copy:
+                        _delete_source(src_file, deleted, conflicts)
                     continue
                 conflicts.append(
                     f"{dest_file.name} in {folder_name}: size mismatch "
                     f"(local {dest_file.stat().st_size} vs {src_size})"
                 )
                 continue
-            shutil.copy2(src_file, dest_file)
+            copied = False
+            last_err: OSError | None = None
+            for attempt in range(5):
+                try:
+                    shutil.copy2(src_file, dest_file)
+                    copied = True
+                    break
+                except OSError as err:
+                    last_err = err
+                    # WinError 32 / sharing violation — brief retry
+                    if attempt < 4:
+                        time.sleep(1.5 * (attempt + 1))
+            if not copied:
+                conflicts.append(
+                    f"{src_file.name} -> {folder_name}/{dest_file.name}: "
+                    f"copy failed ({last_err})"
+                )
+                continue
+            # Verify size before treating as success / deleting source
+            try:
+                dest_size = dest_file.stat().st_size
+            except OSError as err:
+                conflicts.append(
+                    f"{folder_name}/{dest_file.name}: verify failed ({err})"
+                )
+                continue
+            if dest_size != src_size:
+                conflicts.append(
+                    f"{folder_name}/{dest_file.name}: size verify failed "
+                    f"(dest {dest_size} vs src {src_size})"
+                )
+                continue
             imported.append(f"{folder_name}/{dest_file.name}")
+            print(f" + {folder_name}/{dest_file.name}", flush=True)
+            if delete_after_copy:
+                _delete_source(src_file, deleted, conflicts)
 
     return {
         "imported": imported,
         "skipped": skipped,
+        "deleted": deleted,
         "conflicts": conflicts,
         "unmapped": unmapped,
         "catalog_updates": catalog_updates,
@@ -267,9 +466,28 @@ def import_all() -> dict:
 
 
 if __name__ == "__main__":
-    result = import_all()
+    import sys
+
+    args = set(sys.argv[1:])
+    if args & {"--repair-catalog", "repair"}:
+        result = repair_catalog_folders()
+        print("LINKED:", len(result["linked"]))
+        print("CREATED:", len(result["created"]))
+        print("UNCHANGED:", len(result["unchanged"]))
+        print("SKIPPED (no dir):", len(result["skipped_missing_dir"]))
+        for line in result["linked"]:
+            print(" ~", line)
+        for line in result["created"]:
+            print(" +", line)
+        for line in result["skipped_missing_dir"]:
+            print(" !", line)
+        raise SystemExit(0)
+
+    delete_after = "--delete-after-copy" in args
+    result = import_all(delete_after_copy=delete_after)
     print("IMPORTED:", len(result["imported"]))
     print("SKIPPED:", len(result["skipped"]))
+    print("DELETED:", len(result["deleted"]))
     print("CONFLICTS:", len(result["conflicts"]))
     print("UNMAPPED:", result["unmapped"])
     print("CATALOG:", len(result["catalog_updates"]))
@@ -279,3 +497,5 @@ if __name__ == "__main__":
         print(f" ... and {len(result['imported']) - 20} more")
     for c in result["conflicts"][:10]:
         print(" !", c)
+    if len(result["conflicts"]) > 10:
+        print(f" ... and {len(result['conflicts']) - 10} more conflicts")

@@ -220,13 +220,25 @@ def test_api_create_dedupes(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("KOSTREAM_CSRF", "0")
     from kostream.app import create_app
 
+    from conftest import bootstrap_test_users, login_client
+
     catalog = tmp_path / "selected.json"
     catalog.write_text('{"shows": []}', encoding="utf-8")
     media = tmp_path / "media" / "shows"
     media.mkdir(parents=True)
     req_path = tmp_path / "requests.json"
-    app = create_app(media_root=media, catalog_path=catalog, requests_path=req_path)
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    app = create_app(
+        media_root=media,
+        catalog_path=catalog,
+        requests_path=req_path,
+        users_path=users,
+        user_data_base=user_data,
+    )
     client = app.test_client()
+    login_client(client)
 
     payload = {
         "kind": KIND_SERIES,

@@ -1,27 +1,27 @@
 {% extends "base.html" %}
-{% block title %}Library — {{ site_name }}{% endblock %}
+{% block title %}{{ _('Library') }} — {{ site_name }}{% endblock %}
 {% block content %}
 <section class="catalog-page">
   <header class="catalog-header">
-    <h1>Library</h1>
+    <h1>{{ _('Library') }}</h1>
     <p>
-      Only <strong>enabled</strong> entries load on the home page — fast for local testing.
-      Config file: <code>{{ catalog_path }}</code>
+      {{ _('Only enabled entries load on the home page — fast for local testing.') }}
+      {{ _('Config file:') }} <code>{{ catalog_path }}</code>
     </p>
-    <p class="catalog-meta">{{ catalog_count }} enabled · {{ catalog.shows|length }} total{% if mal_count %} · {{ mal_count }} from MAL{% endif %}</p>
+    <p class="catalog-meta">{{ catalog_count }} {{ _('enabled') }} · {{ catalog.shows|length }} {{ _('total') }}{% if mal_count %} · {{ mal_count }} {{ _('from MAL') }}{% endif %}</p>
     {% if library_stats %}
-    <ul class="library-stats" aria-label="Library totals">
+    <ul class="library-stats" aria-label="{{ _('Library totals') }}">
       <li>
-        <span class="library-stats-label">Anime</span>
-        <span class="library-stats-value">{{ library_stats.anime_titles }} title{{ 's' if library_stats.anime_titles != 1 else '' }} · {{ library_stats.anime_episodes }} episode{{ 's' if library_stats.anime_episodes != 1 else '' }}</span>
+        <span class="library-stats-label">{{ _('Anime') }}</span>
+        <span class="library-stats-value">{{ library_stats.anime_titles }} {{ _('titles') if library_stats.anime_titles != 1 else _('title') }} · {{ library_stats.anime_episodes }} episode{{ 's' if library_stats.anime_episodes != 1 else '' }}</span>
       </li>
       <li>
-        <span class="library-stats-label">Manga</span>
-        <span class="library-stats-value">{{ library_stats.manga_titles }} title{{ 's' if library_stats.manga_titles != 1 else '' }} · {{ library_stats.manga_chapters }} chapter{{ 's' if library_stats.manga_chapters != 1 else '' }}</span>
+        <span class="library-stats-label">{{ _('Manga') }}</span>
+        <span class="library-stats-value">{{ library_stats.manga_titles }} {{ _('titles') if library_stats.manga_titles != 1 else _('title') }} · {{ library_stats.manga_chapters }} chapter{{ 's' if library_stats.manga_chapters != 1 else '' }}</span>
       </li>
       <li>
-        <span class="library-stats-label">Manhwa</span>
-        <span class="library-stats-value">{{ library_stats.manhwa_titles }} title{{ 's' if library_stats.manhwa_titles != 1 else '' }} · {{ library_stats.manhwa_chapters }} chapter{{ 's' if library_stats.manhwa_chapters != 1 else '' }}</span>
+        <span class="library-stats-label">{{ _('Manhwa') }}</span>
+        <span class="library-stats-value">{{ library_stats.manhwa_titles }} {{ _('titles') if library_stats.manhwa_titles != 1 else _('title') }} · {{ library_stats.manhwa_chapters }} chapter{{ 's' if library_stats.manhwa_chapters != 1 else '' }}</span>
       </li>
     </ul>
     {% endif %}
@@ -34,10 +34,11 @@
   </header>
 
   <section class="catalog-section requests-section" id="library-requests">
-    <h2>Requests</h2>
+    <h2>{{ _('Requests') }}</h2>
     <p class="catalog-meta">
-      Wishlist for titles with missing available episodes or chapters.
-      {% if media_requests %}{{ media_requests|length }} open{% else %}None yet{% endif %}.
+      {{ _('Wishlist for titles with missing available episodes or chapters.') }}
+      {% if media_requests %}{{ media_requests|length }} {{ _('open') }}{% else %}{{ _('None yet') }}{% endif %}.
+      {% if not can_manage_requests %} {{ _('Showing your requests only.') }}{% endif %}
     </p>
     {% if media_requests %}
     {% for kind, label in request_kind_labels.items() %}
@@ -61,17 +62,26 @@
               {% endif %}
               <div class="requests-meta">
                 <span class="tag">{{ item.type_label or label }}</span>
+                <span class="requests-requester">{{ _('by') }} {{ item.requester_username or item.requester_id or _('Unknown') }}</span>
                 {% if item.expected_count is defined and item.expected_count is not none %}
-                <span class="requests-counts">{{ item.local_count or 0 }}/{{ item.expected_count }} available</span>
+                <span class="requests-counts">{{ item.local_count or 0 }}/{{ item.expected_count }} {{ _('available') }}</span>
                 {% endif %}
               </div>
             </div>
+            {% if can_manage_requests %}
+            <button
+              type="button"
+              class="btn-watch requests-fulfill"
+              data-request-id="{{ item.id }}"
+              title="{{ _('Mark fulfilled') }}"
+            >{{ _('Fulfill') }}</button>
             <button
               type="button"
               class="btn-detail requests-dismiss"
               data-request-id="{{ item.id }}"
-              title="Remove request"
-            >Dismiss</button>
+              title="{{ _('Remove request') }}"
+            >{{ _('Dismiss') }}</button>
+            {% endif %}
           </li>
           {% endfor %}
         </ul>
@@ -79,12 +89,12 @@
       {% endif %}
     {% endfor %}
     {% else %}
-    <p class="empty">No open requests. Use <strong>Request missing</strong> on a show or manga overview when available files are incomplete.</p>
+    <p class="empty">{{ _('No open requests. Use Request missing on a show or manga overview when available files are incomplete.') }}</p>
     {% endif %}
   </section>
 
   <section class="catalog-section mal-section">
-    <h2>MyAnimeList</h2>
+    <h2>{{ _('MyAnimeList') }}</h2>
     {% if not mal_configured %}
     <p class="empty">Set <code>MAL_CLIENT_ID</code> and <code>MAL_CLIENT_SECRET</code> env vars, then restart Ko-Stream. See <code>data/mal/README.md</code>.</p>
     {% elif mal_connected %}
@@ -96,12 +106,16 @@
     {% endif %}
     <p class="catalog-meta" id="mal-sync-status" hidden></p>
     <div class="mal-actions sync-actions" id="mal-sync-actions">
-      <button type="button" class="btn-watch btn-sync" id="mal-sync-animes" title="Update animelist, watch progress, and anime metadata (not episode titles)">Sync animes</button>
-      <button type="button" class="btn-watch btn-sync" id="mal-sync-mangas" title="Update mangalist and clear fulfilled manga requests (not chapter titles)">Sync mangas</button>
-      <button type="button" class="btn-watch btn-sync" id="mal-sync-anime-titles" title="Fetch anime episode titles for available media">Sync anime titles</button>
-      <button type="button" class="btn-watch btn-sync" id="mal-sync-chapter-titles" title="Fetch MangaDex chapter titles for available manga">Sync chapter titles</button>
-      <button type="button" class="btn-detail" id="sync-index-open" title="Manage which titles are skipped on sync">Manage sync index</button>
-      <button type="button" class="btn-detail" id="mal-disconnect">Disconnect</button>
+      <div class="mal-actions-row">
+        <button type="button" class="btn-watch btn-sync" id="mal-sync-animes" title="Update animelist, watch progress, and anime metadata (not episode titles)">{{ _('Sync animes') }}</button>
+        <button type="button" class="btn-watch btn-sync" id="mal-sync-mangas" title="Update mangalist and clear fulfilled manga requests (not chapter titles)">{{ _('Sync mangas') }}</button>
+        <button type="button" class="btn-watch btn-sync" id="mal-sync-anime-titles" title="Fetch anime episode titles for available media">Sync anime titles</button>
+        <button type="button" class="btn-watch btn-sync" id="mal-sync-chapter-titles" title="Fetch MangaDex chapter titles for available manga">Sync chapter titles</button>
+      </div>
+      <div class="mal-actions-row mal-actions-secondary">
+        <button type="button" class="btn-detail" id="sync-index-open" title="Manage which titles are skipped on sync">{{ _('Manage Sync') }}</button>
+        <button type="button" class="btn-detail" id="mal-disconnect">{{ _('Disconnect') }}</button>
+      </div>
     </div>
     {% else %}
     <p>Connect your MyAnimeList account to import your full anime list into the catalog (posters + synopsis).</p>
@@ -111,16 +125,16 @@
     {% if mal_client_hint %}
     <p class="catalog-meta">Client ID in use: <code>{{ mal_client_hint }}</code> — must match apiconfig (32 chars)</p>
     {% endif %}
-    <a class="btn-watch" href="{{ url_for('mal_connect') }}">Connect MyAnimeList</a>
+    <a class="btn-watch" href="{{ url_for('mal_connect') }}">{{ _('Connect MyAnimeList') }}</a>
     <p class="catalog-meta">Login loop? The connect page has a step-by-step fix + manual code paste.</p>
     {% endif %}
   </section>
 
   <section class="catalog-section">
-    <h2>Search AniList (metadata &amp; posters)</h2>
+    <h2>{{ _('Search AniList (metadata & posters)') }}</h2>
     <form id="anilist-search" class="catalog-search">
-      <input type="search" name="q" placeholder="e.g. Frieren, One Piece" minlength="2" required>
-      <button type="submit" class="btn-watch">Search</button>
+      <input type="search" name="q" placeholder="{{ _('e.g. Frieren, One Piece') }}" minlength="2" required>
+      <button type="submit" class="btn-watch">{{ _('Search') }}</button>
     </form>
     <ul id="anilist-results" class="catalog-results"></ul>
   </section>
@@ -143,6 +157,9 @@
       <button type="button" class="sync-index-tab" role="tab" data-section="manga_sync" aria-selected="false">Manga sync</button>
       <button type="button" class="sync-index-tab" role="tab" data-section="chapter_titles" aria-selected="false">Chapter titles</button>
     </nav>
+    <div class="sync-index-actions">
+      <button type="button" class="btn-detail sync-index-toggle-all" id="sync-index-toggle-all" disabled>Check all</button>
+    </div>
     <ul class="sync-index-list" id="sync-index-list" aria-live="polite"></ul>
   </div>
 </div>
@@ -150,6 +167,14 @@
 
 {% block scripts %}
 <script>
+  function removeRequestRow(btn) {
+    const row = btn.closest('.requests-row');
+    const group = btn.closest('.requests-group');
+    if (row) row.remove();
+    if (group && !group.querySelector('.requests-row')) group.remove();
+    if (!document.querySelector('.requests-row')) location.reload();
+  }
+
   document.querySelectorAll('.requests-dismiss').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = btn.dataset.requestId;
@@ -165,11 +190,7 @@
           btn.disabled = false;
           return;
         }
-        const row = btn.closest('.requests-row');
-        const group = btn.closest('.requests-group');
-        if (row) row.remove();
-        if (group && !group.querySelector('.requests-row')) group.remove();
-        if (!document.querySelector('.requests-row')) location.reload();
+        removeRequestRow(btn);
       } catch (_) {
         alert('Could not remove request');
         btn.disabled = false;
@@ -177,7 +198,32 @@
     });
   });
 
-  document.getElementById('anilist-search').addEventListener('submit', async (event) => {
+  document.querySelectorAll('.requests-fulfill').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.requestId;
+      if (!id) return;
+      btn.disabled = true;
+      try {
+        const resp = await fetch('/api/requests/' + encodeURIComponent(id) + '/fulfill', {
+          method: 'POST',
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          alert(data.error || 'Could not fulfill request');
+          btn.disabled = false;
+          return;
+        }
+        removeRequestRow(btn);
+      } catch (_) {
+        alert('Could not fulfill request');
+        btn.disabled = false;
+      }
+    });
+  });
+
+  const anilistForm = document.getElementById('anilist-search');
+  if (anilistForm) {
+  anilistForm.addEventListener('submit', async (event) => {
     event.preventDefault();
     const q = new FormData(event.target).get('q');
     const list = document.getElementById('anilist-results');
@@ -226,17 +272,37 @@
       btn.className = 'btn-watch';
       btn.textContent = 'Add';
       btn.addEventListener('click', async () => {
-        await fetch('{{ url_for("api_catalog_add") }}', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({
-            source: 'anilist',
-            id: 'anilist-' + item.anilist_id,
-            anilist_id: item.anilist_id,
-            title: item.title
-          })
-        });
-        location.reload();
+        btn.disabled = true;
+        try {
+          const resp = await fetch('{{ url_for("api_catalog_add") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              source: 'anilist',
+              id: 'anilist-' + item.anilist_id,
+              anilist_id: item.anilist_id,
+              title: item.title
+            })
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) {
+            alert(data.error || 'Could not add entry');
+            btn.disabled = false;
+            return;
+          }
+          if (data.redirect) {
+            location.href = data.redirect;
+            return;
+          }
+          if (data.id) {
+            location.href = '/show/' + encodeURIComponent(data.id);
+            return;
+          }
+          location.reload();
+        } catch (_) {
+          alert('Could not add entry');
+          btn.disabled = false;
+        }
       });
       li.appendChild(btn);
       list.appendChild(li);
@@ -248,7 +314,7 @@
       list.appendChild(empty);
     }
   });
-
+  }
   const malSyncAnimes = document.getElementById('mal-sync-animes');
   const malSyncMangas = document.getElementById('mal-sync-mangas');
   const malSyncAnimeTitles = document.getElementById('mal-sync-anime-titles');
@@ -407,7 +473,7 @@
   const malDisconnect = document.getElementById('mal-disconnect');
   if (malDisconnect) {
     malDisconnect.addEventListener('click', async () => {
-      if (!confirm('Disconnect MyAnimeList and remove MAL entries from catalog?')) return;
+      if (!confirm('Disconnect MyAnimeList for your account? (Shared catalog stays unchanged.)')) return;
       await fetch('{{ url_for("api_mal_disconnect") }}', { method: 'POST' });
       location.reload();
     });
@@ -419,12 +485,62 @@
   const syncIndexBackdrop = document.getElementById('sync-index-backdrop');
   const syncIndexList = document.getElementById('sync-index-list');
   const syncIndexTabs = document.querySelectorAll('.sync-index-tab');
+  const syncIndexToggleAll = document.getElementById('sync-index-toggle-all');
   let syncIndexSection = 'anime_sync';
 
   const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 
+  const syncIndexCheckboxes = () =>
+    syncIndexList
+      ? Array.from(syncIndexList.querySelectorAll('input[type="checkbox"]'))
+      : [];
+
+  const updateSyncIndexToggleAll = () => {
+    if (!syncIndexToggleAll) return;
+    const boxes = syncIndexCheckboxes();
+    if (!boxes.length) {
+      syncIndexToggleAll.disabled = true;
+      syncIndexToggleAll.textContent = 'Check all';
+      return;
+    }
+    syncIndexToggleAll.disabled = false;
+    const allChecked = boxes.every((cb) => cb.checked);
+    syncIndexToggleAll.textContent = allChecked ? 'Uncheck all' : 'Check all';
+  };
+
+  const persistSyncIndexSkip = async (cb, malId, skip) => {
+    cb.disabled = true;
+    try {
+      const upd = await fetch('/api/sync-index', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken(),
+        },
+        body: JSON.stringify({
+          section: syncIndexSection,
+          mal_id: malId,
+          skip,
+        }),
+      });
+      const payload = await upd.json().catch(() => ({}));
+      if (!upd.ok || !payload.ok) {
+        return { ok: false, error: payload.error || 'Could not update sync index' };
+      }
+      return { ok: true };
+    } catch (_) {
+      return { ok: false, error: 'Could not update sync index' };
+    } finally {
+      cb.disabled = false;
+    }
+  };
+
   const loadSyncIndex = async () => {
     if (!syncIndexList) return;
+    if (syncIndexToggleAll) {
+      syncIndexToggleAll.disabled = true;
+      syncIndexToggleAll.textContent = 'Check all';
+    }
     syncIndexList.innerHTML = '<li class="empty">Loading…</li>';
     try {
       const resp = await fetch('/api/sync-index?section=' + encodeURIComponent(syncIndexSection));
@@ -435,6 +551,7 @@
         err.className = 'empty catalog-error';
         err.textContent = data.error || 'Could not load sync index';
         syncIndexList.appendChild(err);
+        updateSyncIndexToggleAll();
         return;
       }
       (data.entries || []).forEach((row) => {
@@ -461,31 +578,13 @@
         }
         label.appendChild(body);
         cb.addEventListener('change', async () => {
-          cb.disabled = true;
-          try {
-            const upd = await fetch('/api/sync-index', {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-CSRF-Token': csrfToken(),
-              },
-              body: JSON.stringify({
-                section: syncIndexSection,
-                mal_id: row.mal_id,
-                skip: cb.checked,
-              }),
-            });
-            const payload = await upd.json().catch(() => ({}));
-            if (!upd.ok || !payload.ok) {
-              cb.checked = !cb.checked;
-              alert(payload.error || 'Could not update sync index');
-            }
-          } catch (_) {
-            cb.checked = !cb.checked;
-            alert('Could not update sync index');
-          } finally {
-            cb.disabled = false;
+          const prev = !cb.checked;
+          const result = await persistSyncIndexSkip(cb, row.mal_id, cb.checked);
+          if (!result.ok) {
+            cb.checked = prev;
+            alert(result.error);
           }
+          updateSyncIndexToggleAll();
         });
         li.appendChild(label);
         syncIndexList.appendChild(li);
@@ -496,10 +595,32 @@
         empty.textContent = 'No catalog entries for this section.';
         syncIndexList.appendChild(empty);
       }
+      updateSyncIndexToggleAll();
     } catch (_) {
       syncIndexList.innerHTML = '<li class="empty catalog-error">Could not load sync index</li>';
+      updateSyncIndexToggleAll();
     }
   };
+
+  syncIndexToggleAll?.addEventListener('click', async () => {
+    const boxes = syncIndexCheckboxes();
+    if (!boxes.length) return;
+    const next = !boxes.every((cb) => cb.checked);
+    syncIndexToggleAll.disabled = true;
+    const targets = boxes.filter((cb) => cb.checked !== next);
+    const results = await Promise.all(
+      targets.map(async (cb) => {
+        const prev = cb.checked;
+        cb.checked = next;
+        const result = await persistSyncIndexSkip(cb, Number(cb.dataset.malId), next);
+        if (!result.ok) cb.checked = prev;
+        return result;
+      })
+    );
+    const failed = results.find((r) => !r.ok);
+    if (failed) alert(failed.error || 'Could not update sync index');
+    updateSyncIndexToggleAll();
+  });
 
   const openSyncIndex = () => {
     if (!syncIndexModal) return;

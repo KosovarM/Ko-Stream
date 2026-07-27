@@ -112,6 +112,41 @@ def upsert_entry(state: CatalogState, entry: CatalogEntry) -> CatalogState:
     return CatalogState(shows=shows)
 
 
+def find_matching_entry(
+    state: CatalogState,
+    *,
+    entry_id: str | None = None,
+    mal_id: int | None = None,
+    anilist_id: int | None = None,
+) -> CatalogEntry | None:
+    """Find an existing catalog row by id, MAL id, or AniList id (no duplicates)."""
+    if entry_id:
+        found = state.get(entry_id)
+        if found:
+            return found
+    if mal_id is not None:
+        mid = int(mal_id)
+        for entry in state.shows:
+            if entry.mal_id is not None and int(entry.mal_id) == mid:
+                return entry
+            if entry.id == f"mal-{mid}":
+                return entry
+    if anilist_id is not None:
+        aid = int(anilist_id)
+        for entry in state.shows:
+            if entry.anilist_id is not None and int(entry.anilist_id) == aid:
+                return entry
+            if entry.id == f"anilist-{aid}":
+                return entry
+    return None
+
+
+def remove_entry(state: CatalogState, show_id: str) -> CatalogState:
+    """Drop a catalog row by id. Does not touch media files on disk."""
+    shows = [s for s in state.shows if s.id != show_id]
+    return CatalogState(shows=shows)
+
+
 def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 

@@ -40,6 +40,7 @@ class Show:
     anime_status: str | None = None
     list_status: str | None = None
     added_at: str | None = None
+    latest_local_mtime: float | None = None  # max mtime of local video files
     user_score: int | None = None
     mean_score: float | None = None
     related_anime: list[RelatedAnime] = field(default_factory=list)

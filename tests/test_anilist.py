@@ -1,6 +1,6 @@
 from unittest.mock import patch
 
-from kostream.anilist import USER_AGENT, search_anime
+from kostream.anilist import USER_AGENT, fetch_anime_by_mal_id, search_anime
 from kostream.anilist import _post_graphql
 
 
@@ -52,3 +52,40 @@ def test_search_anime_parses_results():
     assert results[0].title == "One Piece"
     assert results[0].anilist_id == 21
     assert results[0].poster_url == "https://example.com/poster.jpg"
+    assert results[0].banner_url == "https://example.com/banner.jpg"
+
+
+def test_fetch_anime_by_mal_id_parses_banner(tmp_path, monkeypatch):
+    monkeypatch.setattr("kostream.anilist.CACHE_DIR", tmp_path)
+    monkeypatch.setattr("kostream.anilist.MAL_INDEX_DIR", tmp_path / "mal")
+    payload = {
+        "data": {
+            "Media": {
+                "id": 16498,
+                "title": {"english": "Attack on Titan", "romaji": "Shingeki no Kyojin"},
+                "description": "Titans.",
+                "genres": ["Action"],
+                "idMal": 16498,
+                "episodes": 25,
+                "coverImage": {
+                    "large": "https://example.com/cover-large.jpg",
+                    "extraLarge": "https://example.com/cover-xl.jpg",
+                },
+                "bannerImage": "https://example.com/wide-banner.jpg",
+            }
+        }
+    }
+    with patch("kostream.anilist._post_graphql", return_value=payload) as post:
+        media = fetch_anime_by_mal_id(16498, network=True)
+        assert post.called
+    assert media is not None
+    assert media.anilist_id == 16498
+    assert media.mal_id == 16498
+    assert media.poster_url == "https://example.com/cover-xl.jpg"
+    assert media.banner_url == "https://example.com/wide-banner.jpg"
+
+    with patch("kostream.anilist._post_graphql") as again:
+        cached = fetch_anime_by_mal_id(16498, network=True)
+        again.assert_not_called()
+    assert cached is not None
+    assert cached.banner_url == "https://example.com/wide-banner.jpg"

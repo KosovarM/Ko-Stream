@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Admin — Users — {{ site_name }}{% endblock %}
+{% block content %}
+<section class="catalog-page admin-users-page">
+  <header class="catalog-header">
+    <h1>Users</h1>
+    <p class="catalog-meta">Create accounts, restrict access, and reset passwords. Only one master is allowed.</p>
+  </header>
+
+  {% if message %}
+  <p class="catalog-success">{{ message }}</p>
+  {% endif %}
+  {% if error %}
+  <p class="catalog-error" role="alert">{{ error }}</p>
+  {% endif %}
+
+  <section class="catalog-section admin-users-create-section">
+    <h2>Create user</h2>
+    <form method="post" action="{{ url_for('admin_users') }}" class="admin-users-create-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label class="admin-users-field">
+        <span class="admin-users-label">Username</span>
+        <input type="text" name="username" required autocomplete="off">
+      </label>
+      <label class="admin-users-field">
+        <span class="admin-users-label">Password</span>
+        <input type="password" name="password" required autocomplete="new-password">
+      </label>
+      <label class="admin-users-field admin-users-field--role">
+        <span class="admin-users-label">Role</span>
+        <select name="role">
+          <option value="user" selected>user</option>
+          <option value="manager">manager</option>
+        </select>
+      </label>
+      <div class="admin-users-create-submit">
+        <button type="submit" class="btn-watch">Create</button>
+      </div>
+    </form>
+  </section>
+
+  <section class="catalog-section">
+    <h2>Accounts</h2>
+    <div class="admin-users-table-wrap">
+      <table class="admin-users-table">
+        <thead>
+          <tr>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Restricted</th>
+            <th>MAL</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in users %}
+          {% set u = row.user %}
+          <tr>
+            <td>{{ u.username }}{% if u.display_name and u.display_name != u.username %} <span class="catalog-meta">({{ u.display_name }})</span>{% endif %}</td>
+            <td>{{ u.role }}</td>
+            <td>{% if u.restricted %}Yes{% else %}No{% endif %}</td>
+            <td>{% if row.mal_connected %}Connected{% else %}—{% endif %}</td>
+            <td class="admin-users-actions">
+              <form method="post" action="{{ url_for('admin_users_reset_password', user_id=u.id) }}" class="admin-users-inline-form admin-users-reset-form">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="password" name="password" placeholder="New password" required autocomplete="new-password">
+                <button type="submit" class="btn-detail">Reset password</button>
+              </form>
+              <span class="admin-users-actions-spacer" aria-hidden="true"></span>
+              {% if u.role != 'master' %}
+                {% if u.restricted %}
+                <form method="post" action="{{ url_for('admin_users_unrestrict', user_id=u.id) }}" class="admin-users-inline-form admin-users-restrict-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button type="submit" class="btn-detail">Unrestrict</button>
+                </form>
+                {% else %}
+                <form method="post" action="{{ url_for('admin_users_restrict', user_id=u.id) }}" class="admin-users-inline-form admin-users-restrict-form">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                  <button type="submit" class="btn-detail">Restrict</button>
+                </form>
+                {% endif %}
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>
+{% endblock %}

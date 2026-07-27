@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import os
 import socket
 import sys
 from typing import Any
 
 from kostream.app import create_app
+from kostream.migrate_accounts import MigrateError, migrate_accounts
+from kostream.users import USERS_FILE, UsersError, bootstrap_master
 
 
 def _is_loopback(host: str) -> bool:
@@ -102,7 +105,7 @@ def _print_listen_banner(host: str, port: int, *, mdns_name: str | None = None) 
     print("  - PC and phone must be on the same Wi-Fi/LAN (not guest/VPN isolation).")
     print("  - Allow TCP port %s in Windows Firewall if the phone cannot connect." % port)
     print("  - Names like KoStream.net need real DNS (Fritzbox/Pi-hole); they are not magic aliases.")
-    print("  - No login yet - only use on a trusted home network.")
+    print("  - Log in is required when accounts exist — bootstrap with: ko-stream accounts bootstrap")
     print()
 
 
@@ -128,7 +131,50 @@ def main(argv: list[str] | None = None) -> int:
         help="LAN hostname label for mDNS / Fritzbox tip (default: kostream → kostream.local).",
     )
 
+    accounts = sub.add_parser("accounts", help="User account management")
+    acc_sub = accounts.add_subparsers(dest="accounts_command", required=True)
+    bootstrap = acc_sub.add_parser("bootstrap", help="Create the master account")
+    bootstrap.add_argument("--username", required=True, help="Master username")
+    bootstrap.add_argument("--password", default=None, help="Master password")
+    bootstrap.add_argument(
+        "--password-env",
+        default=None,
+        help="Environment variable name that holds the master password",
+    )
+    acc_sub.add_parser(
+        "migrate",
+        help="Migrate legacy progress/MAL tokens and split list-state from shared cache",
+    )
+
     args = parser.parse_args(argv)
+    if args.command == "accounts":
+        if args.accounts_command == "bootstrap":
+            password = args.password
+            if args.password_env:
+                password = os.environ.get(args.password_env)
+            if not password:
+                print(
+                    "Password required: use --password or --password-env",
+                    file=sys.stderr,
+                )
+                return 1
+            try:
+                user = bootstrap_master(USERS_FILE, args.username, password)
+            except UsersError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
+            print(f"Master account created: {user.username} ({user.id})")
+            print(f"Users file: {USERS_FILE}")
+            return 0
+        if args.accounts_command == "migrate":
+            try:
+                summary = migrate_accounts()
+            except MigrateError as exc:
+                print(f"Error: {exc}", file=sys.stderr)
+                return 1
+            print(summary.get("message") or "Migration complete.")
+            return 0
+        return 1
     if args.command == "serve":
         host = "0.0.0.0" if args.lan else args.host
         port = args.port

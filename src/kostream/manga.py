@@ -9,8 +9,10 @@ meaningful; otherwise Sync-populated MangaDex titles overlay by chapter number
 
 from __future__ import annotations
 
+import copy
 import os
 import re
+import threading
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass, field
@@ -344,23 +346,7 @@ def _comicinfo_title_from_cbz(path: Path) -> str | None:
             raw = zf.read(comicinfo_name)
     except (OSError, zipfile.BadZipFile, KeyError):
         return None
-    try:
-        text = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        text = raw.decode("utf-8", errors="replace")
-    # Prefer ElementTree; fall back to a light regex for slightly broken XML.
-    try:
-        root = ET.fromstring(text)
-        for el in root.iter():
-            tag = el.tag.rsplit("}", 1)[-1]
-            if tag.casefold() == "title" and (el.text or "").strip():
-                return el.text.strip()
-    except ET.ParseError:
-        m = _COMICINFO_TITLE_RE.search(text)
-        if m:
-            return re.sub(r"\s+", " ", m.group(1)).strip() or None
-    return None
-
+    return _comicinfo_title_from_bytes(raw)
 
 def _is_under(child: Path, root: Path) -> bool:
     try:
@@ -382,39 +368,134 @@ def _list_images_in_dir(folder: Path) -> list[Path]:
 
 
 def _list_images_in_cbz(path: Path) -> list[str]:
+    names, _comic = _read_cbz_listing(path)
+    return names
+
+
+def _read_cbz_listing(path: Path) -> tuple[list[str], str | None]:
+    """Return ``(image names, ComicInfo title)`` from one zip open."""
     names: list[str] = []
-    with zipfile.ZipFile(path, "r") as zf:
-        for info in zf.infolist():
-            if info.is_dir():
+    comic_title: str | None = None
+    try:
+        with zipfile.ZipFile(path, "r") as zf:
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                name = info.filename.replace("\\", "/")
+                if name.startswith("__MACOSX") or "/." in f"/{name}":
+                    continue
+                base = Path(name).name.casefold()
+                if base == "comicinfo.xml" and comic_title is None:
+                    try:
+                        raw = zf.read(info)
+                    except KeyError:
+                        continue
+                    comic_title = _comicinfo_title_from_bytes(raw)
+                    continue
+                suffix = Path(name).suffix.lower()
+                if suffix in IMAGE_EXTENSIONS:
+                    names.append(name)
+    except (OSError, zipfile.BadZipFile):
+        return [], None
+    return sorted(names, key=_natural_key), comic_title
+
+
+def _comicinfo_title_from_bytes(raw: bytes) -> str | None:
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        text = raw.decode("utf-8", errors="replace")
+    try:
+        root = ET.fromstring(text)
+        for el in root.iter():
+            tag = el.tag.rsplit("}", 1)[-1]
+            if tag.casefold() == "title" and (el.text or "").strip():
+                return el.text.strip()
+    except ET.ParseError:
+        m = _COMICINFO_TITLE_RE.search(text)
+        if m:
+            return re.sub(r"\s+", " ", m.group(1)).strip() or None
+    return None
+
+
+
+# Process-level cache: opening every CBZ for page counts / ComicInfo made home
+# and library routes take ~60s with large local libraries. Scan only lists files;
+# page counts resolve lazily when a chapter is opened.
+_SCAN_CACHE_LOCK = threading.Lock()
+_SCAN_CACHE: dict[str, tuple[tuple, list[MangaTitle]]] = {}
+
+
+def _library_signature(base: Path) -> tuple:
+    """Fingerprint title dirs / chapter files via name+mtime+size (no zip I/O)."""
+    parts: list[tuple] = []
+    try:
+        entries = sorted(base.iterdir(), key=lambda p: p.name.casefold())
+    except OSError:
+        return ()
+    for entry in entries:
+        try:
+            st = entry.stat()
+        except OSError:
+            continue
+        if entry.is_file():
+            if entry.suffix.lower() in CBZ_EXTENSIONS:
+                parts.append(("file", entry.name, st.st_mtime_ns, st.st_size))
+            continue
+        if not entry.is_dir() or entry.name.startswith("."):
+            continue
+        parts.append(("dir", entry.name, st.st_mtime_ns, st.st_size))
+        try:
+            children = sorted(entry.iterdir(), key=lambda p: p.name.casefold())
+        except OSError:
+            continue
+        for child in children:
+            try:
+                cst = child.stat()
+            except OSError:
                 continue
-            name = info.filename.replace("\\", "/")
-            if name.startswith("__MACOSX") or "/." in f"/{name}":
-                continue
-            suffix = Path(name).suffix.lower()
-            if suffix in IMAGE_EXTENSIONS:
-                names.append(name)
-    return sorted(names, key=_natural_key)
+            if child.is_file() and child.suffix.lower() in CBZ_EXTENSIONS:
+                parts.append(("cbz", entry.name, child.name, cst.st_mtime_ns, cst.st_size))
+            elif child.is_dir() and not child.name.startswith("."):
+                parts.append(("subdir", entry.name, child.name, cst.st_mtime_ns, cst.st_size))
+            elif child.is_file() and child.suffix.lower() in IMAGE_EXTENSIONS:
+                parts.append(("img", entry.name, child.name, cst.st_mtime_ns, cst.st_size))
+    return tuple(parts)
+
+
+def clear_manga_scan_cache() -> None:
+    """Drop cached scan results (tests / after external library edits)."""
+    with _SCAN_CACHE_LOCK:
+        _SCAN_CACHE.clear()
 
 
 def scan_manga_library(root: Path | None = None) -> list[MangaTitle]:
+    """Scan local manga root for title folders and loose CBZ files.
+
+    CBZ archives are listed by filename only — page counts and ComicInfo titles
+    are resolved lazily via ``enrich_manga_chapter`` / ``list_page_refs``.
+    """
     base = (root or MANGA_ROOT).resolve()
     if not base.is_dir():
         return []
 
+    cache_key = str(base)
+    signature = _library_signature(base)
+    with _SCAN_CACHE_LOCK:
+        cached = _SCAN_CACHE.get(cache_key)
+        if cached and cached[0] == signature:
+            return copy.deepcopy(cached[1])
+
     titles: list[MangaTitle] = []
 
-    # Loose CBZ at manga root → one title each
+    # Loose CBZ at manga root → one title each (no zip open during scan)
     for path in sorted(base.iterdir(), key=lambda p: _natural_key(p.name)):
         if path.is_file() and path.suffix.lower() in CBZ_EXTENSIONS:
-            pages = _list_images_in_cbz(path)
-            if not pages:
-                continue
             title_id = f"file-{_slugify(path.stem)}"
-            comic_title = _comicinfo_title_from_cbz(path)
             chapter = MangaChapter(
                 id="main",
-                title=chapter_display_title(path.name, comic_title=comic_title),
-                page_count=len(pages),
+                title=chapter_display_title(path.name),
+                page_count=0,
                 kind="cbz",
                 relative=path.name,
             )
@@ -446,15 +527,49 @@ def scan_manga_library(root: Path | None = None) -> list[MangaTitle]:
         )
 
     titles.sort(key=lambda t: t.title.casefold())
-    return titles
+    with _SCAN_CACHE_LOCK:
+        _SCAN_CACHE[cache_key] = (signature, copy.deepcopy(titles))
+    return copy.deepcopy(titles)
+
+
+def enrich_manga_chapter(
+    root: Path,
+    manga: MangaTitle,
+    chapter: MangaChapter,
+) -> tuple[MangaChapter, list[str]]:
+    """Fill CBZ page_count / ComicInfo title; return ``(chapter, image names)``."""
+    if chapter.kind != "cbz":
+        return chapter, []
+
+    title_path = resolve_title_path(root, manga)
+    cbz_path = title_path if title_path.is_file() else (title_path / chapter.relative)
+    cbz_path = cbz_path.resolve()
+    if not _is_under(cbz_path, root.resolve()):
+        raise MangaError("CBZ escapes manga root")
+
+    if chapter.page_count > 0 and local_chapter_title_is_meaningful(chapter.title):
+        return chapter, _list_images_in_cbz(cbz_path)
+
+    pages, comic_title = _read_cbz_listing(cbz_path)
+    enriched = MangaChapter(
+        id=chapter.id,
+        title=chapter_display_title(chapter.relative or cbz_path.name, comic_title=comic_title),
+        page_count=len(pages),
+        kind=chapter.kind,
+        relative=chapter.relative,
+    )
+    manga.chapters = [enriched if c.id == chapter.id else c for c in manga.chapters]
+    return enriched, pages
 
 
 def load_manga_library(
     root: Path | None = None,
     catalog_path: Path | None = None,
+    *,
+    user_id: str | None = None,
 ) -> list[MangaTitle]:
     """Merge MAL manga catalog with local media/manga folders."""
-    from kostream.mal import load_cached_manga
+    from kostream.mal import load_cached_manga, load_manga_list_state
     from kostream.manga_catalog import load_manga_catalog
 
     base = (root or MANGA_ROOT).resolve()
@@ -466,11 +581,18 @@ def load_manga_library(
     if not enabled_mal:
         return local
 
+    # Load list state once instead of re-reading the JSON per catalog title.
+    list_state = load_manga_list_state(user_id) if user_id else {}
+
     claimed_folders: set[str] = set()
     merged: list[MangaTitle] = []
 
     for entry in enabled_mal:
         cached = load_cached_manga(entry.mal_id) if entry.mal_id else None
+        list_row = None
+        if user_id and entry.mal_id:
+            raw = list_state.get(str(int(entry.mal_id)))
+            list_row = dict(raw) if isinstance(raw, dict) else None
         local_title = None
         folder = entry.folder
         if folder and folder in local_by_folder:
@@ -494,7 +616,12 @@ def load_manga_library(
             or (local_title.title if local_title else None)
             or entry.id
         )
-        status = cached.list_status if cached else None
+        status = (list_row or {}).get("list_status") if list_row else None
+        if status is None:
+            status = cached.list_status if cached else None
+        chapters_read = int((list_row or {}).get("num_chapters_read") or 0) if list_row else (
+            cached.num_chapters_read if cached else 0
+        )
         chapters = list(local_title.chapters) if local_title else []
         if chapters and entry.mal_id:
             from kostream.mangadex import load_cached_chapter_titles
@@ -502,8 +629,17 @@ def load_manga_library(
             chapters = apply_mangadex_chapter_titles(
                 chapters, load_cached_chapter_titles(entry.mal_id)
             )
-        # Prefer MAL poster over first page (often credits/scan pages)
-        poster = cached.poster_url if cached else None
+        # Prefer local Thumbnail cache, then MAL CDN, then first page
+        poster = None
+        if entry.mal_id:
+            try:
+                from kostream.thumbnails import thumbnail_public_url
+
+                poster = thumbnail_public_url("manga", int(entry.mal_id))
+            except (OSError, TypeError, ValueError):
+                poster = None
+        if not poster:
+            poster = cached.poster_url if cached else None
         cover = None if poster else (local_title.cover_chapter_id if local_title else None)
         media_type = (
             (cached.media_type if cached else None)
@@ -522,7 +658,7 @@ def load_manga_library(
                 mal_id=entry.mal_id,
                 list_status=status,
                 num_chapters_mal=cached.num_chapters if cached else 0,
-                num_chapters_read=cached.num_chapters_read if cached else 0,
+                num_chapters_read=chapters_read,
                 manga_status=cached.manga_status if cached else None,
                 synopsis=(cached.synopsis[:400] if cached and cached.synopsis else ""),
                 source="mal",
@@ -605,19 +741,15 @@ def _scan_title_folder(folder: Path) -> list[MangaChapter]:
             )
         )
 
-    # CBZ inside title folder
+    # CBZ inside title folder — list only; open zip lazily when reading
     for path in sorted(folder.iterdir(), key=lambda p: _natural_key(p.name)):
         if not path.is_file() or path.suffix.lower() not in CBZ_EXTENSIONS:
             continue
-        pages = _list_images_in_cbz(path)
-        if not pages:
-            continue
-        comic_title = _comicinfo_title_from_cbz(path)
         chapters.append(
             MangaChapter(
                 id=f"cbz-{_slugify(path.stem)}",
-                title=chapter_display_title(path.name, comic_title=comic_title),
-                page_count=len(pages),
+                title=chapter_display_title(path.name),
+                page_count=0,
                 kind="cbz",
                 relative=path.name,
             )
@@ -628,15 +760,65 @@ def _scan_title_folder(folder: Path) -> list[MangaChapter]:
     return chapters
 
 
+def find_manga_in_library(
+    titles: list[MangaTitle],
+    *,
+    manga_id: str | None = None,
+    mal_id: int | None = None,
+    title: str | None = None,
+) -> MangaTitle | None:
+    """Locate a library title by id, MAL id, legacy local id, or title.
+
+    After MAL catalog merge, local ``dir-*`` / ``file-*`` ids are replaced by
+    ``mal-manga-*``; recommendations may still store the old id.
+    """
+    mid = (manga_id or "").strip()
+    if mid:
+        for entry in titles:
+            if entry.id == mid:
+                return entry
+
+    if mal_id is not None:
+        try:
+            mid_i = int(mal_id)
+        except (TypeError, ValueError):
+            mid_i = None
+        if mid_i is not None:
+            for entry in titles:
+                if entry.mal_id == mid_i:
+                    return entry
+
+    if mid.startswith("dir-") or mid.startswith("file-"):
+        for entry in titles:
+            folder = (entry.folder or "").strip()
+            if not folder:
+                continue
+            folder_name = Path(folder).name
+            stem = Path(folder).stem
+            if mid == f"dir-{_slugify(folder)}" or mid == f"dir-{_slugify(folder_name)}":
+                return entry
+            if mid == f"file-{_slugify(stem)}":
+                return entry
+
+    name = (title or "").strip().casefold()
+    if name:
+        for entry in titles:
+            if entry.title.casefold() == name:
+                return entry
+            if (entry.folder or "").casefold() == name:
+                return entry
+    return None
+
+
 def get_manga(
     manga_id: str,
     root: Path | None = None,
     catalog_path: Path | None = None,
 ) -> MangaTitle | None:
-    for title in load_manga_library(root, catalog_path):
-        if title.id == manga_id:
-            return title
-    return None
+    return find_manga_in_library(
+        load_manga_library(root, catalog_path),
+        manga_id=manga_id,
+    )
 
 
 def get_chapter(manga: MangaTitle, chapter_id: str) -> MangaChapter | None:
@@ -678,11 +860,7 @@ def list_page_refs(root: Path, manga: MangaTitle, chapter: MangaChapter) -> list
         return pages
 
     if chapter.kind == "cbz":
-        cbz_path = title_path if title_path.is_file() else (title_path / chapter.relative)
-        cbz_path = cbz_path.resolve()
-        if not _is_under(cbz_path, root.resolve()):
-            raise MangaError("CBZ escapes manga root")
-        names = _list_images_in_cbz(cbz_path)
+        chapter, names = enrich_manga_chapter(root, manga, chapter)
         for i, _name in enumerate(names):
             pages.append({"index": i, "url": f"/manga-page/{manga.id}/{chapter.id}/{i}"})
         return pages
@@ -707,18 +885,20 @@ def read_page_bytes(root: Path, manga: MangaTitle, chapter: MangaChapter, index:
         return path.read_bytes(), mime
 
     if chapter.kind == "cbz":
+        chapter, names = enrich_manga_chapter(root, manga, chapter)
+        if index < 0 or index >= len(names):
+            raise MangaError("Page out of range")
+        name = names[index]
         cbz_path = title_path if title_path.is_file() else (title_path / chapter.relative)
         cbz_path = cbz_path.resolve()
         if not _is_under(cbz_path, root.resolve()):
             raise MangaError("CBZ escapes manga root")
-        names = _list_images_in_cbz(cbz_path)
-        if index < 0 or index >= len(names):
-            raise MangaError("Page out of range")
-        name = names[index]
         with zipfile.ZipFile(cbz_path, "r") as zf:
             data = zf.read(name)
         mime = _mime_for_suffix(Path(name).suffix.lower())
         return data, mime
+
+    raise MangaError(f"Unknown chapter kind: {chapter.kind}")
 
     raise MangaError(f"Unknown chapter kind: {chapter.kind}")
 

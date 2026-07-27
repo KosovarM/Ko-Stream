@@ -25,6 +25,7 @@ MANGA_MAP: dict[str, tuple[str, str | None]] = {
     "Fire_Punch": ("Fire Punch", "mal-manga-98270"),
     "Mieruko_chan": ("Mieruko-chan", "mal-manga-116790"),
     "Overgeared": ("Overgeared", "mal-manga-147727"),
+    "overgeared": ("Overgeared", "mal-manga-147727"),
     "Re_Zero_kara_Hajimeru_Isekai_Seikatsu___Daisshou___Outo_no_Ichinichi_Hen": (
         "Re Zero Daisshou Outo no Ichinichi Hen",
         None,

@@ -64,5 +64,6 @@ Sync also refreshes your mangalist and (for anime) batches **episode titles** fr
 
 ## Security
 
-- Tokens stored locally in `data/mal/tokens.json` (gitignored)
+- Tokens stored per logged-in user in `data/mal/users/<user_id>/tokens.json` (gitignored)
 - Never commit Client Secret or tokens
+- Shared catalog/cache stay global; connect/disconnect only affects that user's tokens

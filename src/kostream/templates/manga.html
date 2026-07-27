@@ -24,26 +24,26 @@
   {% if titles %}
   <div class="manga-filters">
     <div class="manga-filter-group">
-      <span class="manga-filter-label" id="manga-status-label">Status</span>
+      <span class="manga-filter-label" id="manga-status-label">{{ _('Status') }}</span>
       <div class="manga-tabs" role="tablist" aria-labelledby="manga-status-label">
-        <button type="button" class="manga-tab{% if active_tab == 'reading' %} is-active{% endif %}" data-manga-tab="reading" role="tab" aria-selected="{{ 'true' if active_tab == 'reading' else 'false' }}">Reading</button>
-        <button type="button" class="manga-tab{% if active_tab == 'completed' %} is-active{% endif %}" data-manga-tab="completed" role="tab" aria-selected="{{ 'true' if active_tab == 'completed' else 'false' }}">Completed</button>
-        <button type="button" class="manga-tab{% if active_tab == 'new' %} is-active{% endif %}" data-manga-tab="new" role="tab" aria-selected="{{ 'true' if active_tab == 'new' else 'false' }}">New</button>
+        <button type="button" class="manga-tab{% if active_tab == 'reading' %} is-active{% endif %}" data-manga-tab="reading" role="tab" aria-selected="{{ 'true' if active_tab == 'reading' else 'false' }}">{{ _('Reading') }}</button>
+        <button type="button" class="manga-tab{% if active_tab == 'completed' %} is-active{% endif %}" data-manga-tab="completed" role="tab" aria-selected="{{ 'true' if active_tab == 'completed' else 'false' }}">{{ _('Completed') }}</button>
+        <button type="button" class="manga-tab{% if active_tab == 'new' %} is-active{% endif %}" data-manga-tab="new" role="tab" aria-selected="{{ 'true' if active_tab == 'new' else 'false' }}">{{ _('New') }}</button>
       </div>
     </div>
     <div class="manga-filter-row">
       <div class="manga-filter-group">
-        <span class="manga-filter-label" id="manga-avail-label">Availability</span>
+        <span class="manga-filter-label" id="manga-avail-label">{{ _('Availability') }}</span>
         <div class="manga-tabs manga-avail-tabs" role="tablist" aria-labelledby="manga-avail-label">
-          <button type="button" class="manga-tab{% if selected_avail != 'local' %} is-active{% endif %}" data-manga-avail="all" role="tab" aria-selected="{{ 'false' if selected_avail == 'local' else 'true' }}">All titles</button>
-          <button type="button" class="manga-tab{% if selected_avail == 'local' %} is-active{% endif %}" data-manga-avail="local" role="tab" aria-selected="{{ 'true' if selected_avail == 'local' else 'false' }}">Available chapters</button>
+          <button type="button" class="manga-tab{% if selected_avail != 'local' %} is-active{% endif %}" data-manga-avail="all" role="tab" aria-selected="{{ 'false' if selected_avail == 'local' else 'true' }}">{{ _('All titles') }}</button>
+          <button type="button" class="manga-tab{% if selected_avail == 'local' %} is-active{% endif %}" data-manga-avail="local" role="tab" aria-selected="{{ 'true' if selected_avail == 'local' else 'false' }}">{{ _('Available chapters') }}</button>
         </div>
       </div>
       {% if genres %}
       <label class="manga-genre-filter" for="manga-genre">
-        <span class="manga-filter-label">Genre</span>
-        <select id="manga-genre" class="manga-genre-select" data-manga-genre aria-label="Filter by genre">
-          <option value="" {% if not selected_genre %}selected{% endif %}>All genres</option>
+        <span class="manga-filter-label">{{ _('Genre') }}</span>
+        <select id="manga-genre" class="manga-genre-select" data-manga-genre aria-label="{{ _('Filter by genre') }}">
+          <option value="" {% if not selected_genre %}selected{% endif %}>{{ _('All genres') }}</option>
           {% for g in genres %}
           <option value="{{ g }}" {% if g == selected_genre %}selected{% endif %}>{{ g }}</option>
           {% endfor %}
@@ -80,9 +80,9 @@
         data-open-overview
         data-manga-id="{{ m.id }}"
         data-manga-title="{{ m.title }}"
-        data-poster="{{ m.poster_url or '' }}"
+        data-poster="{% if m.poster_url %}{{ m.poster_url }}{% elif m.cover_chapter_id %}{{ url_for('manga_page_image', manga_id=m.id, chapter_id=m.cover_chapter_id, page_index=0) }}{% endif %}"
         data-status="{{ status }}"
-        data-meta="{% if m.has_local %}{{ m.chapter_count }} ch · {{ m.page_count }} pages{% elif m.num_chapters_mal %}MAL · {{ m.num_chapters_mal }} ch{% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %}{% else %}MAL{% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %} · no available files{% endif %}"
+        data-meta="{% if m.has_local %}{{ m.chapter_count }} ch{% if m.page_count %} · {{ m.page_count }} pages{% endif %}{% elif m.num_chapters_mal %}MAL · {{ m.num_chapters_mal }} ch{% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %}{% else %}MAL{% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %} · no available files{% endif %}"
         data-synopsis="{{ m.synopsis or '' }}"
         data-genres="{{ (m.genres or []) | join('|') }}"
         data-release-year="{{ m.release_year or '' }}"
@@ -96,6 +96,8 @@
         data-kind="{{ library_kind }}"
         data-mal-id="{{ m.mal_id or '' }}"
         data-resume-chapter="{% if manga_page_progress is defined and manga_page_progress.get(m.id) %}{{ manga_page_progress[m.id].get('last_chapter_id') or '' }}{% endif %}"
+        data-user-recommended="{% if user_recommended_manga_ids is defined and m.id in user_recommended_manga_ids %}1{% else %}0{% endif %}"
+        data-recommend-blocked="{% if recommend_blocked_manga_ids is defined and m.id in recommend_blocked_manga_ids %}1{% else %}0{% endif %}"
         aria-label="Open {{ m.title }}"
       >
         <span class="manga-card-cover" aria-hidden="true">
@@ -115,7 +117,7 @@
           <span class="manga-card-title">{{ m.title }}</span>
           <span class="manga-card-meta">
             {% if m.has_local %}
-              {{ m.chapter_count }} ch · {{ m.page_count }} pages
+              {{ m.chapter_count }} ch{% if m.page_count %} · {{ m.page_count }} pages{% endif %}
             {% elif m.num_chapters_mal %}
               MAL · {{ m.num_chapters_mal }} ch
               {% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %}
@@ -157,15 +159,22 @@
         <p id="overview-synopsis" class="manga-overview-synopsis"></p>
         <div class="manga-overview-actions">
           <button type="button" class="btn-watch manga-overview-continue" id="overview-continue" hidden>
-            Continue
+            {{ _('Continue') }}
           </button>
           <button type="button" class="btn-detail manga-overview-complete-all" id="overview-complete-all" hidden
             title="{% if mal_connected %}Mark the whole title completed and sync to MAL{% else %}Mark the whole title as completed{% endif %}">
             Mark title completed{% if mal_connected %} on MAL{% endif %}
           </button>
-          <button type="button" class="btn-detail btn-request" id="overview-request" hidden>
-            Request missing
+          <button type="button" class="btn-detail btn-request" id="overview-request" hidden
+            data-label-request="{{ _('Request missing') }}"
+            data-label-requested="{{ _('Requested') }}">
+            {{ _('Request missing') }}
           </button>
+          <button type="button" class="btn-detail btn-recommend" id="overview-recommend" hidden
+            title="Recommend to family" aria-label="Recommend to family">
+            ↻ Recommend
+          </button>
+          <p id="recommend-blocked-hint" class="recommend-blocked-hint" hidden></p>
           <p id="overview-action-status" class="manga-overview-action-status" hidden></p>
         </div>
       </div>
@@ -194,6 +203,18 @@
       </div>
       <ul id="overview-chapters" class="manga-overview-chapters"></ul>
       <p id="overview-empty" class="manga-overview-empty" hidden>No available chapters yet — add CBZ/images under media/manga.</p>
+    </div>
+  </div>
+</div>
+
+<div id="recommend-swap-modal" class="recommend-swap" hidden aria-hidden="true">
+  <div class="recommend-swap-backdrop" data-recommend-close></div>
+  <div class="recommend-swap-panel" role="dialog" aria-modal="true" aria-labelledby="recommend-swap-title">
+    <h2 id="recommend-swap-title" class="recommend-swap-heading">Replace recommendation?</h2>
+    <p id="recommend-swap-body" class="recommend-swap-body"></p>
+    <div class="recommend-swap-actions">
+      <button type="button" class="btn-detail" data-recommend-close>Cancel</button>
+      <button type="button" class="btn-watch" id="recommend-swap-confirm">Replace</button>
     </div>
   </div>
 </div>
@@ -251,9 +272,18 @@
   const overviewCompleteAll = document.getElementById('overview-complete-all');
   const overviewContinue = document.getElementById('overview-continue');
   const overviewRequest = document.getElementById('overview-request');
+  const overviewRecommend = document.getElementById('overview-recommend');
   const overviewActionStatus = document.getElementById('overview-action-status');
+  const recommendBlockedHint = document.getElementById('recommend-blocked-hint');
   const libraryKind = {{ library_kind | tojson }};
   const requestsCreateUrl = {{ url_for('api_requests_create') | tojson }};
+  const recommendationsUrl = {{ url_for('api_recommendations_set') | tojson }};
+  const recommendClearBase = {{ url_for('api_recommendations_clear', kind='KIND') | tojson }};
+  const recommendBlockedReason = {{ (recommend_blocked_reason or 'Everyone has already completed this.') | tojson }};
+  const recommendModal = document.getElementById('recommend-swap-modal');
+  const recommendBody = document.getElementById('recommend-swap-body');
+  const recommendConfirm = document.getElementById('recommend-swap-confirm');
+  let pendingRecommendPayload = null;
   const overviewTitle = document.getElementById('overview-title');
   const overviewMeta = document.getElementById('overview-meta');
   const overviewTags = document.getElementById('overview-tags');
@@ -845,7 +875,9 @@
           b.querySelector('.manga-overview-ch-num').textContent = numLabel;
         }
         b.querySelector('.manga-overview-ch-title').textContent = nameLabel;
-        b.querySelector('.manga-overview-ch-pages').textContent = ch.page_count + ' pages';
+        b.querySelector('.manga-overview-ch-pages').textContent = ch.page_count
+          ? (ch.page_count + ' pages')
+          : '';
         if (showResume) {
           b.querySelector('.manga-overview-ch-resume').textContent =
             'p. ' + (ch.page_index + 1) + '/' + (ch.page_count || '?');
@@ -897,7 +929,9 @@
       overviewRequest.hidden = !showBtn;
       overviewRequest.disabled = !showBtn || already;
       overviewRequest.classList.toggle('is-requested', already);
-      overviewRequest.textContent = already ? 'Requested' : 'Request missing';
+      overviewRequest.textContent = already
+        ? (overviewRequest.dataset.labelRequested || 'Requested')
+        : (overviewRequest.dataset.labelRequest || 'Request missing');
       if (already) {
         overviewRequest.setAttribute('aria-disabled', 'true');
       } else {
@@ -911,6 +945,18 @@
       overviewRequest.dataset.localCount = btn.dataset.localCount || '0';
       overviewRequest.dataset.expectedCount = btn.dataset.expectedCount || '0';
       overviewRequest.dataset.typeLabel = (btn.dataset.kind || libraryKind || 'manga') === 'manhwa' ? 'Manhwa' : 'Manga';
+    }
+
+    if (overviewRecommend) {
+      overviewRecommend.hidden = false;
+      overviewRecommend.dataset.mangaId = mid;
+      overviewRecommend.dataset.kind = btn.dataset.kind || libraryKind || 'manga';
+      overviewRecommend.dataset.title = title;
+      overviewRecommend.dataset.posterUrl = btn.dataset.poster || '';
+      overviewRecommend.dataset.malId = btn.dataset.malId || '';
+      overviewRecommend.dataset.recommended = btn.dataset.userRecommended === '1' ? '1' : '0';
+      overviewRecommend.dataset.blocked = btn.dataset.recommendBlocked === '1' ? '1' : '0';
+      syncOverviewRecommendUi();
     }
 
     overview.hidden = false;
@@ -1069,6 +1115,197 @@
       setOverviewStatus('Could not save request', true);
       overviewRequest.disabled = false;
     }
+  });
+
+  function closeRecommendModal() {
+    if (!recommendModal) return;
+    recommendModal.hidden = true;
+    recommendModal.setAttribute('aria-hidden', 'true');
+    pendingRecommendPayload = null;
+  }
+
+  function openRecommendModal(currentTitle, newTitle) {
+    if (!recommendModal || !recommendBody) return;
+    recommendBody.textContent =
+      'You already recommend “' + (currentTitle || 'another title') +
+      '” in this category. Replace it with “' + (newTitle || 'this title') + '”?';
+    recommendModal.hidden = false;
+    recommendModal.setAttribute('aria-hidden', 'false');
+  }
+
+  function recommendClearUrl(kind) {
+    return recommendClearBase.replace('KIND', encodeURIComponent(kind || libraryKind || 'manga'));
+  }
+
+  function syncOverviewRecommendUi() {
+    if (!overviewRecommend) return;
+    const own = overviewRecommend.dataset.recommended === '1';
+    const blocked = overviewRecommend.dataset.blocked === '1';
+    overviewRecommend.classList.toggle('is-recommended', own);
+    overviewRecommend.classList.toggle('is-recommend-blocked', blocked && !own);
+    if (own) {
+      overviewRecommend.textContent = 'Remove recommendation';
+      overviewRecommend.disabled = false;
+      overviewRecommend.removeAttribute('aria-disabled');
+      overviewRecommend.title = 'Remove your recommendation';
+      overviewRecommend.setAttribute('aria-label', 'Remove recommendation');
+      if (recommendBlockedHint) {
+        recommendBlockedHint.hidden = true;
+        recommendBlockedHint.textContent = '';
+      }
+      return;
+    }
+    overviewRecommend.textContent = '↻ Recommend';
+    if (blocked) {
+      overviewRecommend.disabled = true;
+      overviewRecommend.setAttribute('aria-disabled', 'true');
+      overviewRecommend.title = recommendBlockedReason;
+      overviewRecommend.setAttribute('aria-label', recommendBlockedReason);
+      if (recommendBlockedHint) {
+        recommendBlockedHint.hidden = false;
+        recommendBlockedHint.textContent = recommendBlockedReason;
+      }
+    } else {
+      overviewRecommend.disabled = false;
+      overviewRecommend.removeAttribute('aria-disabled');
+      overviewRecommend.title = 'Recommend to family';
+      overviewRecommend.setAttribute('aria-label', 'Recommend to family');
+      if (recommendBlockedHint) {
+        recommendBlockedHint.hidden = true;
+        recommendBlockedHint.textContent = '';
+      }
+    }
+  }
+
+  function markCardRecommendState(mid, {recommended, blocked}) {
+    const cardBtn = document.querySelector(`[data-open-overview][data-manga-id="${CSS.escape(mid)}"]`);
+    if (!cardBtn) return;
+    if (recommended != null) cardBtn.dataset.userRecommended = recommended ? '1' : '0';
+    if (blocked != null) cardBtn.dataset.recommendBlocked = blocked ? '1' : '0';
+  }
+
+  async function postRecommendation(payload) {
+    const resp = await fetch(recommendationsUrl, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    return {resp, data};
+  }
+
+  async function clearRecommendation(kind) {
+    const resp = await fetch(recommendClearUrl(kind), {method: 'DELETE'});
+    const data = await resp.json().catch(() => ({}));
+    return {resp, data};
+  }
+
+  overviewRecommend?.addEventListener('click', async () => {
+    if (overviewRecommend.disabled && overviewRecommend.dataset.recommended !== '1') return;
+    const mid = overviewRecommend.dataset.mangaId || activeMangaId;
+    if (!mid) return;
+    const kind = overviewRecommend.dataset.kind || libraryKind || 'manga';
+
+    if (overviewRecommend.dataset.recommended === '1') {
+      overviewRecommend.disabled = true;
+      try {
+        const {resp, data} = await clearRecommendation(kind);
+        if (!resp.ok || !data.ok) {
+          setOverviewStatus(data.error || 'Could not remove recommendation', true);
+          overviewRecommend.disabled = false;
+          return;
+        }
+        overviewRecommend.dataset.recommended = '0';
+        markCardRecommendState(mid, {recommended: false});
+        // Clear recommended flag on other cards that shared this kind slot.
+        document.querySelectorAll('[data-open-overview][data-user-recommended="1"]').forEach((btn) => {
+          if ((btn.dataset.kind || libraryKind) === kind) {
+            btn.dataset.userRecommended = '0';
+          }
+        });
+        syncOverviewRecommendUi();
+        setOverviewStatus('Recommendation removed', false);
+      } catch (_) {
+        setOverviewStatus('Could not remove recommendation', true);
+        overviewRecommend.disabled = false;
+      }
+      return;
+    }
+
+    const malId = overviewRecommend.dataset.malId;
+    const payload = {
+      kind,
+      manga_id: mid,
+      title: overviewRecommend.dataset.title || activeMangaTitle || mid,
+      poster_url: overviewRecommend.dataset.posterUrl || null,
+    };
+    if (malId) payload.mal_id = Number(malId);
+    overviewRecommend.disabled = true;
+    try {
+      const {resp, data} = await postRecommendation(payload);
+      if (resp.status === 409 && data.needs_swap) {
+        pendingRecommendPayload = Object.assign({}, payload, {replace: true});
+        openRecommendModal((data.current && data.current.title) || '', payload.title);
+        overviewRecommend.disabled = false;
+        return;
+      }
+      if (!resp.ok || !data.ok) {
+        setOverviewStatus(data.error || 'Could not save recommendation', true);
+        syncOverviewRecommendUi();
+        return;
+      }
+      document.querySelectorAll('[data-open-overview][data-user-recommended="1"]').forEach((btn) => {
+        if ((btn.dataset.kind || libraryKind) === kind) {
+          btn.dataset.userRecommended = '0';
+        }
+      });
+      overviewRecommend.dataset.recommended = '1';
+      markCardRecommendState(mid, {recommended: true});
+      syncOverviewRecommendUi();
+      setOverviewStatus(data.swapped ? 'Recommendation replaced' : 'Recommended to family', false);
+    } catch (_) {
+      setOverviewStatus('Could not save recommendation', true);
+      syncOverviewRecommendUi();
+    }
+  });
+
+  recommendConfirm?.addEventListener('click', async () => {
+    if (!pendingRecommendPayload) return;
+    const payload = pendingRecommendPayload;
+    recommendConfirm.disabled = true;
+    try {
+      const {resp, data} = await postRecommendation(payload);
+      if (!resp.ok || !data.ok) {
+        setOverviewStatus(data.error || 'Could not replace recommendation', true);
+        recommendConfirm.disabled = false;
+        return;
+      }
+      closeRecommendModal();
+      const mid = payload.manga_id;
+      const kind = payload.kind || libraryKind || 'manga';
+      document.querySelectorAll('[data-open-overview][data-user-recommended="1"]').forEach((btn) => {
+        if ((btn.dataset.kind || libraryKind) === kind) {
+          btn.dataset.userRecommended = '0';
+        }
+      });
+      if (overviewRecommend) {
+        overviewRecommend.dataset.recommended = '1';
+        if (mid) markCardRecommendState(mid, {recommended: true});
+        syncOverviewRecommendUi();
+      }
+      setOverviewStatus('Recommendation replaced', false);
+    } catch (_) {
+      setOverviewStatus('Could not replace recommendation', true);
+      recommendConfirm.disabled = false;
+    }
+  });
+
+  recommendModal?.querySelectorAll('[data-recommend-close]').forEach((el) => {
+    el.addEventListener('click', () => {
+      closeRecommendModal();
+      if (overviewRecommend) syncOverviewRecommendUi();
+      if (recommendConfirm) recommendConfirm.disabled = false;
+    });
   });
 
   overlay?.querySelectorAll('[data-reader-close]').forEach((el) => {

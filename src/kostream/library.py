@@ -15,7 +15,7 @@ from kostream.models import (
     slugify,
 )
 from kostream.jellyfin import JellyfinConfig, fetch_shows as jellyfin_fetch_shows
-from kostream.mal import load_cached_anime
+from kostream.mal import apply_list_row_to_anime, get_anime_list_row, load_cached_anime
 from kostream.watch_progress import apply_mal_metadata
 
 _REPO_MEDIA_SHOWS = Path(__file__).resolve().parents[2] / "media" / "shows"
@@ -48,14 +48,34 @@ SEASON_LABEL_PATTERN = re.compile(
 )
 
 
-def scan_library(root: Path | None = None, catalog_path: Path | None = None) -> list[Show]:
+def scan_library(
+    root: Path | None = None,
+    catalog_path: Path | None = None,
+    *,
+    user_id: str | None = None,
+) -> list[Show]:
     """Load only catalog-selected shows when data/catalog/selected.json exists."""
     base = root or MEDIA_ROOT
     catalog = load_catalog(catalog_path)
     enabled = catalog.enabled
 
     if enabled:
-        shows = [_build_show_from_entry(entry, base) for entry in enabled]
+        list_state: dict = {}
+        if user_id:
+            from kostream.mal import load_anime_list_state
+
+            list_state = load_anime_list_state(user_id)
+
+        def _row_for(entry: CatalogEntry):
+            if not entry.mal_id:
+                return None
+            raw = list_state.get(str(int(entry.mal_id)))
+            return dict(raw) if isinstance(raw, dict) else None
+
+        shows = [
+            _build_show_from_entry(entry, base, user_id=user_id, list_row=_row_for(entry))
+            for entry in enabled
+        ]
         shows = [s for s in shows if s is not None]
         return shows if shows else _demo_shows()
 
@@ -74,7 +94,7 @@ def _scan_all(base: Path) -> list[Show]:
         for show_dir in sorted(base.iterdir()):
             if not show_dir.is_dir():
                 continue
-            episodes = _scan_show_folder(show_dir)
+            episodes, latest_mtime = _scan_show_folder(show_dir)
             if not episodes:
                 continue
             show_id = slugify(show_dir.name)
@@ -87,6 +107,7 @@ def _scan_all(base: Path) -> list[Show]:
                         poster=_find_poster(show_dir),
                         episodes=episodes,
                         genres=["Local"],
+                        latest_local_mtime=latest_mtime,
                     ),
                     show_dir,
                 )
@@ -99,9 +120,15 @@ def _scan_all(base: Path) -> list[Show]:
     return shows if shows else _demo_shows()
 
 
-def _build_show_from_entry(entry: CatalogEntry, base: Path) -> Show | None:
+def _build_show_from_entry(
+    entry: CatalogEntry,
+    base: Path,
+    *,
+    user_id: str | None = None,
+    list_row: dict | None = None,
+) -> Show | None:
     if entry.mal_id:
-        show = _mal_show_for_entry(entry, base)
+        show = _mal_show_for_entry(entry, base, user_id=user_id, list_row=list_row)
         if show:
             return _attach_catalog_meta(show, entry)
 
@@ -115,7 +142,7 @@ def _build_show_from_entry(entry: CatalogEntry, base: Path) -> Show | None:
         if not show_dir.is_dir():
             show = _metadata_only_show(entry)
         else:
-            episodes = _scan_show_folder(show_dir)
+            episodes, latest_mtime = _scan_show_folder(show_dir)
             if not episodes:
                 show = _metadata_only_show(entry)
             else:
@@ -128,6 +155,7 @@ def _build_show_from_entry(entry: CatalogEntry, base: Path) -> Show | None:
                     episodes=episodes,
                     genres=["Local"],
                     anilist_id=entry.anilist_id,
+                    latest_local_mtime=latest_mtime,
                 )
                 show = _enrich_show(built, show_dir, entry.anilist_id)
     else:
@@ -138,16 +166,27 @@ def _build_show_from_entry(entry: CatalogEntry, base: Path) -> Show | None:
     return _attach_catalog_meta(show, entry)
 
 
-def _mal_show_for_entry(entry: CatalogEntry, base: Path) -> Show | None:
+def _mal_show_for_entry(
+    entry: CatalogEntry,
+    base: Path,
+    *,
+    user_id: str | None = None,
+    list_row: dict | None = None,
+) -> Show | None:
     cached = load_cached_anime(entry.mal_id) if entry.mal_id else None
+    if list_row is None and user_id and entry.mal_id:
+        list_row = get_anime_list_row(user_id, entry.mal_id)
+    if cached and list_row:
+        apply_list_row_to_anime(cached, list_row)
     show_id = entry.id
 
     local_episodes: list[Episode] = []
     local_poster: str | None = None
+    latest_mtime: float | None = None
     if entry.folder:
         show_dir = base / entry.folder
         if show_dir.is_dir():
-            local_episodes = _scan_show_folder(show_dir)
+            local_episodes, latest_mtime = _scan_show_folder(show_dir)
             local_poster = _find_poster(show_dir)
 
     if cached:
@@ -177,12 +216,13 @@ def _mal_show_for_entry(entry: CatalogEntry, base: Path) -> Show | None:
             title=cached.title,
             description=desc[:500],
             poster=local_poster,
-            poster_url=cached.poster_url,
+            poster_url=_prefer_local_anime_poster(cached.mal_id, cached.poster_url),
             genres=cached.genres or ["MAL"],
             mal_id=cached.mal_id,
             episodes=episodes,
+            latest_local_mtime=latest_mtime,
         )
-        apply_mal_metadata(show, cached)
+        apply_mal_metadata(show, cached, list_row)
         return _attach_catalog_meta(show, entry)
 
     if local_episodes:
@@ -203,6 +243,7 @@ def _mal_show_for_entry(entry: CatalogEntry, base: Path) -> Show | None:
             episodes=episodes,
             genres=["Local", "MAL"],
             mal_id=entry.mal_id,
+            latest_local_mtime=latest_mtime,
         )
         return _attach_catalog_meta(show, entry)
 
@@ -377,9 +418,15 @@ def _enrich_show(show: Show, show_dir: Path, anilist_id: int | None = None) -> S
     return show
 
 
-def _scan_show_folder(show_dir: Path) -> list[Episode]:
+def _scan_show_folder(show_dir: Path) -> tuple[list[Episode], float | None]:
+    """Scan local videos/strm under ``show_dir``.
+
+    Returns ``(episodes, latest_local_mtime)`` where mtime is the max filesystem
+    mtime of real video files (``.mp4`` / ``.mkv`` / ``.webm``), ignoring strm.
+    """
     show_id = slugify(show_dir.name)
     episodes: list[Episode] = []
+    latest_mtime: float | None = None
     for path in sorted(show_dir.rglob("*")):
         suffix = path.suffix.lower()
         if suffix == STRM_EXTENSION:
@@ -400,6 +447,12 @@ def _scan_show_folder(show_dir: Path) -> list[Episode]:
             continue
         if suffix not in VIDEO_EXTENSIONS:
             continue
+        try:
+            mtime = path.stat().st_mtime
+            if latest_mtime is None or mtime > latest_mtime:
+                latest_mtime = mtime
+        except OSError:
+            pass
         season, number = _parse_episode_numbers(path.name)
         rel = path.relative_to(show_dir)
         episodes.append(
@@ -412,7 +465,7 @@ def _scan_show_folder(show_dir: Path) -> list[Episode]:
                 filename=str(rel).replace("\\", "/"),
             )
         )
-    return sorted(episodes, key=lambda e: (e.season, e.number))
+    return sorted(episodes, key=lambda e: (e.season, e.number)), latest_mtime
 
 
 def _parse_episode_numbers(name: str) -> tuple[int, int]:
@@ -436,8 +489,28 @@ def _find_poster(show_dir: Path) -> str | None:
     return None
 
 
-def get_show(show_id: str, root: Path | None = None, catalog_path: Path | None = None) -> Show | None:
-    for show in scan_library(root, catalog_path):
+def _prefer_local_anime_poster(mal_id: int | None, remote_url: str | None) -> str | None:
+    """Prefer Thumbnail/anime/<mal_id> over MAL CDN URL."""
+    if mal_id:
+        try:
+            from kostream.thumbnails import thumbnail_public_url
+
+            local = thumbnail_public_url("anime", int(mal_id))
+            if local:
+                return local
+        except (OSError, TypeError, ValueError):
+            pass
+    return remote_url
+
+
+def get_show(
+    show_id: str,
+    root: Path | None = None,
+    catalog_path: Path | None = None,
+    *,
+    user_id: str | None = None,
+) -> Show | None:
+    for show in scan_library(root, catalog_path, user_id=user_id):
         if show.id == show_id:
             return show
     return None

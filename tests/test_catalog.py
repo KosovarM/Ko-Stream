@@ -62,6 +62,20 @@ def test_catalog_upsert(tmp_path: Path):
     assert state.shows[0].added_at == first_added
 
 
+def test_catalog_remove_entry(tmp_path: Path):
+    from kostream.catalog import remove_entry
+
+    state = CatalogState(
+        shows=[
+            CatalogEntry(id="a", enabled=True, source="demo", title="A"),
+            CatalogEntry(id="b", enabled=True, source="demo", title="B"),
+        ]
+    )
+    updated = remove_entry(state, "a")
+    assert [s.id for s in updated.shows] == ["b"]
+    assert remove_entry(updated, "missing").shows == updated.shows
+
+
 def test_catalog_roundtrip_added_at(tmp_path: Path):
     catalog_path = tmp_path / "selected.json"
     state = CatalogState(

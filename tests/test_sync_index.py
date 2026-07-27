@@ -190,6 +190,8 @@ def test_sync_episode_titles_respects_skip(tmp_path, monkeypatch):
 def test_api_sync_index_list_and_update(tmp_path):
     from kostream.app import create_app
 
+    from conftest import bootstrap_test_users, login_client
+
     catalog_path = tmp_path / "selected.json"
     save_catalog(
         CatalogState(
@@ -202,16 +204,22 @@ def test_api_sync_index_list_and_update(tmp_path):
     anime_index = tmp_path / "animes.json"
     save_anime_index({"5": {"skip_anime_sync": False, "title": "API Show"}}, anime_index)
 
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
     app = create_app(
         catalog_path=catalog_path,
         media_root=tmp_path / "anime",
         manga_root=tmp_path / "manga",
         manga_catalog_path=tmp_path / "manga.json",
         requests_path=tmp_path / "requests.json",
+        users_path=users,
+        user_data_base=user_data,
     )
     app.config["ANIME_SYNC_INDEX_PATH"] = anime_index
     app.config["MANGA_SYNC_INDEX_PATH"] = tmp_path / "mangas.json"
     client = app.test_client()
+    login_client(client)
 
     resp = client.get("/api/sync-index?section=anime_sync")
     assert resp.status_code == 200

@@ -6,6 +6,7 @@ import zipfile
 from kostream.manga import (
     chapter_display_title,
     filter_library_format,
+    find_manga_in_library,
     get_manga,
     list_page_refs,
     load_manga_library,
@@ -234,6 +235,8 @@ def test_collect_manga_genres_and_match():
 def test_manga_routes(tmp_path: Path):
     from kostream.app import create_app
 
+    from conftest import bootstrap_test_users, login_client
+
     media = tmp_path / "shows"
     media.mkdir()
     manga_root = tmp_path / "manga"
@@ -245,13 +248,19 @@ def test_manga_routes(tmp_path: Path):
     catalog.write_text('{"shows": []}', encoding="utf-8")
     manga_catalog = tmp_path / "manga_selected.json"
     manga_catalog.write_text('{"titles": []}', encoding="utf-8")
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
     app = create_app(
         media_root=media,
         catalog_path=catalog,
         manga_root=manga_root,
         manga_catalog_path=manga_catalog,
+        users_path=users,
+        user_data_base=user_data,
     )
     client = app.test_client()
+    login_client(client)
     resp = client.get("/manga")
     assert resp.status_code == 200
     assert b"Manga" in resp.data
@@ -265,10 +274,11 @@ def test_manga_routes(tmp_path: Path):
     assert img.content_type.startswith("image/")
 
 
-def test_manga_complete_range_api(tmp_path: Path, monkeypatch):
-    from kostream import app as app_mod
+def test_manga_complete_range_api(tmp_path: Path):
     from kostream.app import create_app
-    from kostream import manga_progress as mp
+    from kostream.user_paths import user_data_paths
+
+    from conftest import bootstrap_test_users, login_client
 
     media = tmp_path / "shows"
     media.mkdir()
@@ -284,17 +294,21 @@ def test_manga_complete_range_api(tmp_path: Path, monkeypatch):
     catalog.write_text('{"shows": []}', encoding="utf-8")
     manga_catalog = tmp_path / "manga_selected.json"
     manga_catalog.write_text('{"titles": []}', encoding="utf-8")
-    completed = tmp_path / "manga_completed.json"
-    monkeypatch.setattr(mp, "MANGA_COMPLETED_FILE", completed)
-    monkeypatch.setattr(app_mod, "MANGA_COMPLETED_FILE", completed)
 
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    completed = user_data_paths("u_testuser", user_data)["manga_completed"]
     app = create_app(
         media_root=media,
         catalog_path=catalog,
         manga_root=manga_root,
         manga_catalog_path=manga_catalog,
+        users_path=users,
+        user_data_base=user_data,
     )
     client = app.test_client()
+    login_client(client)
     titles = scan_manga_library(manga_root)
     mid = titles[0].id
     chapters = titles[0].chapters
@@ -327,9 +341,7 @@ def test_manga_complete_range_api(tmp_path: Path, monkeypatch):
 
 
 def test_manga_complete_range_meta_only(tmp_path: Path, monkeypatch):
-    from kostream import app as app_mod
     from kostream.app import create_app
-    from kostream import manga_progress as mp
     from kostream import mal as mal_mod
     from kostream.mal import MalMangaEntry
     from kostream.manga_catalog import (
@@ -337,6 +349,9 @@ def test_manga_complete_range_meta_only(tmp_path: Path, monkeypatch):
         MangaCatalogState,
         save_manga_catalog,
     )
+    from kostream.user_paths import user_data_paths
+
+    from conftest import bootstrap_test_users, login_client
 
     media = tmp_path / "shows"
     media.mkdir()
@@ -378,17 +393,20 @@ def test_manga_complete_range_meta_only(tmp_path: Path, monkeypatch):
             mean_score=None,
         )
     )
-    completed = tmp_path / "manga_completed.json"
-    monkeypatch.setattr(mp, "MANGA_COMPLETED_FILE", completed)
-    monkeypatch.setattr(app_mod, "MANGA_COMPLETED_FILE", completed)
-
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    completed = user_data_paths("u_testuser", user_data)["manga_completed"]
     app = create_app(
         media_root=media,
         catalog_path=catalog,
         manga_root=manga_root,
         manga_catalog_path=manga_catalog,
+        users_path=users,
+        user_data_base=user_data,
     )
     client = app.test_client()
+    login_client(client)
     resp = client.post(
         "/api/manga/complete-range",
         json={"manga_id": "mal-manga-88", "from_pos": 2, "to_pos": 4},
@@ -412,6 +430,8 @@ def test_manhwa_route(tmp_path: Path, monkeypatch):
     from kostream.app import create_app
     from kostream import mal as mal_mod
     from kostream.mal import MalMangaEntry
+
+    from conftest import bootstrap_test_users, login_client
 
     media = tmp_path / "shows"
     media.mkdir()
@@ -481,13 +501,19 @@ def test_manhwa_route(tmp_path: Path, monkeypatch):
             media_type="manga",
         )
     )
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
     app = create_app(
         media_root=media,
         catalog_path=catalog,
         manga_root=manga_root,
         manga_catalog_path=manga_catalog,
+        users_path=users,
+        user_data_base=user_data,
     )
     client = app.test_client()
+    login_client(client)
     manhwa = client.get("/manhwa")
     assert manhwa.status_code == 200
     assert b"Solo Leveling" in manhwa.data
@@ -502,6 +528,8 @@ def test_manga_genre_filter_ui(tmp_path: Path, monkeypatch):
     from kostream.app import create_app
     from kostream import mal as mal_mod
     from kostream.mal import MalMangaEntry
+
+    from conftest import bootstrap_test_users, login_client
 
     media = tmp_path / "shows"
     media.mkdir()
@@ -571,13 +599,19 @@ def test_manga_genre_filter_ui(tmp_path: Path, monkeypatch):
             media_type="manga",
         )
     )
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
     app = create_app(
         media_root=media,
         catalog_path=catalog,
         manga_root=manga_root,
         manga_catalog_path=manga_catalog,
+        users_path=users,
+        user_data_base=user_data,
     )
     client = app.test_client()
+    login_client(client)
 
     page = client.get("/manga")
     assert page.status_code == 200
@@ -623,6 +657,9 @@ def test_chapter_display_title_prefers_comicinfo():
 
 
 def test_scan_cbz_uses_comicinfo_and_filename_title(tmp_path: Path):
+    """Scan stays filename-fast; ComicInfo titles resolve on chapter enrich."""
+    from kostream.manga import enrich_manga_chapter
+
     root = tmp_path / "manga"
     title = root / "Demo Series"
     title.mkdir(parents=True)
@@ -644,9 +681,38 @@ def test_scan_cbz_uses_comicinfo_and_filename_title(tmp_path: Path):
 
     titles = scan_manga_library(root)
     assert len(titles) == 1
-    by_rel = {c.relative: c.title for c in titles[0].chapters}
-    assert by_rel["Chapter 01.cbz"] == "Chapter 01: Bored at Home"
-    assert by_rel["Chapter 02 - School Arc.cbz"] == "Chapter 02: School Arc"
+    by_rel = {c.relative: c for c in titles[0].chapters}
+    assert by_rel["Chapter 01.cbz"].title == "Chapter 01"
+    assert by_rel["Chapter 01.cbz"].page_count == 0
+    assert by_rel["Chapter 02 - School Arc.cbz"].title == "Chapter 02: School Arc"
+
+    enriched, pages = enrich_manga_chapter(root, titles[0], by_rel["Chapter 01.cbz"])
+    assert enriched.title == "Chapter 01: Bored at Home"
+    assert enriched.page_count == 1
+    assert len(pages) == 1
+
+
+def test_manga_scan_cache_invalidates_on_change(tmp_path: Path):
+    from kostream.manga import clear_manga_scan_cache
+
+    clear_manga_scan_cache()
+    root = tmp_path / "manga"
+    title = root / "Series"
+    title.mkdir(parents=True)
+    first = title / "Chapter 01.cbz"
+    with zipfile.ZipFile(first, "w") as zf:
+        zf.writestr("page1.png", b"x")
+
+    a = scan_manga_library(root)
+    b = scan_manga_library(root)
+    assert len(a[0].chapters) == 1
+    assert len(b[0].chapters) == 1
+
+    second = title / "Chapter 02.cbz"
+    with zipfile.ZipFile(second, "w") as zf:
+        zf.writestr("page1.png", b"y")
+    c = scan_manga_library(root)
+    assert len(c[0].chapters) == 2
 
 
 def test_scan_folder_chapter_title_from_dirname(tmp_path: Path):
@@ -656,3 +722,33 @@ def test_scan_folder_chapter_title_from_dirname(tmp_path: Path):
     _write_png(ch / "01.png")
     titles = scan_manga_library(root)
     assert titles[0].chapters[0].title == "Chapter 03: Finale"
+
+
+def test_find_manga_in_library_legacy_dir_id():
+    remapped = MangaTitle(
+        id="mal-manga-61147",
+        title="Fate/Extra CCC: Fox Tail",
+        folder="Fate Extra CCC Fox Tail",
+        poster_url="https://cdn.myanimelist.net/images/manga/2/120387l.jpg",
+        mal_id=61147,
+        source="mal",
+    )
+    local_only = MangaTitle(
+        id="dir-dice",
+        title="Dice",
+        folder="Dice",
+        cover_chapter_id="ch1",
+    )
+    titles = [remapped, local_only]
+
+    found = find_manga_in_library(
+        titles, manga_id="dir-fate-extra-ccc-fox-tail"
+    )
+    assert found is remapped
+    assert found.poster_url
+
+    by_mal = find_manga_in_library(titles, mal_id=61147)
+    assert by_mal is remapped
+
+    by_title = find_manga_in_library(titles, title="Dice")
+    assert by_title is local_only

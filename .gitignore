@@ -12,12 +12,16 @@ media/
 *.mkv
 *.avi
 
-# Progress DB
+# Progress DB (legacy global paths + per-user dirs)
 data/progress.json
 data/completed.json
 data/manga_completed.json
 data/manga_page_progress.json
+data/users.json
+data/users/
+data/.accounts_migrated
 data/requests.json
+data/recommendations.json
 
 # Grab URL cache / overrides (local)
 data/grab/cache.json
@@ -33,6 +37,7 @@ media_assets/
 data/mal/tokens.json
 data/mal/pending_oauth.json
 data/mal/last_sync.json
+data/mal/users/
 data/mal/cache/
 
 # AniList / other API caches

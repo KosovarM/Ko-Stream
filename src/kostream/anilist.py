@@ -12,8 +12,20 @@ from urllib.request import Request, urlopen
 
 API_URL = "https://graphql.anilist.co"
 CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "anilist"
+MAL_INDEX_DIR = CACHE_DIR / "mal"
 CACHE_TTL_SECONDS = 7 * 24 * 3600
 USER_AGENT = "Ko-Stream/0.2 (+https://github.com/KosovarM/Ko-Stream; local metadata)"
+
+_MEDIA_FIELDS = """
+        id
+        title { romaji english native }
+        description(asHtml: false)
+        genres
+        idMal
+        episodes
+        coverImage { large extraLarge }
+        bannerImage
+"""
 
 
 class AniListError(Exception):
@@ -65,19 +77,12 @@ def fetch_anime(anilist_id: int, *, network: bool = True) -> AniListMedia | None
         return cached
     if not network:
         return None
-    gql = """
-    query ($id: Int) {
-      Media(id: $id, type: ANIME) {
-        id
-        title { romaji english native }
-        description(asHtml: false)
-        genres
-        idMal
-        episodes
-        coverImage { large extraLarge }
-        bannerImage
-      }
-    }
+    gql = f"""
+    query ($id: Int) {{
+      Media(id: $id, type: ANIME) {{
+{_MEDIA_FIELDS}
+      }}
+    }}
     """
     try:
         data = _post_graphql(gql, {"id": anilist_id})
@@ -93,6 +98,46 @@ def fetch_anime(anilist_id: int, *, network: bool = True) -> AniListMedia | None
 
 def fetch_anime_cached_only(anilist_id: int) -> AniListMedia | None:
     return fetch_anime(anilist_id, network=False)
+
+
+def fetch_anime_by_mal_id(mal_id: int, *, network: bool = True) -> AniListMedia | None:
+    """Resolve AniList media (incl. wide bannerImage) from a MAL id."""
+    try:
+        mid = int(mal_id)
+    except (TypeError, ValueError):
+        return None
+    if mid <= 0:
+        return None
+
+    indexed = _read_mal_index(mid)
+    if indexed is not None:
+        return indexed
+
+    scanned = _scan_cache_for_mal(mid)
+    if scanned is not None:
+        _write_mal_index(mid, scanned.anilist_id)
+        return scanned
+
+    if not network:
+        return None
+
+    gql = f"""
+    query ($idMal: Int) {{
+      Media(idMal: $idMal, type: ANIME) {{
+{_MEDIA_FIELDS}
+      }}
+    }}
+    """
+    try:
+        data = _post_graphql(gql, {"idMal": mid})
+    except (URLError, OSError, ValueError, KeyError, AniListError):
+        return None
+    media = data.get("data", {}).get("Media")
+    if not media:
+        return None
+    parsed = _parse_media(media)
+    _write_cache(parsed)
+    return parsed
 
 
 def _parse_media(item: dict[str, Any]) -> AniListMedia:
@@ -146,6 +191,57 @@ def _cache_path(anilist_id: int) -> Path:
     return CACHE_DIR / f"{anilist_id}.json"
 
 
+def _mal_index_path(mal_id: int) -> Path:
+    return MAL_INDEX_DIR / f"{int(mal_id)}.json"
+
+
+def _read_mal_index(mal_id: int) -> AniListMedia | None:
+    path = _mal_index_path(mal_id)
+    if not path.exists():
+        return None
+    if time.time() - path.stat().st_mtime > CACHE_TTL_SECONDS:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        anilist_id = int(data["anilist_id"])
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+        return None
+    return _read_cache(anilist_id)
+
+
+def _write_mal_index(mal_id: int, anilist_id: int) -> None:
+    MAL_INDEX_DIR.mkdir(parents=True, exist_ok=True)
+    payload = {"mal_id": int(mal_id), "anilist_id": int(anilist_id)}
+    _mal_index_path(mal_id).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+
+
+def _scan_cache_for_mal(mal_id: int) -> AniListMedia | None:
+    """Best-effort: find an existing AniList cache entry that maps to this MAL id."""
+    if not CACHE_DIR.is_dir():
+        return None
+    mid = int(mal_id)
+    for path in CACHE_DIR.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if int(data.get("mal_id") or 0) != mid:
+                continue
+            if time.time() - path.stat().st_mtime > CACHE_TTL_SECONDS:
+                continue
+            return AniListMedia(
+                anilist_id=int(data["anilist_id"]),
+                title=data["title"],
+                description=data.get("description", ""),
+                genres=data.get("genres", []),
+                poster_url=data.get("poster_url"),
+                banner_url=data.get("banner_url"),
+                mal_id=mid,
+                episodes=int(data["episodes"]) if data.get("episodes") else None,
+            )
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            continue
+    return None
+
+
 def _read_cache(anilist_id: int) -> AniListMedia | None:
     path = _cache_path(anilist_id)
     if not path.exists():
@@ -178,3 +274,5 @@ def _write_cache(media: AniListMedia) -> None:
         "episodes": media.episodes,
     }
     _cache_path(media.anilist_id).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    if media.mal_id:
+        _write_mal_index(int(media.mal_id), media.anilist_id)

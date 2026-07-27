@@ -5,8 +5,13 @@ from kostream.mal import MalAnimeEntry, MalMangaEntry, sync_animelist_to_catalog
 from kostream.manga_catalog import load_manga_catalog
 
 
-def test_sync_animelist_replaces_mal_entries(tmp_path):
+def test_sync_animelist_upserts_without_removing_others(tmp_path, monkeypatch):
+    """Sync enriches the shared catalog; titles not on this user's list stay put."""
+    from kostream import mal as mal_mod
+
     catalog_path = tmp_path / "selected.json"
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path / "cache")
+    monkeypatch.setattr(mal_mod, "MAL_DATA_DIR", tmp_path / "mal")
     save_catalog(
         CatalogState(
             shows=[
@@ -21,12 +26,22 @@ def test_sync_animelist_replaces_mal_entries(tmp_path):
                     title="Old MAL",
                     added_at="2026-01-15T10:00:00Z",
                 ),
-                CatalogEntry(id="mal-99", enabled=True, source="mal", mal_id=99, title="Removed"),
+                CatalogEntry(
+                    id="mal-31240",
+                    enabled=True,
+                    source="mal",
+                    folder="Re Zero Season 1",
+                    mal_id=31240,
+                    title="Re:Zero",
+                    added_at="2026-02-01T00:00:00Z",
+                ),
+                CatalogEntry(id="mal-99", enabled=True, source="mal", mal_id=99, title="Other User Show"),
             ]
         ),
         catalog_path,
     )
 
+    # Smaller list (e.g. Blerta): only One Piece — must not wipe Re:Zero / mal-99.
     fake_entries = [
         MalAnimeEntry(
             mal_id=21,
@@ -40,7 +55,20 @@ def test_sync_animelist_replaces_mal_entries(tmp_path):
             anime_status="currently_airing",
             score=10,
             mean_score=8.7,
-        )
+        ),
+        MalAnimeEntry(
+            mal_id=20,
+            title="Naruto",
+            synopsis="Ninja.",
+            poster_url="https://example.com/n.jpg",
+            genres=["Action"],
+            num_episodes=220,
+            list_status="completed",
+            num_episodes_watched=220,
+            anime_status="finished_airing",
+            score=8,
+            mean_score=8.0,
+        ),
     ]
 
     class FakeCfg:
@@ -50,14 +78,18 @@ def test_sync_animelist_replaces_mal_entries(tmp_path):
 
     with patch("kostream.mal.get_valid_access_token", return_value="token"):
         with patch("kostream.mal.fetch_animelist", return_value=fake_entries):
-            count = sync_animelist_to_catalog(FakeCfg(), catalog_path)
+            with patch("kostream.mal.enrich_catalog_mal_details", return_value=0):
+                count = sync_animelist_to_catalog(FakeCfg(), catalog_path, user_id="u_blerta")
 
-    assert count == 1
+    assert count == 2
     state = load_catalog(catalog_path)
     ids = {s.id for s in state.shows}
     assert "local-1" in ids
     assert "mal-21" in ids
-    assert "mal-99" not in ids
+    assert "mal-31240" in ids
+    assert "mal-99" in ids
+    assert "mal-20" in ids
+
     mal21 = state.get("mal-21")
     assert mal21 is not None
     assert mal21.added_at == "2026-01-15T10:00:00Z"
@@ -65,6 +97,34 @@ def test_sync_animelist_replaces_mal_entries(tmp_path):
     assert mal21.anilist_id == 21
     assert mal21.enabled is False
     assert mal21.title == "One Piece"
+
+    rezero = state.get("mal-31240")
+    assert rezero is not None
+    assert rezero.folder == "Re Zero Season 1"
+    assert rezero.enabled is True
+    assert rezero.title == "Re:Zero"
+    assert rezero.added_at == "2026-02-01T00:00:00Z"
+
+    other = state.get("mal-99")
+    assert other is not None
+    assert other.enabled is True
+    assert other.title == "Other User Show"
+
+    new_show = state.get("mal-20")
+    assert new_show is not None
+    assert new_show.enabled is True
+    assert new_show.title == "Naruto"
+    assert new_show.folder is None
+
+    import json
+
+    cache_raw = json.loads((tmp_path / "cache" / "21.json").read_text(encoding="utf-8"))
+    assert "num_episodes_watched" not in cache_raw
+    assert "list_status" not in cache_raw
+    overlay = mal_mod.load_anime_list_state("u_blerta")
+    assert overlay["21"]["num_episodes_watched"] == 500
+    assert overlay["21"]["score"] == 10
+    assert overlay["20"]["list_status"] == "completed"
 
 
 def test_sync_mangalist_to_catalog(tmp_path, monkeypatch):
@@ -99,6 +159,7 @@ def test_sync_mangalist_to_catalog(tmp_path, monkeypatch):
     )
     cache = tmp_path / "manga_cache"
     monkeypatch.setattr(mal_mod, "MANGA_CACHE_DIR", cache)
+    monkeypatch.setattr(mal_mod, "MAL_DATA_DIR", tmp_path / "mal")
 
     fake = [
         MalMangaEntry(
@@ -126,7 +187,10 @@ def test_sync_mangalist_to_catalog(tmp_path, monkeypatch):
     with patch("kostream.mal.get_valid_access_token", return_value="token"):
         with patch("kostream.mal.fetch_mangalist", return_value=fake):
             count = sync_mangalist_to_catalog(
-                FakeCfg(), manga_catalog_path=catalog, manga_media_root=media
+                FakeCfg(),
+                user_id="u_test",
+                manga_catalog_path=catalog,
+                manga_media_root=media,
             )
 
     assert count == 1
@@ -143,6 +207,14 @@ def test_sync_mangalist_to_catalog(tmp_path, monkeypatch):
     cached = mal_mod.load_cached_manga(2)
     assert cached is not None
     assert cached.title == "Berserk"
+    assert cached.num_chapters_read == 0
+    overlay = mal_mod.load_manga_list_state("u_test")
+    assert overlay["2"]["num_chapters_read"] == 10
+    import json
+
+    raw = json.loads((cache / "2.json").read_text(encoding="utf-8"))
+    assert "list_status" not in raw
+    assert "num_chapters_read" not in raw
 
 
 def test_load_cached_anime(tmp_path, monkeypatch):
@@ -157,7 +229,8 @@ def test_load_cached_anime(tmp_path, monkeypatch):
     item = mal_mod.load_cached_anime(21)
     assert item is not None
     assert item.title == "One Piece"
-    assert item.num_episodes_watched == 3
+    # Shared cache ignores personal list fields (overlay owns them).
+    assert item.num_episodes_watched == 0
     assert item.anime_status == "currently_airing"
     assert item.episode_titles[1] == "I'm Luffy!"
 

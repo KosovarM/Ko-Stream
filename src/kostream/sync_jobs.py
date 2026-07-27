@@ -116,9 +116,11 @@ def start_anime_sync(
     cfg: MalConfig,
     catalog_path,
     *,
+    user_id: str,
     media_root=None,
     requests_path=None,
     anime_index_path=None,
+    completed_path=None,
 ) -> SyncJob:
     """Animelist + progress reconcile + anime request clear + metadata enrich."""
     job = _begin_job("animes", "list", "Syncing animelist…")
@@ -128,7 +130,9 @@ def start_anime_sync(
     def runner() -> None:
         nonlocal job
         try:
-            count = sync_animelist_to_catalog(cfg, catalog_path, enrich=False)
+            count = sync_animelist_to_catalog(
+                cfg, catalog_path, user_id=user_id, enrich=False
+            )
             with _lock:
                 job.synced = count
                 job.phase = "progress"
@@ -142,7 +146,12 @@ def start_anime_sync(
                 root = media_root or MEDIA_ROOT
                 for show in scan_library(root, catalog_path):
                     if show.mal_id and int(show.mal_id) not in skip_anime:
-                        reconcile_anime_progress(show, mal_cfg=cfg)
+                        reconcile_anime_progress(
+                            show,
+                            completed_path=completed_path,
+                            mal_cfg=cfg,
+                            user_id=user_id,
+                        )
             except (OSError, ValueError):
                 pass
 
@@ -178,6 +187,7 @@ def start_anime_sync(
                 enriched = enrich_catalog_mal_details(
                     cfg,
                     catalog_path,
+                    user_id=user_id,
                     limit=ENRICH_BATCH_SIZE,
                     skip_mal_ids=skip_anime,
                 )
@@ -201,6 +211,24 @@ def start_anime_sync(
             with _lock:
                 job.enriched = enriched
             try:
+                from kostream.thumbnails import sync_anime_thumbnails_from_cache
+
+                with _lock:
+                    job.phase = "thumbnails"
+                    job.message = (
+                        f"Synced {count} anime · enriched {enriched}. "
+                        "Caching posters…"
+                    )
+                thumbs = sync_anime_thumbnails_from_cache()
+                with _lock:
+                    if thumbs:
+                        job.message = (
+                            f"Synced {count} anime · enriched {enriched} · "
+                            f"thumbnails {thumbs}."
+                        )
+            except (OSError, ValueError, TypeError):
+                thumbs = 0
+            try:
                 refresh_anime_index(
                     catalog_path=catalog_path,
                     media_root=media_root,
@@ -213,9 +241,10 @@ def start_anime_sync(
                 if enriched >= ENRICH_BATCH_SIZE
                 else ""
             )
+            thumb_hint = f" · thumbnails {thumbs}" if thumbs else ""
             _finish_ok(
                 job,
-                f"Animes synced: {count} · enriched {enriched}.{more_hint}",
+                f"Animes synced: {count} · enriched {enriched}{thumb_hint}.{more_hint}",
             )
         except (MalError, TimeoutError, OSError) as exc:
             _finish_error(job, f"Anime sync failed: {exc}", exc)
@@ -227,6 +256,7 @@ def start_anime_sync(
 def start_manga_sync(
     cfg: MalConfig,
     *,
+    user_id: str,
     manga_catalog_path=None,
     manga_media_root=None,
     requests_path=None,
@@ -242,6 +272,7 @@ def start_manga_sync(
         try:
             manga_count = sync_mangalist_to_catalog(
                 cfg,
+                user_id=user_id,
                 manga_catalog_path=manga_catalog_path,
                 manga_media_root=manga_media_root,
             )
@@ -249,6 +280,7 @@ def start_manga_sync(
                 job.manga_synced = manga_count
                 job.message = f"Synced {manga_count} manga. Clearing fulfilled requests…"
 
+            cleared = 0
             try:
                 from kostream.requests_store import clear_fulfilled_requests
 
@@ -258,24 +290,18 @@ def start_manga_sync(
                     manga_catalog_path=manga_catalog_path,
                     scope="manga",
                 )
-                if cleared:
-                    try:
-                        refresh_manga_index(
-                            manga_catalog_path=manga_catalog_path,
-                            manga_media_root=manga_media_root,
-                            index_path=manga_index_path,
-                        )
-                    except (OSError, ValueError):
-                        pass
-                    _finish_ok(
-                        job,
-                        f"Mangas synced: {manga_count}. "
-                        f"Cleared {cleared} fulfilled request"
-                        f"{'s' if cleared != 1 else ''}.",
-                    )
-                    return
             except (OSError, ValueError, TypeError):
                 pass
+
+            try:
+                from kostream.thumbnails import sync_manga_thumbnails_from_cache
+
+                with _lock:
+                    job.phase = "thumbnails"
+                    job.message = f"Synced {manga_count} manga. Caching posters…"
+                thumbs = sync_manga_thumbnails_from_cache()
+            except (OSError, ValueError, TypeError):
+                thumbs = 0
 
             try:
                 refresh_manga_index(
@@ -286,7 +312,14 @@ def start_manga_sync(
             except (OSError, ValueError):
                 pass
 
-            _finish_ok(job, f"Mangas synced: {manga_count}.")
+            parts = [f"Mangas synced: {manga_count}"]
+            if cleared:
+                parts.append(
+                    f"cleared {cleared} fulfilled request{'s' if cleared != 1 else ''}"
+                )
+            if thumbs:
+                parts.append(f"thumbnails {thumbs}")
+            _finish_ok(job, ". ".join(parts) + ".")
         except (MalError, TimeoutError, OSError) as exc:
             _finish_error(job, f"Manga sync failed: {exc}", exc)
 
@@ -408,6 +441,7 @@ def start_mal_sync(
     cfg: MalConfig,
     catalog_path,
     *,
+    user_id: str,
     manga_catalog_path=None,
     manga_media_root=None,
     media_root=None,
@@ -420,6 +454,7 @@ def start_mal_sync(
     return start_anime_sync(
         cfg,
         catalog_path,
+        user_id=user_id,
         media_root=media_root,
         requests_path=requests_path,
     )

@@ -23,6 +23,8 @@ from kostream.grab import (
 from kostream.library import get_show
 from kostream.models import Episode, Show
 
+from conftest import bootstrap_test_users, login_client
+
 
 @pytest.fixture
 def grab_base(tmp_path: Path) -> Path:
@@ -155,7 +157,22 @@ def _app_with_demo(tmp_path: Path, grab_base: Path):
         ]
     )
     save_catalog(state, catalog)
-    return create_app(media_root=media, catalog_path=catalog, grab_base=grab_base)
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    return create_app(
+        media_root=media,
+        catalog_path=catalog,
+        grab_base=grab_base,
+        users_path=users,
+        user_data_base=user_data,
+    )
+
+
+def _logged_in_client(app):
+    client = app.test_client()
+    login_client(client)
+    return client
 
 
 def test_watch_page_uses_grab_when_demo_enabled(
@@ -165,7 +182,7 @@ def test_watch_page_uses_grab_when_demo_enabled(
     monkeypatch.setenv("KOSTREAM_GRAB_DEMO", "1")
     monkeypatch.delenv("KOSTREAM_GRAB_CMD", raising=False)
     app = _app_with_demo(tmp_path, grab_base)
-    client = app.test_client()
+    client = _logged_in_client(app)
     show = get_show("demo-show", app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
     assert show is not None
     ep = show.episodes[0]
@@ -183,7 +200,7 @@ def test_watch_page_needs_resolve_without_demo(
     monkeypatch.setenv("KOSTREAM_GRAB_DEMO", "0")
     monkeypatch.delenv("KOSTREAM_GRAB_CMD", raising=False)
     app = _app_with_demo(tmp_path, grab_base)
-    client = app.test_client()
+    client = _logged_in_client(app)
     show = get_show("demo-show", app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
     assert show is not None
     ep = show.episodes[0]
@@ -198,7 +215,7 @@ def test_watch_page_demo_when_grab_off(
 ):
     monkeypatch.setenv("KOSTREAM_GRAB", "0")
     app = _app_with_demo(tmp_path, grab_base)
-    client = app.test_client()
+    client = _logged_in_client(app)
     show = get_show("demo-show", app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
     assert show is not None
     ep = show.episodes[0]
@@ -215,7 +232,7 @@ def test_proxy_grab_route(
     monkeypatch.setenv("KOSTREAM_GRAB_DEMO", "1")
     monkeypatch.delenv("KOSTREAM_GRAB_CMD", raising=False)
     app = _app_with_demo(tmp_path, grab_base)
-    client = app.test_client()
+    client = _logged_in_client(app)
     show = get_show("demo-show", app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
     assert show is not None
     ep = show.episodes[0]
@@ -235,7 +252,7 @@ def test_api_grab_override(
 ):
     monkeypatch.setenv("KOSTREAM_GRAB", "1")
     app = _app_with_demo(tmp_path, grab_base)
-    client = app.test_client()
+    client = _logged_in_client(app)
     show = get_show("demo-show", app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
     assert show is not None
     ep = show.episodes[0]
@@ -256,7 +273,7 @@ def test_api_grab_resolve_and_bulk(
     monkeypatch.setenv("KOSTREAM_GRAB_DEMO", "1")
     monkeypatch.delenv("KOSTREAM_GRAB_CMD", raising=False)
     app = _app_with_demo(tmp_path, grab_base)
-    client = app.test_client()
+    client = _logged_in_client(app)
     show = get_show("demo-show", app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
     assert show is not None
     ep = show.episodes[0]

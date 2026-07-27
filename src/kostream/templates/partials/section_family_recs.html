@@ -1,0 +1,43 @@
+{% if family_recommendations %}
+<section class="section family-recs-section">
+  <div class="section-head">
+    <h2 class="section-title">Recommended by other Users</h2>
+    <div class="section-scroll-hint" aria-hidden="true">‹ ›</div>
+  </div>
+  <div class="family-recs-grid">
+  {% for group in family_recommendations %}
+  <div class="family-recs-group">
+    <h3 class="family-recs-by">{{ group.display_name or group.username }}</h3>
+    <div class="card-scroll">
+      {% for item in group.picks %}
+      {% if item.show_id %}
+      <a href="{{ url_for('show_detail', show_id=item.show_id) }}" class="anime-card family-rec-card">
+      {% elif item.manga_id and item.kind == 'manhwa' %}
+      <a href="{{ url_for('manhwa_page', open=item.manga_id) }}" class="anime-card family-rec-card">
+      {% elif item.manga_id %}
+      <a href="{{ url_for('manga_page', open=item.manga_id) }}" class="anime-card family-rec-card">
+      {% else %}
+      <div class="anime-card family-rec-card">
+      {% endif %}
+        <div class="card-poster">
+          {% if item.poster_url %}
+          <img src="{{ item.poster_url }}" alt="" class="card-poster-img" loading="lazy" referrerpolicy="no-referrer">
+          {% else %}
+          <span class="card-initials">{{ item.title[:2] }}</span>
+          {% endif %}
+          <span class="card-type">{{ item.kind_label }}</span>
+          <div class="card-shade"></div>
+        </div>
+        <h3 class="card-title">{{ item.title }}</h3>
+      {% if item.show_id or item.manga_id %}
+      </a>
+      {% else %}
+      </div>
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+  </div>
+</section>
+{% endif %}

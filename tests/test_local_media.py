@@ -16,6 +16,8 @@ from kostream.local_media import (
 )
 from kostream.models import Episode, Show
 
+from conftest import bootstrap_test_users, login_client
+
 
 def test_suggest_and_expected_names():
     show = Show(
@@ -110,8 +112,12 @@ def test_api_prepare_and_upload(tmp_path: Path):
         ),
         catalog,
     )
-    app = create_app(media_root=media, catalog_path=catalog)
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    app = create_app(media_root=media, catalog_path=catalog, users_path=users, user_data_base=user_data)
     client = app.test_client()
+    login_client(client)
     show = get_show("demo-show", media, catalog)
     assert show is not None
     ep = show.episodes[0]

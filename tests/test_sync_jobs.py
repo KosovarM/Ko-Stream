@@ -78,6 +78,7 @@ def test_anime_sync_skips_manga_and_titles(tmp_path, monkeypatch):
     job = sync_jobs.start_anime_sync(
         _cfg(),
         catalog,
+        user_id="u_test",
         media_root=tmp_path / "anime",
         requests_path=tmp_path / "requests.json",
     )
@@ -127,6 +128,7 @@ def test_manga_sync_skips_anime_and_titles(tmp_path, monkeypatch):
 
     job = sync_jobs.start_manga_sync(
         _cfg(),
+        user_id="u_test",
         manga_catalog_path=tmp_path / "manga.json",
         manga_media_root=tmp_path / "manga",
         requests_path=tmp_path / "requests.json",
@@ -227,7 +229,7 @@ def test_global_lock_blocks_second_job(tmp_path, monkeypatch):
     catalog = tmp_path / "c.json"
     catalog.write_text('{"shows":[]}', encoding="utf-8")
 
-    first = sync_jobs.start_anime_sync(_cfg(), catalog)
+    first = sync_jobs.start_anime_sync(_cfg(), catalog, user_id="u_test")
     assert started.wait(timeout=1.0)
     second = sync_jobs.start_anime_title_sync(catalog)
     assert second.kind == "animes"
@@ -244,11 +246,22 @@ def test_api_mal_sync_endpoints_require_connection(tmp_path, monkeypatch):
     catalog.write_text('{"shows": []}', encoding="utf-8")
     media = tmp_path / "media" / "shows"
     media.mkdir(parents=True)
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    from conftest import bootstrap_test_users, login_client
+
+    bootstrap_test_users(users)
     monkeypatch.setenv("MAL_CLIENT_ID", _MAL_ID)
     monkeypatch.setenv("MAL_CLIENT_SECRET", _MAL_SECRET)
-    monkeypatch.setattr("kostream.app.mal_is_connected", lambda: False)
-    app = create_app(media_root=media, catalog_path=catalog)
+    monkeypatch.setattr("kostream.app.mal_is_connected", lambda *_a, **_k: False)
+    app = create_app(
+        media_root=media,
+        catalog_path=catalog,
+        users_path=users,
+        user_data_base=user_data,
+    )
     client = app.test_client()
+    login_client(client)
 
     for path in (
         "/api/mal/sync/animes",
@@ -271,23 +284,33 @@ def test_catalog_shows_four_sync_buttons_when_connected(tmp_path, monkeypatch):
     catalog.write_text('{"shows": []}', encoding="utf-8")
     media = tmp_path / "media" / "shows"
     media.mkdir(parents=True)
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    from conftest import bootstrap_test_users, login_client
+
+    bootstrap_test_users(users)
     monkeypatch.setenv("MAL_CLIENT_ID", _MAL_ID)
     monkeypatch.setenv("MAL_CLIENT_SECRET", _MAL_SECRET)
-    monkeypatch.setattr("kostream.app.mal_is_connected", lambda: True)
+    monkeypatch.setattr("kostream.app.mal_is_connected", lambda *_a, **_k: True)
     monkeypatch.setattr(
         "kostream.app.mal_load_tokens",
-        lambda: MalTokens(
+        lambda *_a, **_k: MalTokens(
             access_token="t",
             refresh_token="r",
             expires_at=time.time() + 3600,
             username="tester",
         ),
     )
-    monkeypatch.setattr("kostream.app.load_last_sync", lambda: None)
     monkeypatch.setattr("kostream.app.format_last_sync_label", lambda *_a, **_k: None)
 
-    app = create_app(media_root=media, catalog_path=catalog)
+    app = create_app(
+        media_root=media,
+        catalog_path=catalog,
+        users_path=users,
+        user_data_base=user_data,
+    )
     client = app.test_client()
+    login_client(client)
     resp = client.get("/catalog")
     assert resp.status_code == 200
     assert b"Sync animes" in resp.data

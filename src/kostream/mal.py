@@ -25,9 +25,19 @@ MAL_AUTH_URL = "https://myanimelist.net/v1/oauth2/authorize"
 MAL_TOKEN_URL = "https://myanimelist.net/v1/oauth2/token"
 MAL_API_URL = "https://api.myanimelist.net/v2"
 MAL_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "mal"
-TOKEN_FILE = MAL_DATA_DIR / "tokens.json"
+# Shared anime/manga metadata cache (personal list fields live in per-user overlay).
 CACHE_DIR = MAL_DATA_DIR / "cache"
+# Legacy global paths — unused at runtime (migrate-accounts moves them to master).
+TOKEN_FILE = MAL_DATA_DIR / "tokens.json"
 LAST_SYNC_FILE = MAL_DATA_DIR / "last_sync.json"
+PENDING_OAUTH_FILE = MAL_DATA_DIR / "pending_oauth.json"
+
+# Personal list fields — never written to shared cache after list-state split.
+ANIME_LIST_FIELD_KEYS = ("list_status", "num_episodes_watched", "score")
+MANGA_LIST_FIELD_KEYS = ("list_status", "num_volumes_read", "num_chapters_read", "score")
+ANIME_LIST_STATUSES = frozenset(
+    {"watching", "completed", "on_hold", "dropped", "plan_to_watch"}
+)
 USER_AGENT = "Ko-Stream/0.2 (+https://github.com/KosovarM/Ko-Stream; local MAL sync)"
 JIKAN_EPISODES_URL = "https://api.jikan.moe/v4/anime/{mal_id}/episodes"
 # Dummy slug works; MAL serves the canonical episode list page.
@@ -187,14 +197,217 @@ def parse_mal_start_year(source: dict[str, Any] | None) -> int | None:
     return None
 
 
-def is_connected() -> bool:
-    return load_tokens() is not None
+def _normalize_user_id(user_id: str) -> str:
+    uid = str(user_id or "").strip()
+    if not uid or "/" in uid or "\\" in uid or uid in (".", ".."):
+        raise MalError("Invalid user_id for MAL tokens.")
+    return uid
 
 
-def load_tokens() -> MalTokens | None:
-    if not TOKEN_FILE.exists():
+def mal_user_dir(user_id: str) -> Path:
+    """Per-user MAL directory: ``data/mal/users/<user_id>/``."""
+    return MAL_DATA_DIR / "users" / _normalize_user_id(user_id)
+
+
+def token_path(user_id: str) -> Path:
+    return mal_user_dir(user_id) / "tokens.json"
+
+
+def pending_oauth_path(user_id: str) -> Path:
+    return mal_user_dir(user_id) / "pending_oauth.json"
+
+
+def last_sync_path(user_id: str) -> Path:
+    return mal_user_dir(user_id) / "last_sync.json"
+
+
+def anime_list_state_path(user_id: str) -> Path:
+    return mal_user_dir(user_id) / "anime_list_state.json"
+
+
+def manga_list_state_path(user_id: str) -> Path:
+    return mal_user_dir(user_id) / "manga_list_state.json"
+
+
+def _load_list_state(path: Path) -> dict[str, dict[str, Any]]:
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for key, value in data.items():
+        if isinstance(value, dict):
+            out[str(key)] = value
+    return out
+
+
+def _save_list_state(path: Path, state: dict[str, dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+
+def load_anime_list_state(user_id: str) -> dict[str, dict[str, Any]]:
+    """mal_id (str) → {list_status, num_episodes_watched, score}."""
+    return _load_list_state(anime_list_state_path(user_id))
+
+
+def save_anime_list_state(user_id: str, state: dict[str, dict[str, Any]]) -> None:
+    _save_list_state(anime_list_state_path(user_id), state)
+
+
+def load_manga_list_state(user_id: str) -> dict[str, dict[str, Any]]:
+    """mal_id (str) → {list_status, num_volumes_read, num_chapters_read, score}."""
+    return _load_list_state(manga_list_state_path(user_id))
+
+
+def save_manga_list_state(user_id: str, state: dict[str, dict[str, Any]]) -> None:
+    _save_list_state(manga_list_state_path(user_id), state)
+
+
+def get_anime_list_row(user_id: str, mal_id: int) -> dict[str, Any] | None:
+    state = load_anime_list_state(user_id)
+    row = state.get(str(int(mal_id)))
+    return dict(row) if isinstance(row, dict) else None
+
+
+def get_manga_list_row(user_id: str, mal_id: int) -> dict[str, Any] | None:
+    state = load_manga_list_state(user_id)
+    row = state.get(str(int(mal_id)))
+    return dict(row) if isinstance(row, dict) else None
+
+
+def upsert_anime_list_row(
+    user_id: str,
+    mal_id: int,
+    *,
+    list_status: str | None = None,
+    num_episodes_watched: int | None = None,
+    score: int | None = None,
+) -> dict[str, Any]:
+    state = load_anime_list_state(user_id)
+    key = str(int(mal_id))
+    row = dict(state.get(key) or {})
+    if list_status is not None:
+        row["list_status"] = str(list_status)
+    if num_episodes_watched is not None:
+        row["num_episodes_watched"] = max(0, int(num_episodes_watched))
+    if score is not None:
+        row["score"] = max(0, int(score))
+    row.setdefault("list_status", "plan_to_watch")
+    row.setdefault("num_episodes_watched", 0)
+    row.setdefault("score", 0)
+    state[key] = row
+    save_anime_list_state(user_id, state)
+    return row
+
+
+def upsert_manga_list_row(
+    user_id: str,
+    mal_id: int,
+    *,
+    list_status: str | None = None,
+    num_volumes_read: int | None = None,
+    num_chapters_read: int | None = None,
+    score: int | None = None,
+) -> dict[str, Any]:
+    state = load_manga_list_state(user_id)
+    key = str(int(mal_id))
+    row = dict(state.get(key) or {})
+    if list_status is not None:
+        row["list_status"] = str(list_status)
+    if num_volumes_read is not None:
+        row["num_volumes_read"] = max(0, int(num_volumes_read))
+    if num_chapters_read is not None:
+        row["num_chapters_read"] = max(0, int(num_chapters_read))
+    if score is not None:
+        row["score"] = max(0, int(score))
+    row.setdefault("list_status", "plan_to_read")
+    row.setdefault("num_volumes_read", 0)
+    row.setdefault("num_chapters_read", 0)
+    row.setdefault("score", 0)
+    state[key] = row
+    save_manga_list_state(user_id, state)
+    return row
+
+
+def write_anime_list_state_from_entries(user_id: str, entries: list[MalAnimeEntry]) -> None:
+    state = load_anime_list_state(user_id)
+    for item in entries:
+        state[str(item.mal_id)] = {
+            "list_status": item.list_status,
+            "num_episodes_watched": int(item.num_episodes_watched or 0),
+            "score": int(item.score or 0),
+        }
+    save_anime_list_state(user_id, state)
+
+
+def write_manga_list_state_from_entries(user_id: str, entries: list[MalMangaEntry]) -> None:
+    state = load_manga_list_state(user_id)
+    for item in entries:
+        state[str(item.mal_id)] = {
+            "list_status": item.list_status,
+            "num_volumes_read": int(item.num_volumes_read or 0),
+            "num_chapters_read": int(item.num_chapters_read or 0),
+            "score": int(item.score or 0),
+        }
+    save_manga_list_state(user_id, state)
+
+
+def apply_list_row_to_anime(entry: MalAnimeEntry, list_row: dict[str, Any] | None) -> MalAnimeEntry:
+    """Overlay personal list fields onto a metadata cache entry (in place)."""
+    if not list_row:
+        return entry
+    if list_row.get("list_status"):
+        entry.list_status = str(list_row["list_status"])
+    if "num_episodes_watched" in list_row:
+        entry.num_episodes_watched = int(list_row.get("num_episodes_watched") or 0)
+    if "score" in list_row:
+        entry.score = int(list_row.get("score") or 0)
+    return entry
+
+
+def apply_list_row_to_manga(entry: MalMangaEntry, list_row: dict[str, Any] | None) -> MalMangaEntry:
+    if not list_row:
+        return entry
+    if list_row.get("list_status"):
+        entry.list_status = str(list_row["list_status"])
+    if "num_volumes_read" in list_row:
+        entry.num_volumes_read = int(list_row.get("num_volumes_read") or 0)
+    if "num_chapters_read" in list_row:
+        entry.num_chapters_read = int(list_row.get("num_chapters_read") or 0)
+    if "score" in list_row:
+        entry.score = int(list_row.get("score") or 0)
+    return entry
+
+
+def load_cached_anime_for_user(mal_id: int, user_id: str | None) -> MalAnimeEntry | None:
+    """Load shared metadata and merge this user's list overlay when ``user_id`` is set."""
+    entry = load_cached_anime(mal_id)
+    if entry is None or not user_id:
+        return entry
+    return apply_list_row_to_anime(entry, get_anime_list_row(user_id, mal_id))
+
+
+def load_cached_manga_for_user(mal_id: int, user_id: str | None) -> MalMangaEntry | None:
+    entry = load_cached_manga(mal_id)
+    if entry is None or not user_id:
+        return entry
+    return apply_list_row_to_manga(entry, get_manga_list_row(user_id, mal_id))
+
+
+def is_connected(user_id: str) -> bool:
+    return load_tokens(user_id) is not None
+
+
+def load_tokens(user_id: str) -> MalTokens | None:
+    path = token_path(user_id)
+    if not path.exists():
         return None
-    data = json.loads(TOKEN_FILE.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"))
     if not data.get("access_token") or not data.get("refresh_token"):
         return None
     return MalTokens(
@@ -205,35 +418,50 @@ def load_tokens() -> MalTokens | None:
     )
 
 
-def save_tokens(tokens: MalTokens) -> None:
-    MAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
+def save_tokens(user_id: str, tokens: MalTokens) -> None:
+    path = token_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "access_token": tokens.access_token,
         "refresh_token": tokens.refresh_token,
         "expires_at": tokens.expires_at,
         "username": tokens.username,
     }
-    TOKEN_FILE.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
-def disconnect() -> None:
-    if TOKEN_FILE.exists():
-        TOKEN_FILE.unlink()
+def disconnect(user_id: str) -> None:
+    """Remove this user's MAL tokens (and any pending OAuth). Does not touch catalog."""
+    path = token_path(user_id)
+    if path.exists():
+        path.unlink()
+    pending = pending_oauth_path(user_id)
+    if pending.exists():
+        pending.unlink()
 
 
-def start_oauth(cfg: MalConfig) -> str:
-    """Return authorization URL. Stores PKCE verifier locally."""
-    return prepare_oauth(cfg)["authorize_url"]
+def start_oauth(cfg: MalConfig, user_id: str) -> str:
+    """Return authorization URL. Stores PKCE verifier for this user."""
+    return prepare_oauth(cfg, user_id)["authorize_url"]
 
 
-def prepare_oauth(cfg: MalConfig) -> dict[str, str]:
+def prepare_oauth(cfg: MalConfig, user_id: str) -> dict[str, str]:
     """Create OAuth session and return login + authorize URLs (same PKCE session)."""
+    uid = _normalize_user_id(user_id)
     state = secrets.token_urlsafe(32)
     code_verifier = _new_code_verifier()
 
-    MAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    _pending_file().write_text(
-        json.dumps({"state": state, "code_verifier": code_verifier, "created_at": time.time()}),
+    pending = pending_oauth_path(uid)
+    pending.parent.mkdir(parents=True, exist_ok=True)
+    pending.write_text(
+        json.dumps(
+            {
+                "user_id": uid,
+                "state": state,
+                "code_verifier": code_verifier,
+                "created_at": time.time(),
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -257,13 +485,15 @@ def prepare_oauth(cfg: MalConfig) -> dict[str, str]:
     }
 
 
-def complete_oauth_with_code(cfg: MalConfig, raw_code: str) -> MalTokens:
+def complete_oauth_with_code(cfg: MalConfig, raw_code: str, user_id: str) -> MalTokens:
     """Finish OAuth using pasted code (full URL or code string)."""
+    uid = _normalize_user_id(user_id)
     code = extract_oauth_code(raw_code)
-    pending_path = _pending_file()
+    pending_path = pending_oauth_path(uid)
     if not pending_path.exists():
         raise MalError("OAuth session expired — open Connect MyAnimeList again first.")
     pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    _assert_pending_user(pending, uid)
     if time.time() - float(pending.get("created_at", 0)) > 1800:
         raise MalError("OAuth session timed out (30 min) — start again.")
 
@@ -276,7 +506,7 @@ def complete_oauth_with_code(cfg: MalConfig, raw_code: str) -> MalTokens:
     except MalError:
         tokens.username = None
 
-    save_tokens(tokens)
+    save_tokens(uid, tokens)
     return tokens
 
 
@@ -304,11 +534,21 @@ def _new_code_verifier() -> str:
     return code_verifier
 
 
-def complete_oauth(cfg: MalConfig, code: str, state: str) -> MalTokens:
-    pending_path = _pending_file()
+def _assert_pending_user(pending: dict[str, Any], user_id: str) -> None:
+    pending_uid = str(pending.get("user_id") or "").strip()
+    if not pending_uid or pending_uid != user_id:
+        raise MalError(
+            "OAuth session belongs to a different user — log in as that user and try again."
+        )
+
+
+def complete_oauth(cfg: MalConfig, code: str, state: str, user_id: str) -> MalTokens:
+    uid = _normalize_user_id(user_id)
+    pending_path = pending_oauth_path(uid)
     if not pending_path.exists():
         raise MalError("OAuth session expired — try connecting again.")
     pending = json.loads(pending_path.read_text(encoding="utf-8"))
+    _assert_pending_user(pending, uid)
     if pending.get("state") != state:
         raise MalError("OAuth state mismatch.")
     if time.time() - float(pending.get("created_at", 0)) > 1800:
@@ -323,18 +563,18 @@ def complete_oauth(cfg: MalConfig, code: str, state: str) -> MalTokens:
     except MalError:
         tokens.username = None
 
-    save_tokens(tokens)
+    save_tokens(uid, tokens)
     return tokens
 
 
-def get_valid_access_token(cfg: MalConfig) -> str:
-    tokens = load_tokens()
+def get_valid_access_token(cfg: MalConfig, user_id: str) -> str:
+    tokens = load_tokens(user_id)
     if not tokens:
         raise MalError("Not connected to MyAnimeList.")
     if not tokens.expired:
         return tokens.access_token
-    refreshed = _refresh_tokens(cfg, tokens.refresh_token)
-    save_tokens(refreshed)
+    refreshed = _refresh_tokens(cfg, tokens.refresh_token, user_id)
+    save_tokens(user_id, refreshed)
     return refreshed.access_token
 
 
@@ -342,25 +582,31 @@ def sync_animelist_to_catalog(
     cfg: MalConfig,
     catalog_path: Path | None = None,
     *,
+    user_id: str,
     enrich: bool = True,
 ) -> int:
-    """Fetch MAL animelist and merge into catalog. Returns number of entries synced."""
-    access_token = get_valid_access_token(cfg)
+    """Fetch MAL animelist and upsert into the shared catalog.
+
+    Adds missing titles and updates metadata for shows on this user's list.
+    Never deletes catalog entries or clears folder/enabled for titles absent
+    from this sync (other users' / library titles must remain).
+    """
+    access_token = get_valid_access_token(cfg, user_id)
     entries = fetch_animelist(access_token)
+    write_anime_list_state_from_entries(user_id, entries)
     _write_cache(entries)
 
     state = load_catalog(catalog_path)
-    existing_mal = {s.id: s for s in state.shows if s.source == "mal"}
-    state = CatalogState(shows=[s for s in state.shows if s.source != "mal"])
 
     for item in entries:
         entry_id = f"mal-{item.mal_id}"
-        previous = existing_mal.get(entry_id)
+        previous = state.get(entry_id)
         entry = CatalogEntry(
             id=entry_id,
             enabled=previous.enabled if previous is not None else True,
             source="mal",
             folder=previous.folder if previous else None,
+            jellyfin_id=previous.jellyfin_id if previous else None,
             anilist_id=previous.anilist_id if previous else None,
             mal_id=item.mal_id,
             title=item.title,
@@ -369,10 +615,12 @@ def sync_animelist_to_catalog(
         state = upsert_entry(state, entry)
 
     save_catalog(state, catalog_path)
-    record_last_sync(len(entries))
+    record_last_sync(len(entries), user_id)
     if enrich:
         try:
-            enrich_catalog_mal_details(cfg, catalog_path, limit=ENRICH_BATCH_SIZE)
+            enrich_catalog_mal_details(
+                cfg, catalog_path, user_id=user_id, limit=ENRICH_BATCH_SIZE
+            )
         except (MalError, TimeoutError, OSError, URLError):
             pass
     return len(entries)
@@ -381,6 +629,7 @@ def sync_animelist_to_catalog(
 def sync_mangalist_to_catalog(
     cfg: MalConfig,
     *,
+    user_id: str,
     manga_catalog_path: Path | None = None,
     manga_media_root: Path | None = None,
 ) -> int:
@@ -401,8 +650,9 @@ def sync_mangalist_to_catalog(
         upsert_manga_entry,
     )
 
-    access_token = get_valid_access_token(cfg)
+    access_token = get_valid_access_token(cfg, user_id)
     entries = fetch_mangalist(access_token)
+    write_manga_list_state_from_entries(user_id, entries)
     _write_manga_cache(entries)
 
     media_root = manga_media_root or MANGA_ROOT
@@ -433,22 +683,24 @@ def sync_mangalist_to_catalog(
     return len(entries)
 
 
-def record_last_sync(synced_count: int) -> str:
-    """Persist last successful animelist sync timestamp. Returns ISO string."""
+def record_last_sync(synced_count: int, user_id: str) -> str:
+    """Persist last successful animelist sync timestamp for this user. Returns ISO string."""
     stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    MAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
-    LAST_SYNC_FILE.write_text(
+    path = last_sync_path(user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
         json.dumps({"synced_at": stamp, "count": synced_count}, indent=2),
         encoding="utf-8",
     )
     return stamp
 
 
-def load_last_sync() -> dict[str, Any] | None:
-    if not LAST_SYNC_FILE.exists():
+def load_last_sync(user_id: str) -> dict[str, Any] | None:
+    path = last_sync_path(user_id)
+    if not path.exists():
         return None
     try:
-        data = json.loads(LAST_SYNC_FILE.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError):
         return None
     if not data.get("synced_at"):
@@ -456,9 +708,15 @@ def load_last_sync() -> dict[str, Any] | None:
     return data
 
 
-def format_last_sync_label(data: dict[str, Any] | None = None) -> str | None:
+def format_last_sync_label(
+    data: dict[str, Any] | None = None,
+    *,
+    user_id: str | None = None,
+) -> str | None:
     """Human-readable last-sync label for the catalog UI."""
-    info = data if data is not None else load_last_sync()
+    info = data
+    if info is None and user_id:
+        info = load_last_sync(user_id)
     if not info:
         return None
     raw = str(info["synced_at"])
@@ -488,6 +746,7 @@ def enrich_catalog_mal_details(
     cfg: MalConfig,
     catalog_path: Path | None = None,
     *,
+    user_id: str,
     limit: int | None = ENRICH_BATCH_SIZE,
     force: bool = False,
     skip_mal_ids: set[int] | frozenset[int] | None = None,
@@ -503,7 +762,7 @@ def enrich_catalog_mal_details(
         mal_ids -= {int(x) for x in skip_mal_ids}
     if not mal_ids:
         return 0
-    access_token = get_valid_access_token(cfg)
+    access_token = get_valid_access_token(cfg, user_id)
     return enrich_mal_details(access_token, mal_ids, limit=limit, force=force)
 
 
@@ -818,6 +1077,8 @@ def _store_episode_titles(
     existing = _episode_titles_from_cache(data.get("episode_titles") or {})
     existing.update(titles)
     data["episode_titles"] = {str(k): v for k, v in sorted(existing.items())}
+    for key in ANIME_LIST_FIELD_KEYS:
+        data.pop(key, None)
     if complete:
         data["episode_titles_fetched_at"] = (
             datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -829,7 +1090,7 @@ def _store_episode_titles(
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def ensure_anime_details_async(cfg: MalConfig, mal_id: int) -> bool:
+def ensure_anime_details_async(cfg: MalConfig, mal_id: int, user_id: str) -> bool:
     """Start background enrich if needed. Returns True if work was scheduled."""
     if not cache_needs_enrichment(mal_id):
         return False
@@ -840,7 +1101,7 @@ def ensure_anime_details_async(cfg: MalConfig, mal_id: int) -> bool:
 
     def runner() -> None:
         try:
-            ensure_anime_details(cfg, mal_id)
+            ensure_anime_details(cfg, mal_id, user_id)
         finally:
             with _enrich_lock:
                 _enrich_inflight.discard(mal_id)
@@ -849,14 +1110,14 @@ def ensure_anime_details_async(cfg: MalConfig, mal_id: int) -> bool:
     return True
 
 
-def ensure_anime_details(cfg: MalConfig, mal_id: int) -> MalAnimeEntry | None:
+def ensure_anime_details(cfg: MalConfig, mal_id: int, user_id: str) -> MalAnimeEntry | None:
     """Fetch related_anime for one title if missing. Used on show page load."""
     cached = load_cached_anime(mal_id)
     if cached and not _cache_needs_enrichment(mal_id):
         ensure_episode_titles(mal_id)
         return load_cached_anime(mal_id) or cached
     try:
-        access_token = get_valid_access_token(cfg)
+        access_token = get_valid_access_token(cfg, user_id)
         merge_anime_details_into_cache(access_token, mal_id)
         ensure_episode_titles(mal_id)
         return load_cached_anime(mal_id)
@@ -928,6 +1189,7 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
 
     media_type = node.get("media_type") or (existing.media_type if existing else None)
     release_year = parse_mal_start_year(node) or (existing.release_year if existing else None)
+    # List fields are personal overlays — details enrich only updates shared metadata.
     entry = MalAnimeEntry(
         mal_id=mal_id,
         title=str(node.get("title") or (existing.title if existing else title_fallback or f"Anime {mal_id}")),
@@ -939,10 +1201,10 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
         ),
         genres=genres[:5] or (existing.genres if existing else []),
         num_episodes=int(node.get("num_episodes") or (existing.num_episodes if existing else 0)),
-        list_status=existing.list_status if existing else "plan_to_watch",
-        num_episodes_watched=existing.num_episodes_watched if existing else 0,
+        list_status="plan_to_watch",
+        num_episodes_watched=0,
         anime_status=node.get("status") or (existing.anime_status if existing else None),
-        score=existing.score if existing else 0,
+        score=0,
         mean_score=node.get("mean") if node.get("mean") is not None else (existing.mean_score if existing else None),
         related_anime=related,
         broadcast_day=day,
@@ -964,14 +1226,21 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
     return entry
 
 
-def update_episodes_watched(cfg: MalConfig, mal_id: int, num_watched: int, status: str | None = None) -> None:
+def update_episodes_watched(
+    cfg: MalConfig,
+    mal_id: int,
+    num_watched: int,
+    status: str | None = None,
+    *,
+    user_id: str,
+) -> None:
     """Push local watch progress to MAL (PATCH my_list_status).
 
-    Never decreases MAL progress: the value sent is at least the cached remote count.
+    Never decreases MAL progress: the value sent is at least the overlay remote count.
     """
-    access_token = get_valid_access_token(cfg)
-    cached = load_cached_anime(mal_id)
-    floor = cached.num_episodes_watched if cached else 0
+    access_token = get_valid_access_token(cfg, user_id)
+    row = get_anime_list_row(user_id, mal_id) or {}
+    floor = int(row.get("num_episodes_watched") or 0)
     num_watched = max(0, int(num_watched), floor)
     form: dict[str, str] = {"num_watched_episodes": str(num_watched)}
     if status:
@@ -984,11 +1253,48 @@ def update_episodes_watched(cfg: MalConfig, mal_id: int, num_watched: int, statu
         put_form = {"status": status or "watching", "num_watched_episodes": str(num_watched)}
         _api_form_raw(access_token, f"/anime/{mal_id}/my_list_status", put_form, method="PUT")
 
-    if cached:
-        cached.num_episodes_watched = max(cached.num_episodes_watched, num_watched)
-        if status:
-            cached.list_status = status
-        write_cached_anime(cached)
+    upsert_anime_list_row(
+        user_id,
+        mal_id,
+        list_status=status or row.get("list_status") or "watching",
+        num_episodes_watched=num_watched,
+        score=int(row.get("score") or 0) if "score" in row else None,
+    )
+
+
+def update_anime_list_status(
+    cfg: MalConfig,
+    mal_id: int,
+    status: str,
+    *,
+    user_id: str,
+) -> dict[str, Any]:
+    """Set MAL anime list status via PATCH/PUT my_list_status; update per-user overlay."""
+    status = str(status or "").strip()
+    if status not in ANIME_LIST_STATUSES:
+        raise MalError(f"Invalid list status: {status}")
+    access_token = get_valid_access_token(cfg, user_id)
+    row = get_anime_list_row(user_id, mal_id) or {}
+    form: dict[str, str] = {"status": status}
+    try:
+        _api_form_raw(access_token, f"/anime/{mal_id}/my_list_status", form, method="PATCH")
+    except MalError as exc:
+        if "404" not in str(exc):
+            raise
+        put_form: dict[str, str] = {"status": status}
+        if "num_episodes_watched" in row:
+            put_form["num_watched_episodes"] = str(int(row.get("num_episodes_watched") or 0))
+        _api_form_raw(access_token, f"/anime/{mal_id}/my_list_status", put_form, method="PUT")
+
+    return upsert_anime_list_row(
+        user_id,
+        mal_id,
+        list_status=status,
+        num_episodes_watched=int(row["num_episodes_watched"])
+        if "num_episodes_watched" in row
+        else None,
+        score=int(row["score"]) if "score" in row else None,
+    )
 
 
 def update_chapters_read(
@@ -996,14 +1302,16 @@ def update_chapters_read(
     mal_id: int,
     num_chapters_read: int,
     status: str | None = None,
+    *,
+    user_id: str,
 ) -> None:
     """Push manga chapter progress to MAL (PATCH my_list_status).
 
-    Never decreases MAL chapter progress relative to the local cache floor.
+    Never decreases MAL chapter progress relative to the per-user overlay floor.
     """
-    access_token = get_valid_access_token(cfg)
-    cached = load_cached_manga(mal_id)
-    floor = cached.num_chapters_read if cached else 0
+    access_token = get_valid_access_token(cfg, user_id)
+    row = get_manga_list_row(user_id, mal_id) or {}
+    floor = int(row.get("num_chapters_read") or 0)
     num_chapters_read = max(0, int(num_chapters_read), floor)
     form: dict[str, str] = {"num_chapters_read": str(num_chapters_read)}
     if status:
@@ -1019,11 +1327,14 @@ def update_chapters_read(
         }
         _api_form_raw(access_token, f"/manga/{mal_id}/my_list_status", put_form, method="PUT")
 
-    if cached:
-        cached.num_chapters_read = max(cached.num_chapters_read, num_chapters_read)
-        if status:
-            cached.list_status = status
-        write_cached_manga(cached)
+    upsert_manga_list_row(
+        user_id,
+        mal_id,
+        list_status=status or row.get("list_status") or "reading",
+        num_chapters_read=num_chapters_read,
+        num_volumes_read=int(row["num_volumes_read"]) if "num_volumes_read" in row else None,
+        score=int(row["score"]) if "score" in row else None,
+    )
 
 
 def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True) -> None:
@@ -1055,6 +1366,7 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
             pass
     if related:
         details_enriched = True
+    # Shared cache is metadata-only — personal list fields live in per-user overlay.
     payload = {
         "mal_id": entry.mal_id,
         "title": entry.title,
@@ -1062,10 +1374,7 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
         "poster_url": entry.poster_url,
         "genres": entry.genres,
         "num_episodes": entry.num_episodes,
-        "list_status": entry.list_status,
-        "num_episodes_watched": entry.num_episodes_watched,
         "anime_status": entry.anime_status,
-        "score": entry.score,
         "mean_score": entry.mean_score,
         "broadcast_day": broadcast_day,
         "broadcast_time": broadcast_time,
@@ -1157,11 +1466,12 @@ def load_cached_manga(mal_id: int) -> MalMangaEntry | None:
         genres=data.get("genres", []),
         num_volumes=int(data.get("num_volumes", 0)),
         num_chapters=int(data.get("num_chapters", 0)),
-        list_status=data.get("list_status", "plan_to_read"),
-        num_volumes_read=int(data.get("num_volumes_read", 0)),
-        num_chapters_read=int(data.get("num_chapters_read", 0)),
+        # Personal list fields come from per-user overlay (defaults here).
+        list_status="plan_to_read",
+        num_volumes_read=0,
+        num_chapters_read=0,
         manga_status=data.get("manga_status"),
-        score=int(data.get("score", 0)),
+        score=0,
         mean_score=data.get("mean_score"),
         media_type=(data.get("media_type") or None),
         release_year=data.get("release_year"),
@@ -1193,11 +1503,7 @@ def write_cached_manga(entry: MalMangaEntry) -> None:
         "genres": entry.genres,
         "num_volumes": entry.num_volumes,
         "num_chapters": entry.num_chapters,
-        "list_status": entry.list_status,
-        "num_volumes_read": entry.num_volumes_read,
-        "num_chapters_read": entry.num_chapters_read,
         "manga_status": entry.manga_status,
-        "score": entry.score,
         "mean_score": entry.mean_score,
         "media_type": entry.media_type,
         "release_year": release_year,
@@ -1234,6 +1540,37 @@ def _parse_mangalist_row(row: dict[str, Any]) -> MalMangaEntry | None:
     )
 
 
+def prefer_large_mal_picture_url(url: str | None) -> str | None:
+    """Upgrade MAL CDN picture URLs from tiny/medium to the large variant.
+
+    MAL serves ``…/123.jpg`` (medium), ``…/123t.jpg`` (tiny), ``…/123l.jpg`` (large).
+    Leaves non-MAL URLs unchanged.
+    """
+    if not url:
+        return None
+    text = str(url).strip()
+    if "myanimelist.net/images/" not in text:
+        return text
+    if re.search(r"l\.(?:jpe?g|webp|png)(?:\?|$)", text, re.IGNORECASE):
+        return text
+    tiny = re.sub(
+        r"t\.(jpe?g|webp|png)(\?.*)?$",
+        r"l.\1\2",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    if tiny != text:
+        return tiny
+    return re.sub(
+        r"(\d+)\.(jpe?g|webp|png)(\?.*)?$",
+        r"\1l.\2\3",
+        text,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+
+
 def load_cached_anime(mal_id: int) -> MalAnimeEntry | None:
     path = CACHE_DIR / f"{mal_id}.json"
     if not path.exists():
@@ -1246,10 +1583,11 @@ def load_cached_anime(mal_id: int) -> MalAnimeEntry | None:
         poster_url=data.get("poster_url"),
         genres=data.get("genres", []),
         num_episodes=int(data.get("num_episodes", 0)),
-        list_status=data.get("list_status", "plan_to_watch"),
-        num_episodes_watched=int(data.get("num_episodes_watched", 0)),
+        # Personal list fields come from per-user overlay (defaults here).
+        list_status="plan_to_watch",
+        num_episodes_watched=0,
         anime_status=data.get("anime_status"),
-        score=int(data.get("score", 0)),
+        score=0,
         mean_score=data.get("mean_score"),
         related_anime=_related_anime_from_cache(data.get("related_anime") or []),
         broadcast_day=data.get("broadcast_day"),
@@ -1372,8 +1710,9 @@ def _related_anime_from_cache(items: list[dict[str, Any]]) -> list[RelatedAnime]
     return related
 
 
-def _pending_file() -> Path:
-    return MAL_DATA_DIR / "pending_oauth.json"
+def _pending_file(user_id: str) -> Path:
+    """Deprecated alias — use ``pending_oauth_path``."""
+    return pending_oauth_path(user_id)
 
 
 def _exchange_code(cfg: MalConfig, code: str, code_verifier: str) -> MalTokens:
@@ -1390,7 +1729,7 @@ def _exchange_code(cfg: MalConfig, code: str, code_verifier: str) -> MalTokens:
     return _tokens_from_payload(payload)
 
 
-def _refresh_tokens(cfg: MalConfig, refresh_token: str) -> MalTokens:
+def _refresh_tokens(cfg: MalConfig, refresh_token: str, user_id: str) -> MalTokens:
     body = urlencode(
         {
             "grant_type": "refresh_token",
@@ -1399,7 +1738,7 @@ def _refresh_tokens(cfg: MalConfig, refresh_token: str) -> MalTokens:
     ).encode("utf-8")
     payload = _token_request(cfg, body)
     tokens = _tokens_from_payload(payload)
-    old = load_tokens()
+    old = load_tokens(user_id)
     if old and old.username:
         tokens.username = old.username
     return tokens

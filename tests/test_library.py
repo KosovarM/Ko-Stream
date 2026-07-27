@@ -117,3 +117,6 @@ def test_mal_show_keeps_full_list_with_local_files(tmp_path: Path, monkeypatch):
     assert show.episodes[2].title == "Episode 3"
     assert show.episodes[2].season == 4
     assert show.is_metadata_only is False
+    assert show.has_local_files is True
+    assert show.latest_local_mtime is not None
+    assert show.latest_local_mtime > 0

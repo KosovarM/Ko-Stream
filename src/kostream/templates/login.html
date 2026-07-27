@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Log in') }} — {{ site_name }}{% endblock %}
+{% block body_class %}login-view{% endblock %}
+{% block content %}
+<section class="login-shell" aria-label="{{ _('Log in') }}">
+  <div class="login-atmosphere" aria-hidden="true"></div>
+  <div class="login-panel">
+    <header class="login-brand">
+      <img
+        class="login-brand-mark"
+        src="{{ url_for('static', filename='logo-mark.png') }}"
+        width="96"
+        height="96"
+        alt=""
+        decoding="async"
+      >
+      <p class="login-brand-name">Ko-<span>Stream</span></p>
+      <p class="login-brand-tagline">{{ _('Your private local library') }}</p>
+    </header>
+
+    {% if not users_bootstrapped %}
+    <p class="login-bootstrap-hint">
+      {{ _('No accounts yet. Create the first master account on the server:') }}
+      <code>ko-stream accounts bootstrap --username YOUR_NAME --password YOUR_PASSWORD</code>
+    </p>
+    {% endif %}
+
+    {% if error %}
+    <p class="login-error" role="alert">{{ error }}</p>
+    {% endif %}
+
+    <form class="login-form" method="post" action="{{ url_for('login') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label>
+        <span>{{ _('Username') }}</span>
+        <input type="text" name="username" autocomplete="username" required autofocus{% if not users_bootstrapped %} disabled{% endif %}>
+      </label>
+      <label>
+        <span>{{ _('Password') }}</span>
+        <input type="password" name="password" autocomplete="current-password" required{% if not users_bootstrapped %} disabled{% endif %}>
+      </label>
+      <button type="submit" class="btn-watch login-submit"{% if not users_bootstrapped %} disabled{% endif %}>{{ _('Log in') }}</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

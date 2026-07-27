@@ -11,6 +11,8 @@ AVAIL_ALL = "all"
 AVAIL_LOCAL = "local"
 AVAIL_STREAM = "stream"
 AVAIL_OPTIONS = frozenset({AVAIL_ALL, AVAIL_LOCAL, AVAIL_STREAM})
+AVAIL_COOKIE = "kostream_avail"
+AVAIL_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 year
 
 # Browse subcategories (mutually exclusive)
 KIND_ANIMES = "animes"  # Hauptanimes — TV (+ unknown/missing)
@@ -57,6 +59,22 @@ def normalize_availability(value: str | None) -> str:
     if v in AVAIL_OPTIONS:
         return v
     return AVAIL_ALL
+
+
+def resolve_request_availability(
+    *,
+    has_avail_param: bool,
+    avail_param: str | None,
+    cookie_value: str | None,
+) -> tuple[str, bool]:
+    """Return ``(availability, should_set_cookie)`` for anime browse routes.
+
+    Query ``avail`` wins and is persisted to the cookie; otherwise the cookie
+    (or ``all``) is used without rewriting the cookie.
+    """
+    if has_avail_param:
+        return normalize_availability(avail_param), True
+    return normalize_availability(cookie_value), False
 
 
 def normalize_browse_kind(value: str | None) -> str:

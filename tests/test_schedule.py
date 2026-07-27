@@ -79,12 +79,23 @@ def test_build_weekly_schedule_seven_days():
 def test_schedule_page_ok(tmp_path):
     from kostream.app import create_app
 
+    from conftest import bootstrap_test_users, login_client
+
     media = tmp_path / "shows"
     media.mkdir()
     catalog = tmp_path / "selected.json"
     catalog.write_text('{"shows": []}', encoding="utf-8")
-    app = create_app(media_root=media, catalog_path=catalog)
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    app = create_app(
+        media_root=media,
+        catalog_path=catalog,
+        users_path=users,
+        user_data_base=user_data,
+    )
     client = app.test_client()
+    login_client(client)
     resp = client.get("/schedule")
     assert resp.status_code == 200
     assert b"Schedule" in resp.data
@@ -99,6 +110,8 @@ def test_schedule_modes_split_manga_and_manhwa(tmp_path, monkeypatch):
     from kostream import mal as mal_mod
     from kostream.mal import MalMangaEntry
     from kostream.manga_catalog import MangaCatalogEntry, MangaCatalogState, save_manga_catalog
+
+    from conftest import bootstrap_test_users, login_client
 
     media = tmp_path / "shows"
     media.mkdir()
@@ -168,13 +181,19 @@ def test_schedule_modes_split_manga_and_manhwa(tmp_path, monkeypatch):
             media_type="manga",
         )
     )
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
     app = create_app(
         media_root=media,
         catalog_path=catalog,
         manga_root=manga_root,
         manga_catalog_path=manga_catalog,
+        users_path=users,
+        user_data_base=user_data,
     )
     client = app.test_client()
+    login_client(client)
 
     manga = client.get("/schedule?mode=manga")
     assert manga.status_code == 200

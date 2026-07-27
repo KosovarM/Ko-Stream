@@ -183,25 +183,39 @@ def filter_currently_airing(shows: list[Show]) -> list[Show]:
 
 
 def recently_added(shows: list[Show], limit: int = 12) -> list[Show]:
-    dated = [s for s in shows if s.added_at]
-    undated = [s for s in shows if not s.added_at]
-    dated.sort(key=lambda s: s.added_at or "", reverse=True)
-    return (dated + undated)[:limit]
+    """Shows that most recently gained local episode files (by filesystem mtime)."""
+    with_local = [
+        s for s in shows if s.has_local_files and s.latest_local_mtime is not None
+    ]
+    with_local.sort(key=lambda s: s.latest_local_mtime or 0.0, reverse=True)
+    return with_local[:limit]
 
 
-def apply_mal_metadata(show: Show, cached) -> None:
+def apply_mal_metadata(show: Show, cached, list_row: dict | None = None) -> None:
     """Copy MAL list progress, ratings, and relations onto a Show.
 
     Progress is merged upward: local ``episodes_watched`` is never lowered.
+    When ``list_row`` is provided (per-user overlay), it supplies watched/score/list_status.
     """
     from kostream.browse import format_type_label
 
-    show.episodes_watched = max(show.episodes_watched, cached.num_episodes_watched)
+    watched = int(getattr(cached, "num_episodes_watched", 0) or 0)
+    score = int(getattr(cached, "score", 0) or 0)
+    list_status = getattr(cached, "list_status", None)
+    if list_row:
+        if "num_episodes_watched" in list_row:
+            watched = int(list_row.get("num_episodes_watched") or 0)
+        if "score" in list_row:
+            score = int(list_row.get("score") or 0)
+        if list_row.get("list_status"):
+            list_status = str(list_row["list_status"])
+
+    show.episodes_watched = max(show.episodes_watched, watched)
     show.anime_status = cached.anime_status
     # Keep completed if we are already at/above MAL progress
     if show.list_status != "completed":
-        show.list_status = cached.list_status
-    show.user_score = cached.score if cached.score else None
+        show.list_status = list_status
+    show.user_score = score if score else None
     show.mean_score = cached.mean_score
     show.related_anime = list(cached.related_anime or [])
     show.broadcast_day = getattr(cached, "broadcast_day", None)
@@ -218,6 +232,7 @@ def reconcile_anime_progress(
     *,
     completed_path: Path | None = None,
     mal_cfg=None,
+    user_id: str | None = None,
 ) -> int:
     """Take max(local completed, MAL cache) and push upward both ways.
 
@@ -225,14 +240,27 @@ def reconcile_anime_progress(
     - If local is ahead and MAL is connected → PATCH MAL upward only.
     Returns the merged watched count.
     """
-    from kostream.mal import MalConfig, MalError, load_cached_anime, update_episodes_watched
+    from kostream.mal import (
+        MalConfig,
+        MalError,
+        get_anime_list_row,
+        load_cached_anime,
+        update_episodes_watched,
+    )
 
     file_path = completed_path or COMPLETED_FILE
     local = _effective_watched_count(show, load_completed(file_path))
     remote = 0
-    cached = load_cached_anime(show.mal_id) if show.mal_id else None
-    if cached:
-        remote = int(cached.num_episodes_watched or 0)
+    got_overlay = False
+    if show.mal_id and user_id:
+        row = get_anime_list_row(user_id, show.mal_id)
+        if row is not None:
+            remote = int(row.get("num_episodes_watched") or 0)
+            got_overlay = True
+    if not got_overlay and show.mal_id:
+        cached = load_cached_anime(show.mal_id)
+        if cached:
+            remote = int(cached.num_episodes_watched or 0)
     merged = max(local, remote, show.episodes_watched or 0)
     if merged <= 0:
         return 0
@@ -250,11 +278,13 @@ def reconcile_anime_progress(
             cfg = MalConfig.from_env()
         except Exception:  # noqa: BLE001
             cfg = None
-    if cfg and show.mal_id and merged > remote:
+    if cfg and show.mal_id and user_id and merged > remote:
         try:
             total = show.episode_count or 0
             status = "completed" if total and merged >= total else None
-            update_episodes_watched(cfg, show.mal_id, merged, status=status)
+            update_episodes_watched(
+                cfg, show.mal_id, merged, status=status, user_id=user_id
+            )
         except MalError:
             pass
     return merged
