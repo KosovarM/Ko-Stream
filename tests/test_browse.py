@@ -1,10 +1,17 @@
 from kostream.browse import (
     AVAIL_LOCAL,
     AVAIL_STREAM,
+    KIND_ANIMES,
+    KIND_MOVIES,
+    KIND_SPECIALS,
     PAGE_SIZE,
+    classify_show_kind,
     collect_genres,
+    filter_by_kind,
     filter_shows,
+    format_type_label,
     normalize_availability,
+    normalize_browse_kind,
     paginate,
 )
 from kostream.models import Episode, Show
@@ -86,6 +93,59 @@ def test_normalize_availability():
     assert normalize_availability("LOCAL") == "local"
     assert normalize_availability("stream") == "stream"
     assert normalize_availability("nope") == "all"
+
+
+def test_format_type_label():
+    assert format_type_label(None) == "TV"
+    assert format_type_label("tv") == "TV"
+    assert format_type_label("movie") == "Movie"
+    assert format_type_label("ova") == "OVA"
+    assert format_type_label("tv_special") == "TV Special"
+
+
+def test_classify_show_kind_three_way():
+    tv = Show(id="tv", title="TV", description="", media_type="tv", type_label="TV")
+    movie = Show(id="m", title="Film", description="", media_type="movie", type_label="Movie")
+    ova = Show(id="o", title="OVA", description="", media_type="ova", type_label="OVA")
+    special = Show(id="s", title="Sp", description="", media_type="special", type_label="Special")
+    ona = Show(id="n", title="ONA", description="", media_type="ona", type_label="ONA")
+    music = Show(id="mu", title="OP", description="", media_type="music", type_label="Music")
+    missing = Show(id="x", title="Unknown", description="")  # default type_label TV
+    weird = Show(id="w", title="Weird", description="", media_type="something_new")
+
+    assert classify_show_kind(tv) == KIND_ANIMES
+    assert classify_show_kind(movie) == KIND_MOVIES
+    assert classify_show_kind(ova) == KIND_SPECIALS
+    assert classify_show_kind(special) == KIND_SPECIALS
+    assert classify_show_kind(ona) == KIND_SPECIALS
+    assert classify_show_kind(music) == KIND_SPECIALS
+    assert classify_show_kind(missing) == KIND_ANIMES
+    assert classify_show_kind(weird) == KIND_ANIMES  # unknown → main list
+
+
+def test_filter_by_kind_mutually_exclusive():
+    shows = [
+        Show(id="tv", title="A", description="", media_type="tv"),
+        Show(id="movie", title="B", description="", media_type="movie"),
+        Show(id="ova", title="C", description="", media_type="ova"),
+        Show(id="unknown", title="D", description=""),
+    ]
+    animes = filter_by_kind(shows, KIND_ANIMES)
+    movies = filter_by_kind(shows, KIND_MOVIES)
+    specials = filter_by_kind(shows, KIND_SPECIALS)
+    assert {s.id for s in animes} == {"tv", "unknown"}
+    assert {s.id for s in movies} == {"movie"}
+    assert {s.id for s in specials} == {"ova"}
+    # No overlap
+    ids = [s.id for s in animes + movies + specials]
+    assert len(ids) == len(set(ids)) == len(shows)
+
+
+def test_normalize_browse_kind():
+    assert normalize_browse_kind(None) == KIND_ANIMES
+    assert normalize_browse_kind("movies") == KIND_MOVIES
+    assert normalize_browse_kind("SPECIALS") == KIND_SPECIALS
+    assert normalize_browse_kind("nope") == KIND_ANIMES
 
 
 def test_paginate_25_per_page():

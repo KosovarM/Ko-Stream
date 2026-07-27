@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path
 
@@ -17,7 +18,21 @@ from kostream.jellyfin import JellyfinConfig, fetch_shows as jellyfin_fetch_show
 from kostream.mal import load_cached_anime
 from kostream.watch_progress import apply_mal_metadata
 
-MEDIA_ROOT = Path(__file__).resolve().parents[2] / "media" / "shows"
+_REPO_MEDIA_SHOWS = Path(__file__).resolve().parents[2] / "media" / "shows"
+_DEFAULT_ANIME = Path(os.environ.get("KOSTREAM_ANIME_ROOT", r"D:\Media\Ko-Stream\anime"))
+
+
+def default_media_root() -> Path:
+    """Anime library root (env ``KOSTREAM_ANIME_ROOT`` / ``KOSTREAM_MEDIA_ROOT``)."""
+    env = (os.environ.get("KOSTREAM_ANIME_ROOT") or os.environ.get("KOSTREAM_MEDIA_ROOT") or "").strip()
+    if env:
+        return Path(env)
+    if _DEFAULT_ANIME.exists() or _DEFAULT_ANIME.parent.exists():
+        return _DEFAULT_ANIME
+    return _REPO_MEDIA_SHOWS
+
+
+MEDIA_ROOT = default_media_root()
 # S01E02 / s04e01, 1x02 (season x ep), Episode 2 / Ep 2 / Ep.2
 EPISODE_PATTERN = re.compile(
     r"(?:"
@@ -91,7 +106,7 @@ def _build_show_from_entry(entry: CatalogEntry, base: Path) -> Show | None:
             return _attach_catalog_meta(show, entry)
 
     show: Show | None = None
-    if entry.source == "demo":
+    if entry.source in ("demo", "anilist"):
         show = _demo_show_for_entry(entry)
     elif entry.source == "jellyfin" and entry.jellyfin_id:
         show = _jellyfin_show_for_entry(entry)

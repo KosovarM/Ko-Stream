@@ -17,6 +17,7 @@ data/progress.json
 data/completed.json
 data/manga_completed.json
 data/manga_page_progress.json
+data/requests.json
 
 # Grab URL cache / overrides (local)
 data/grab/cache.json
@@ -44,6 +45,12 @@ data/catalog/selected.json
 data/manga/selected.json
 data/mal/manga_cache/
 
+# MangaDex chapter-title cache (local sync)
+data/mangadex/
+
+# Sync skip index (per-install completion flags)
+data/sync_index/
+
 # IDE
 .vscode/
 !.vscode/extensions.json
@@ -54,3 +61,4 @@ Thumbs.db
 
 .env
 .env.*
+data/.flask_secret

@@ -1,20 +1,36 @@
-"""Local manga library — scan media/manga and serve page images (folders + CBZ).
+"""Local manga library — scan manga root and serve page images (folders + CBZ).
 
-Chapter display titles come from local filenames / CBZ ``ComicInfo.xml`` only.
-MAL and Jikan expose manga ``num_chapters`` but not per-chapter titles (unlike
-anime episode lists), so Sync cannot populate chapter names the way it does for
-anime. See ``chapter_display_title`` / ``_comicinfo_title_from_cbz``.
+Default root: ``D:\\Media\\Ko-Stream\\manga`` (override with ``KOSTREAM_MANGA_ROOT``).
+
+Chapter display titles prefer local filenames / CBZ ``ComicInfo.xml`` when
+meaningful; otherwise Sync-populated MangaDex titles overlay by chapter number
+(see ``apply_mangadex_chapter_titles`` / ``kostream.mangadex``).
 """
 
 from __future__ import annotations
 
+import os
 import re
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-MANGA_ROOT = Path(__file__).resolve().parents[2] / "media" / "manga"
+_REPO_MANGA = Path(__file__).resolve().parents[2] / "media" / "manga"
+_DEFAULT_MANGA = Path(os.environ.get("KOSTREAM_MANGA_ROOT", r"D:\Media\Ko-Stream\manga"))
+
+
+def default_manga_root() -> Path:
+    """Manga/manhwa library root (env ``KOSTREAM_MANGA_ROOT``)."""
+    env = (os.environ.get("KOSTREAM_MANGA_ROOT") or "").strip()
+    if env:
+        return Path(env)
+    if _DEFAULT_MANGA.exists() or _DEFAULT_MANGA.parent.exists():
+        return _DEFAULT_MANGA
+    return _REPO_MANGA
+
+
+MANGA_ROOT = default_manga_root()
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".avif", ".bmp"}
 CBZ_EXTENSIONS = {".cbz", ".zip"}
@@ -51,6 +67,52 @@ class MangaChapter:
     relative: str
 
 
+def chapter_list_parts(
+    display_title: str,
+    *,
+    relative: str = "",
+) -> tuple[str, str]:
+    """Split a chapter label into ``(number, name)`` for list UI (like episodes).
+
+    Number stays on the left even when MangaDex supplies a real title. When no
+    chapter number can be parsed, number is ``\"\"`` and name is the full title.
+    """
+    t = (display_title or "").strip()
+    stem = relative if relative not in (".", "") else t
+    num = _chapter_number_from_stem(stem) or _chapter_number_from_stem(t)
+    if num is not None:
+        from kostream.mangadex import normalize_chapter_key
+
+        label_num = normalize_chapter_key(num) or num
+    else:
+        label_num = ""
+
+    named = re.match(
+        r"(?i)^(?:chapter|ch\.?)\s*\#?\s*\d+(?:\.\d+)?\s*:\s*(.+)$",
+        t,
+    )
+    if named and named.group(1).strip():
+        return label_num, named.group(1).strip()
+    if label_num and local_chapter_title_is_meaningful(t):
+        return label_num, t
+    if label_num:
+        # Generic \"Chapter N\" — number alone; avoid duplicating on the right.
+        return label_num, ""
+    return "", t or "Chapter"
+
+
+def chapter_payload_row(chapter: MangaChapter) -> dict:
+    """JSON row for overview/reader chapter lists."""
+    number, name = chapter_list_parts(chapter.title, relative=chapter.relative)
+    return {
+        "id": chapter.id,
+        "title": chapter.title,
+        "number": number,
+        "name": name,
+        "page_count": chapter.page_count,
+    }
+
+
 @dataclass
 class MangaTitle:
     id: str
@@ -68,6 +130,7 @@ class MangaTitle:
     source: str = "local"  # local | mal
     media_type: str | None = None  # manga | manhwa | manhua | …
     genres: list[str] = field(default_factory=list)
+    release_year: int | None = None
 
     @property
     def chapter_count(self) -> int:
@@ -86,10 +149,7 @@ class MangaTitle:
         return (self.media_type or "").casefold() == "manhwa"
 
     def chapters_payload(self) -> list[dict]:
-        return [
-            {"id": c.id, "title": c.title, "page_count": c.page_count}
-            for c in self.chapters
-        ]
+        return [chapter_payload_row(c) for c in self.chapters]
 
     def chapters_payload_with_progress(
         self,
@@ -109,12 +169,8 @@ class MangaTitle:
             done = chapter_completed(
                 self, c.id, completed, self.num_chapters_read
             )
-            row: dict = {
-                "id": c.id,
-                "title": c.title,
-                "page_count": c.page_count,
-                "done": done,
-            }
+            row = chapter_payload_row(c)
+            row["done"] = done
             if not done and c.id in pages_map:
                 try:
                     idx = int(pages_map[c.id])
@@ -157,6 +213,56 @@ def _slugify(name: str) -> str:
     slug = re.sub(r"[^\w\s-]", "", name, flags=re.UNICODE)
     slug = re.sub(r"[-\s]+", "-", slug.strip()).casefold()
     return slug or "manga"
+
+
+def local_chapter_title_is_meaningful(display_title: str) -> bool:
+    """True when a local label already has a real name (not just ``Chapter N``)."""
+    t = (display_title or "").strip()
+    if not t:
+        return False
+    named = re.match(
+        r"(?i)^(?:chapter|ch\.?)\s*\#?\s*\d+(?:\.\d+)?\s*:\s*(.+)$",
+        t,
+    )
+    if named:
+        return bool(named.group(1).strip())
+    if re.fullmatch(r"(?i)(?:chapter|ch\.?|c)?\s*\#?\s*\d+(?:\.\d+)?", t):
+        return False
+    return True
+
+
+def apply_mangadex_chapter_titles(
+    chapters: list[MangaChapter],
+    mdx_titles: dict[str, str] | None,
+) -> list[MangaChapter]:
+    """Overlay MangaDex titles onto chapters that lack a meaningful local name."""
+    if not mdx_titles or not chapters:
+        return chapters
+    from kostream.mangadex import normalize_chapter_key
+
+    out: list[MangaChapter] = []
+    for ch in chapters:
+        if local_chapter_title_is_meaningful(ch.title):
+            out.append(ch)
+            continue
+        stem = ch.relative if ch.relative not in (".", "") else ch.title
+        num_s = _chapter_number_from_stem(stem)
+        key = normalize_chapter_key(num_s) if num_s is not None else None
+        name = (mdx_titles.get(key) or "").strip() if key else ""
+        if not name:
+            out.append(ch)
+            continue
+        label_num = key or num_s or "?"
+        out.append(
+            MangaChapter(
+                id=ch.id,
+                title=f"Chapter {label_num}: {name}",
+                page_count=ch.page_count,
+                kind=ch.kind,
+                relative=ch.relative,
+            )
+        )
+    return out
 
 
 def chapter_display_title(
@@ -389,7 +495,13 @@ def load_manga_library(
             or entry.id
         )
         status = cached.list_status if cached else None
-        chapters = local_title.chapters if local_title else []
+        chapters = list(local_title.chapters) if local_title else []
+        if chapters and entry.mal_id:
+            from kostream.mangadex import load_cached_chapter_titles
+
+            chapters = apply_mangadex_chapter_titles(
+                chapters, load_cached_chapter_titles(entry.mal_id)
+            )
         # Prefer MAL poster over first page (often credits/scan pages)
         poster = cached.poster_url if cached else None
         cover = None if poster else (local_title.cover_chapter_id if local_title else None)
@@ -404,7 +516,7 @@ def load_manga_library(
                 id=entry.id,
                 title=title_name,
                 folder=folder or (local_title.folder if local_title else ""),
-                chapters=list(chapters),
+                chapters=chapters,
                 cover_chapter_id=cover,
                 poster_url=poster,
                 mal_id=entry.mal_id,
@@ -416,6 +528,7 @@ def load_manga_library(
                 source="mal",
                 media_type=media_type,
                 genres=genres,
+                release_year=cached.release_year if cached else None,
             )
         )
 

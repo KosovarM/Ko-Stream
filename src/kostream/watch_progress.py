@@ -166,6 +166,10 @@ def mark_show_completed(show: Show, path: Path | None = None) -> int:
 
 
 def is_currently_airing(show: Show) -> bool:
+    from kostream.browse import KIND_ANIMES, classify_show_kind
+
+    if classify_show_kind(show) != KIND_ANIMES:
+        return False
     if show.anime_status != "currently_airing":
         return False
     if show.list_status == "completed":
@@ -186,15 +190,74 @@ def recently_added(shows: list[Show], limit: int = 12) -> list[Show]:
 
 
 def apply_mal_metadata(show: Show, cached) -> None:
-    """Copy MAL list progress, ratings, and relations onto a Show."""
-    show.episodes_watched = cached.num_episodes_watched
+    """Copy MAL list progress, ratings, and relations onto a Show.
+
+    Progress is merged upward: local ``episodes_watched`` is never lowered.
+    """
+    from kostream.browse import format_type_label
+
+    show.episodes_watched = max(show.episodes_watched, cached.num_episodes_watched)
     show.anime_status = cached.anime_status
-    show.list_status = cached.list_status
+    # Keep completed if we are already at/above MAL progress
+    if show.list_status != "completed":
+        show.list_status = cached.list_status
     show.user_score = cached.score if cached.score else None
     show.mean_score = cached.mean_score
     show.related_anime = list(cached.related_anime or [])
     show.broadcast_day = getattr(cached, "broadcast_day", None)
     show.broadcast_time = getattr(cached, "broadcast_time", None)
+    media_type = getattr(cached, "media_type", None)
+    if media_type:
+        show.media_type = str(media_type)
+        show.type_label = format_type_label(media_type)
+    show.release_year = getattr(cached, "release_year", None)
+
+
+def reconcile_anime_progress(
+    show: Show,
+    *,
+    completed_path: Path | None = None,
+    mal_cfg=None,
+) -> int:
+    """Take max(local completed, MAL cache) and push upward both ways.
+
+    - If MAL is ahead → raise local completed count.
+    - If local is ahead and MAL is connected → PATCH MAL upward only.
+    Returns the merged watched count.
+    """
+    from kostream.mal import MalConfig, MalError, load_cached_anime, update_episodes_watched
+
+    file_path = completed_path or COMPLETED_FILE
+    local = _effective_watched_count(show, load_completed(file_path))
+    remote = 0
+    cached = load_cached_anime(show.mal_id) if show.mal_id else None
+    if cached:
+        remote = int(cached.num_episodes_watched or 0)
+    merged = max(local, remote, show.episodes_watched or 0)
+    if merged <= 0:
+        return 0
+
+    data = load_completed(file_path)
+    prev_local = data.get(show.id, 0)
+    if merged > prev_local:
+        data[show.id] = merged
+        save_completed(file_path, data)
+    show.episodes_watched = max(show.episodes_watched, merged)
+
+    cfg = mal_cfg
+    if cfg is None:
+        try:
+            cfg = MalConfig.from_env()
+        except Exception:  # noqa: BLE001
+            cfg = None
+    if cfg and show.mal_id and merged > remote:
+        try:
+            total = show.episode_count or 0
+            status = "completed" if total and merged >= total else None
+            update_episodes_watched(cfg, show.mal_id, merged, status=status)
+        except MalError:
+            pass
+    return merged
 
 
 def apply_mal_progress(show: Show, cached) -> None:

@@ -4,7 +4,6 @@
 {% set poster = poster_for(show) %}
 {% set bg = show.banner_url or poster %}
 {% set next_ep = next_unwatched_episode(show, progress, completed) %}
-{% set local_info = local_info or {} %}
 <section class="detail-banner" {% if bg %}style="background-image: url('{{ bg }}')"{% endif %}>
   <div class="detail-banner-shade"></div>
   <div class="detail-hero">
@@ -28,6 +27,7 @@
         {% if show.mean_score %}
         <span class="tag tag-score">★ {{ '%.2f'|format(show.mean_score) }} MAL</span>
         {% endif %}
+        {% if show.release_year %}<span class="tag tag-year">{{ show.release_year }}</span>{% endif %}
         {% if show.user_score %}
         <span class="tag tag-my-score">Your score: {{ show.user_score }}/10</span>
         {% endif %}
@@ -37,13 +37,17 @@
         {% if show.anime_status == 'currently_airing' %}
         <span class="tag tag-airing">Airing</span>
         {% endif %}
+      </div>
+      {% if show.genres %}
+      <div class="meta-tags meta-tags-genres">
         {% for g in show.genres[:4] %}<span class="tag genre">{{ g }}</span>{% endfor %}
       </div>
+      {% endif %}
       <p class="detail-desc">{{ show.description }}</p>
       {% if show.is_metadata_only and grab_enabled %}
-      <p class="meta-only-hint">No local files — use Grab for streams, or add files below into the show folder.</p>
+      <p class="meta-only-hint">No available files — use Grab for streams.</p>
       {% elif show.is_metadata_only %}
-      <p class="meta-only-hint">No local video files yet — prepare the folder and upload episodes below.</p>
+      <p class="meta-only-hint">No available video files yet.</p>
       {% endif %}
       {% if next_ep and (not show.is_metadata_only or grab_enabled) %}
       <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=next_ep.id) }}">
@@ -56,27 +60,28 @@
       {% elif show.list_status == 'completed' %}
       <span class="tag tag-completed-show">Completed on MAL</span>
       {% endif %}
+      {% if show_needs_request or (already_requested and not show_is_airing) %}
+      <button
+        type="button"
+        class="btn-detail btn-request{% if already_requested %} is-requested{% endif %}"
+        id="btn-request-missing"
+        data-kind="{{ show_request_kind }}"
+        data-media-id="{{ show.id }}"
+        data-title="{{ show.title }}"
+        data-mal-id="{{ show.mal_id or '' }}"
+        data-poster-url="{{ poster or '' }}"
+        data-type-label="{{ show.type_label }}"
+        data-local-count="{{ show_local_count }}"
+        data-expected-count="{{ show_expected_count }}"
+        {% if already_requested %}disabled aria-disabled="true"{% endif %}
+      >{% if already_requested %}Requested{% else %}Request missing{% endif %}</button>
+      {% endif %}
     </div>
   </div>
-</section>
-
-<section class="section local-media-panel" id="local-media-panel">
-  <div class="local-media-header">
-    <div class="local-media-title-row">
-      <h2 class="section-title">Local files</h2>
-      <div class="local-media-actions">
-        <button type="button" class="btn-detail" id="btn-open-folder">Open folder</button>
-      </div>
-    </div>
-    <p class="local-media-hint">
-      Open the show folder and drop files named
-      <code>SxxExx.mp4</code> (e.g. <code>S04E03.mp4</code>), or use Upload next to an episode.
-    </p>
-  </div>
-  <p class="local-media-msg" id="local-media-msg" hidden></p>
 </section>
 
 <section class="section detail-episodes">
+  <p class="local-media-msg" id="local-media-msg" hidden></p>
   <div class="detail-episodes-head">
     <h2 class="section-title">Episodes</h2>
     {% set show_done = show.list_status == 'completed' or (show.episode_count and show.episodes_watched >= show.episode_count) or (not next_ep and show.episodes) %}
@@ -121,7 +126,7 @@
         <span class="ep-num">S{{ '%02d'|format(ep.season) }}E{{ '%02d'|format(ep.number) }}</span>
         <span class="ep-title">{{ ep.title }}</span>
         {% if is_local %}
-        <span class="ep-badge ep-local-badge">local</span>
+        <span class="ep-badge ep-local-badge">Available</span>
         {% elif stream_only %}
         <span class="ep-badge ep-stream-badge">stream only</span>
         {% endif %}
@@ -134,7 +139,7 @@
         {% endif %}
       </a>
       {% if stream_only or not is_local %}
-      <label class="ep-upload-btn" title="Upload local file as {{ expected }}">
+      <label class="ep-upload-btn" title="Upload file as {{ expected }}">
         Upload
         <input
           type="file"
@@ -183,25 +188,6 @@
     localMsg.textContent = text;
     localMsg.classList.toggle('is-error', !!isError);
   }
-
-  document.getElementById('btn-open-folder')?.addEventListener('click', async () => {
-    const resp = await fetch(`/api/show/${encodeURIComponent(showId)}/open-folder`, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: '{}',
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || !data.ok) {
-      showLocalMsg(data.error || 'Could not open folder.', true);
-      return;
-    }
-    const tip = 'Add files as SxxExx.mp4, then refresh this page.';
-    if (!data.opened) {
-      showLocalMsg(`Folder ready — open manually: ${data.folder_path}. ${tip}`);
-    } else {
-      showLocalMsg(`Opened ${data.folder_path || 'folder'}. ${tip}`);
-    }
-  });
 
   async function uploadEpisode(episodeId, file) {
     const body = new FormData();
@@ -301,5 +287,42 @@
     if (titleTries > 40) clearInterval(titleTimer);
   }, 1500);
   {% endif %}
+
+  const requestBtn = document.getElementById('btn-request-missing');
+  if (requestBtn && !requestBtn.disabled) {
+    requestBtn.addEventListener('click', async () => {
+      requestBtn.disabled = true;
+      const malId = requestBtn.dataset.malId;
+      const payload = {
+        kind: requestBtn.dataset.kind,
+        media_id: requestBtn.dataset.mediaId,
+        title: requestBtn.dataset.title,
+        poster_url: requestBtn.dataset.posterUrl || null,
+        type_label: requestBtn.dataset.typeLabel || null,
+        local_count: Number(requestBtn.dataset.localCount || 0),
+        expected_count: Number(requestBtn.dataset.expectedCount || 0),
+      };
+      if (malId) payload.mal_id = Number(malId);
+      try {
+        const resp = await fetch('{{ url_for("api_requests_create") }}', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) {
+          alert(data.error || 'Could not save request');
+          requestBtn.disabled = false;
+          return;
+        }
+        requestBtn.textContent = 'Requested';
+        requestBtn.classList.add('is-requested');
+        requestBtn.setAttribute('aria-disabled', 'true');
+      } catch (_) {
+        alert('Could not save request');
+        requestBtn.disabled = false;
+      }
+    });
+  }
 </script>
 {% endblock %}

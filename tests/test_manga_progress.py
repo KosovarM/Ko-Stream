@@ -187,9 +187,32 @@ def test_chapters_payload_includes_page_index():
     payload = manga.chapters_payload_with_progress({}, page_progress)
     assert payload[0]["page_index"] == 5
     assert payload[1]["page_index"] == 2
+    assert payload[0]["number"] == "1"
+    assert payload[0]["name"] == ""
     # Done chapters omit page_index
     completed = {manga.id: 1}
     payload2 = manga.chapters_payload_with_progress(completed, page_progress)
     assert payload2[0]["done"] is True
     assert "page_index" not in payload2[0]
     assert payload2[1].get("page_index") == 2
+
+
+def test_chapters_payload_splits_named_title():
+    manga = MangaTitle(
+        id="m1",
+        title="Demo",
+        folder="Demo",
+        chapters=[
+            MangaChapter(
+                id="c1",
+                title="Chapter 1: Dog & Chainsaw",
+                page_count=10,
+                kind="dir",
+                relative="Chapter 01",
+            )
+        ],
+    )
+    row = manga.chapters_payload()[0]
+    assert row["number"] == "1"
+    assert row["name"] == "Dog & Chainsaw"
+    assert row["title"] == "Chapter 1: Dog & Chainsaw"

@@ -6,7 +6,6 @@
   const dots = document.querySelectorAll(".spotlight-dots .dot");
   if (!slides.length) return;
 
-  let timer;
   let scrolling = false;
 
   function currentIndex() {
@@ -23,30 +22,20 @@
 
   function goTo(i, behavior) {
     const idx = ((i % slides.length) + slides.length) % slides.length;
-    const slide = slides[idx];
-    if (!slide) return;
+    const w = track.clientWidth || 0;
+    if (!w) return;
     scrolling = true;
-    slide.scrollIntoView({ behavior: behavior || "smooth", inline: "start", block: "nearest" });
+    // Scroll the track only — avoid scrollIntoView, which can jump the page.
+    track.scrollTo({ left: idx * w, behavior: behavior || "smooth" });
     window.setTimeout(() => {
       scrolling = false;
       syncDots();
     }, behavior === "auto" ? 0 : 400);
   }
 
-  function next() {
-    goTo(currentIndex() + 1);
-  }
-
-  function resetTimer() {
-    clearInterval(timer);
-    if (slides.length < 2) return;
-    timer = setInterval(next, 8000);
-  }
-
   dots.forEach((dot) => {
     dot.addEventListener("click", () => {
       goTo(Number(dot.dataset.slide));
-      resetTimer();
     });
   });
 
@@ -55,11 +44,9 @@
     () => {
       if (scrolling) return;
       syncDots();
-      resetTimer();
     },
     { passive: true }
   );
 
   syncDots();
-  resetTimer();
 })();

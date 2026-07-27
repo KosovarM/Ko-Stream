@@ -2,10 +2,13 @@
 name: kostream-media
 description: >-
   Organize and maintain the Ko-Stream local media library: discover files in
-  Downloads Anime/Manga, import into media/shows and media/manga with correct
-  naming, skip duplicates, update catalog folder links, and report results.
-  Use when importing episodes/chapters, syncing the media base, fixing broken
-  catalog folders, or maintaining anime/manga library files.
+  the unsorted inbox (D:\\UnsortedFiles\\KoStream\\Anime and …\\Manga), import
+  into D:\Media\Ko-Stream\anime and
+  D:\Media\Ko-Stream\manga (env overrides KOSTREAM_ANIME_ROOT /
+  KOSTREAM_MANGA_ROOT) with correct naming, skip duplicates, update catalog
+  folder links, and report results. Use when importing episodes/chapters,
+  syncing the media base, fixing broken catalog folders, or maintaining
+  anime/manga library files.
 disable-model-invocation: true
 ---
 
@@ -17,14 +20,14 @@ Maintain the user's **own legal local library** files. Organize, rename, copy, a
 
 | Role | Path |
 |------|------|
-| Anime library | `media/shows/<Show Folder>/` |
-| Manga library | `media/manga/<Title Folder>/` |
-| Anime downloads | `C:\Users\Kosov\Downloads\Anime` |
-| Manga downloads | `C:\Users\Kosov\Downloads\Manga` |
+| Anime library | `D:\Media\Ko-Stream\anime\<Show Folder>\` (env `KOSTREAM_ANIME_ROOT` / `KOSTREAM_MEDIA_ROOT`) |
+| Manga library | `D:\Media\Ko-Stream\manga\<Title Folder>\` (env `KOSTREAM_MANGA_ROOT`) |
+| Unsorted inbox (anime) | `D:\UnsortedFiles\KoStream\Anime` (env `KOSTREAM_INBOX_ROOT` / `KOSTREAM_INBOX_ANIME`) |
+| Unsorted inbox (manga) | `D:\UnsortedFiles\KoStream\Manga` (env `KOSTREAM_INBOX_ROOT` / `KOSTREAM_INBOX_MANGA`) |
 | Anime catalog | `data/catalog/selected.json` (`folder` field) |
 | Manga catalog | `data/manga/selected.json` (`folder` field) |
 
-Repo root: workspace / CodeProject2.
+Repo root: workspace / CodeProject2. Repo `media/shows` and `media/manga` are README stubs only — real files live on `D:\Media\Ko-Stream\…`.
 
 ## Naming
 
@@ -43,7 +46,7 @@ Copy this checklist and track it:
 ```
 Media base:
 - [ ] Confirm scope (anime / manga / both; which titles)
-- [ ] Discover new files in Downloads
+- [ ] Discover new files in unsorted inbox (`D:\UnsortedFiles\KoStream\…`)
 - [ ] Map to target media folders + filenames
 - [ ] Import (copy); skip duplicates
 - [ ] Update catalog `folder` links if needed
@@ -53,13 +56,13 @@ Media base:
 
 ### 1. Discover
 
-List new items under Downloads Anime and/or Manga. Group by title/season. Ignore incomplete downloads (`.part`, `.crdownload`, zero-byte).
+List new items under `D:\UnsortedFiles\KoStream\Anime` and/or `…\Manga`. Group by title/season. Ignore incomplete downloads (`.part`, `.crdownload`, zero-byte).
 
 ### 2. Map targets
 
-- Match Downloads folder names to existing `media/shows/*` or `media/manga/*` folders (fuzzy title match OK; prefer exact catalog `folder`).
+- Match inbox folder names to existing `D:\Media\Ko-Stream\anime\*` or `D:\Media\Ko-Stream\manga\*` folders (fuzzy title match OK; prefer exact catalog `folder`).
 - Parse episode/chapter numbers from source names; target anime files must become `SxxExx.ext`.
-- If no target folder exists: create under `media/shows/` or `media/manga/` using a clean display name (spaces OK; no `<>:"/\|?*`).
+- If no target folder exists: create under the anime/manga media root using a clean display name (spaces OK; no `<>:"/\|?*`).
 - There is **no** bulk anime import CLI (`ko-stream` is mainly `serve`). Import = filesystem copy/rename + catalog `folder` updates. Manga has richer scan/catalog helpers in `src/kostream/manga*.py`.
 
 ### 3. Import (skip duplicates)
@@ -69,15 +72,15 @@ For each candidate file:
 1. Compute destination path.
 2. **Skip** if destination exists with the **same size** (byte length). Treat same-size as already present.
 3. If destination exists with **different size**, do not overwrite — report as conflict and ask or leave for user.
-4. Otherwise **copy** (prefer copy over move so Downloads remain until user cleans up), then verify size.
+4. Otherwise **copy** (prefer copy over move so the inbox remains until user cleans up), then verify size.
 
 Do not invent new app features or CLIs unless the user asks.
 
 ### 4. Catalog links
 
-**Anime** (`data/catalog/selected.json`): set `"folder": "<exact media/shows subfolder name>"` on the matching entry (often `mal-*`). Enable if the user wants it on the home page. New titles: add an entry (`source` `local` or `mal` with ids) — do not invent fake MAL ids; omit or ask.
+**Anime** (`data/catalog/selected.json`): set `"folder": "<exact anime-root subfolder name>"` on the matching entry (often `mal-*`). Enable if the user wants it on the home page. New titles: add an entry (`source` `local` or `mal` with ids) — do not invent fake MAL ids; omit or ask.
 
-**Manga** (`data/manga/selected.json`): same idea with `"folder"` under `media/manga/`. Prefer matching existing MAL entries via title/folder.
+**Manga** (`data/manga/selected.json`): same idea with `"folder"` under the manga root. Prefer matching existing MAL entries via title/folder.
 
 Catalog JSON files are typically **gitignored** (personal library state). Edit locally; do not force-commit them.
 
@@ -125,7 +128,7 @@ Always end with a short report:
 
 ## Optional: Automations
 
-A Cursor **Automation** (scheduled Downloads → import) is optional and separate. Prefer this Skill for on-demand maintenance. Create an Automation only if the user explicitly asks for scheduled/triggered runs.
+A Cursor **Automation** (scheduled inbox → import) is optional and separate. Prefer this Skill for on-demand maintenance. Create an Automation only if the user explicitly asks for scheduled/triggered runs.
 
 ## Invoke
 

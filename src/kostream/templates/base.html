@@ -3,6 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token }}">
   <title>{% block title %}{{ site_name }}{% endblock %}</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.png') }}" type="image/png">
   <link rel="apple-touch-icon" href="{{ url_for('static', filename='favicon.png') }}">
@@ -19,12 +20,30 @@
         <img class="logo-mark" src="{{ url_for('static', filename='logo-mark.png') }}" width="52" height="52" alt="" decoding="async">
         <span class="logo-stream" aria-hidden="true">stream</span>
       </a>
+      {% set animes_active = request.endpoint in ('search', 'movies_page', 'specials_page') %}
       <nav class="header-nav" id="header-nav">
-        <a href="{{ url_for('home') }}" class="nav-link">Home</a>
-        <a href="{{ url_for('schedule_page') }}" class="nav-link">Schedule</a>
-        <a href="{{ url_for('search') }}" class="nav-link">Animes</a>
-        <a href="{{ url_for('manga_page') }}" class="nav-link">Manga</a>
-        <a href="{{ url_for('manhwa_page') }}" class="nav-link">Manhwa</a>
+        <a href="{{ url_for('home') }}" class="nav-link{% if request.endpoint == 'home' %} is-active{% endif %}">Home</a>
+        <a href="{{ url_for('schedule_page') }}" class="nav-link{% if request.endpoint == 'schedule_page' %} is-active{% endif %}">Schedule</a>
+        <div class="nav-dropdown{% if animes_active %} is-current{% endif %}" id="nav-animes">
+          <button
+            type="button"
+            class="nav-link nav-dropdown-toggle{% if animes_active %} is-active{% endif %}"
+            id="nav-animes-toggle"
+            aria-expanded="false"
+            aria-controls="nav-animes-menu"
+            aria-haspopup="true"
+          >
+            Animes
+            <span class="nav-caret" aria-hidden="true"></span>
+          </button>
+          <div class="nav-dropdown-menu" id="nav-animes-menu" role="menu" hidden>
+            <a href="{{ url_for('search') }}" class="nav-dropdown-link{% if request.endpoint == 'search' %} is-active{% endif %}" role="menuitem">Series</a>
+            <a href="{{ url_for('movies_page') }}" class="nav-dropdown-link{% if request.endpoint == 'movies_page' %} is-active{% endif %}" role="menuitem">Movies</a>
+            <a href="{{ url_for('specials_page') }}" class="nav-dropdown-link{% if request.endpoint == 'specials_page' %} is-active{% endif %}" role="menuitem">Specials</a>
+          </div>
+        </div>
+        <a href="{{ url_for('manga_page') }}" class="nav-link{% if request.endpoint == 'manga_page' %} is-active{% endif %}">Manga</a>
+        <a href="{{ url_for('manhwa_page') }}" class="nav-link{% if request.endpoint == 'manhwa_page' %} is-active{% endif %}">Manhwa</a>
       </nav>
       <button type="button" class="search-toggle" id="search-toggle" aria-label="Open search" aria-expanded="false" aria-controls="header-search">
         <span aria-hidden="true">⌕</span>
@@ -49,11 +68,60 @@
   {% block scripts %}{% endblock %}
   <script>
     (function () {
+      const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+      if (csrfToken && typeof window.fetch === 'function') {
+        const originalFetch = window.fetch.bind(window);
+        window.fetch = function (input, init) {
+          init = init ? Object.assign({}, init) : {};
+          const method = String(init.method || 'GET').toUpperCase();
+          if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+            const headers = new Headers(init.headers || {});
+            if (!headers.has('X-CSRF-Token') && !headers.has('X-CSRFToken')) {
+              headers.set('X-CSRF-Token', csrfToken);
+            }
+            init.headers = headers;
+          }
+          return originalFetch(input, init);
+        };
+      }
+      document.addEventListener('DOMContentLoaded', () => {
+        if (!csrfToken) return;
+        document.querySelectorAll('form').forEach((form) => {
+          const method = (form.getAttribute('method') || 'get').toLowerCase();
+          if (method !== 'post') return;
+          if (form.querySelector('input[name="csrf_token"]')) return;
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'csrf_token';
+          input.value = csrfToken;
+          form.appendChild(input);
+        });
+      });
+    })();
+  </script>
+  <script>
+    (function () {
       const nav = document.getElementById('header-nav');
       const menuToggle = document.getElementById('menu-toggle');
       const searchForm = document.getElementById('header-search');
       const searchToggle = document.getElementById('search-toggle');
       const searchInput = document.getElementById('header-search-input');
+      const animesDropdown = document.getElementById('nav-animes');
+      const animesToggle = document.getElementById('nav-animes-toggle');
+      const animesMenu = document.getElementById('nav-animes-menu');
+
+      function setAnimesOpen(open) {
+        if (!animesDropdown || !animesToggle || !animesMenu) return;
+        animesDropdown.classList.toggle('is-open', open);
+        animesToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        animesMenu.hidden = !open;
+      }
+
+      function setNavOpen(open) {
+        if (!nav) return;
+        nav.classList.toggle('open', open);
+        if (!open) setAnimesOpen(false);
+      }
 
       function setSearchOpen(open) {
         if (!searchForm || !searchToggle) return;
@@ -61,14 +129,24 @@
         searchToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
         searchToggle.setAttribute('aria-label', open ? 'Close search' : 'Open search');
         if (open) {
-          nav?.classList.remove('open');
+          setNavOpen(false);
           window.setTimeout(() => searchInput?.focus(), 0);
         }
       }
 
+      animesToggle?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        const open = !animesDropdown?.classList.contains('is-open');
+        setAnimesOpen(open);
+      });
+
       menuToggle?.addEventListener('click', () => {
         setSearchOpen(false);
-        nav?.classList.toggle('open');
+        const open = !nav?.classList.contains('open');
+        setNavOpen(open);
+        if (open && animesDropdown?.classList.contains('is-current')) {
+          setAnimesOpen(true);
+        }
       });
 
       searchToggle?.addEventListener('click', () => {
@@ -77,14 +155,23 @@
       });
 
       document.addEventListener('keydown', (event) => {
-        if (event.key === 'Escape') setSearchOpen(false);
+        if (event.key !== 'Escape') return;
+        setSearchOpen(false);
+        setAnimesOpen(false);
       });
 
       document.addEventListener('click', (event) => {
-        if (!searchForm?.classList.contains('is-open')) return;
         const target = event.target;
-        if (searchForm.contains(target) || searchToggle?.contains(target)) return;
-        setSearchOpen(false);
+        if (searchForm?.classList.contains('is-open')) {
+          if (!searchForm.contains(target) && !searchToggle?.contains(target)) {
+            setSearchOpen(false);
+          }
+        }
+        if (animesDropdown?.classList.contains('is-open')) {
+          if (!animesDropdown.contains(target)) {
+            setAnimesOpen(false);
+          }
+        }
       });
     })();
   </script>

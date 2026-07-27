@@ -75,7 +75,18 @@ If it does not load, allow the port in Windows Firewall (Admin PowerShell):
 New-NetFirewallRule -DisplayName "Ko-Stream" -Direction Inbound -Protocol TCP -LocalPort 5001 -Action Allow -Profile Private
 ```
 
-**Security:** There is no login yet. Use only on a trusted home network (not public Wi‑Fi / not exposed to the internet).
+**Security:** There is no login yet. Basic CSRF protection covers mutating POSTs (session token + `X-CSRF-Token` on fetch). Use only on a trusted home network (not public Wi‑Fi / not exposed to the internet). Optional secret: `KOSTREAM_SECRET_KEY` (otherwise a key is stored in `data/.flask_secret`). Disable CSRF for local scripts with `KOSTREAM_CSRF=0`.
+
+## Media roots
+
+Anime and manga files live **outside the git repo** (disk space):
+
+| Kind | Default path | Env override |
+|------|----------------|--------------|
+| Anime | `D:\Media\Ko-Stream\anime` | `KOSTREAM_ANIME_ROOT` or `KOSTREAM_MEDIA_ROOT` |
+| Manga | `D:\Media\Ko-Stream\manga` | `KOSTREAM_MANGA_ROOT` |
+
+Repo `media/shows/` and `media/manga/` keep README stubs only. On a Pi / other host, set the env vars to your NAS or USB path.
 
 ## Catalog (fast local testing)
 
@@ -91,7 +102,7 @@ Open **http://127.0.0.1:5001/catalog** to:
 
 - Enable/disable shows
 
-- Add local folders from `media/shows/`
+- Link local folders under the anime media root
 
 - Search **AniList** for titles, descriptions, and cover art
 
@@ -123,6 +134,8 @@ ko-stream serve
 
 Then open **Catalog → Connect MyAnimeList**. Full setup: `data/mal/README.md`.
 
+**Sync** also pulls anime episode titles (Jikan/MAL) and, for local manga/manhwa with a MAL id, chapter titles from [MangaDex](https://mangadex.org/) (metadata only — no chapter images). Optional per-title override: set `mangadex_id` on a manga catalog entry in `data/manga/selected.json`.
+
 
 
 ## Add shows
@@ -135,9 +148,11 @@ Then open **Catalog → Connect MyAnimeList**. Full setup: `data/mal/README.md`.
 
 ```
 
-media/shows/My Series Name/S01E01.mp4
+D:\Media\Ko-Stream\anime\My Series Name\S01E01.mp4
 
 ```
+
+(or `$env:KOSTREAM_ANIME_ROOT\My Series Name\S01E01.mp4`)
 
 
 
@@ -147,10 +162,9 @@ media/shows/My Series Name/S01E01.mp4
 
 ```
 
-media/shows/My Series Name/S01E01.strm
+D:\Media\Ko-Stream\anime\My Series Name\S01E01.strm
 
 ```
-
 
 
 File content: one direct URL to an MP4/WebM stream.
@@ -187,12 +201,12 @@ Show page → **Open folder**, then place files as `SxxExx.mp4` (e.g. `S04E03.mp
 
 ### Manga
 
-Place titles under `media/manga/`:
+Place titles under `D:\Media\Ko-Stream\manga\` (or `$env:KOSTREAM_MANGA_ROOT`):
 
 ```
-media/manga/My Manga/Chapter 01/001.jpg
-media/manga/My Manga/vol2.cbz
-media/manga/OneShot.cbz
+D:\Media\Ko-Stream\manga\My Manga\Chapter 01\001.jpg
+D:\Media\Ko-Stream\manga\My Manga\vol2.cbz
+D:\Media\Ko-Stream\manga\OneShot.cbz
 ```
 
 Open **Manga** in the nav — click a cover (or a chapter) for the full-screen reader (←/→, Esc, RTL toggle).

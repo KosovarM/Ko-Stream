@@ -77,9 +77,17 @@ def test_is_currently_airing():
     airing = _show(anime_status="currently_airing", list_status="watching")
     finished = _show(anime_status="finished_airing", list_status="watching")
     completed = _show(anime_status="currently_airing", list_status="completed")
+    movie = _show(anime_status="currently_airing", list_status="watching")
+    movie.media_type = "movie"
+    movie.type_label = "Movie"
+    ova = _show(anime_status="currently_airing", list_status="watching")
+    ova.media_type = "ova"
+    ova.type_label = "OVA"
     assert is_currently_airing(airing) is True
     assert is_currently_airing(finished) is False
     assert is_currently_airing(completed) is False
+    assert is_currently_airing(movie) is False
+    assert is_currently_airing(ova) is False
 
 
 def test_filter_currently_airing():

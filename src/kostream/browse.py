@@ -1,4 +1,4 @@
-"""Browse/search helpers — grid pagination and MAL genre filtering."""
+"""Browse/search helpers — grid pagination, kind filters, and MAL genre filtering."""
 
 from __future__ import annotations
 
@@ -12,12 +12,97 @@ AVAIL_LOCAL = "local"
 AVAIL_STREAM = "stream"
 AVAIL_OPTIONS = frozenset({AVAIL_ALL, AVAIL_LOCAL, AVAIL_STREAM})
 
+# Browse subcategories (mutually exclusive)
+KIND_ANIMES = "animes"  # Hauptanimes — TV (+ unknown/missing)
+KIND_MOVIES = "movies"
+KIND_SPECIALS = "specials"  # OVA, Special, ONA, Music, …
+KIND_OPTIONS = frozenset({KIND_ANIMES, KIND_MOVIES, KIND_SPECIALS})
+
+KIND_LABELS = {
+    KIND_ANIMES: "Animes",
+    KIND_MOVIES: "Movies",
+    KIND_SPECIALS: "Specials",
+}
+
+_TYPE_LABELS = {
+    "tv": "TV",
+    "movie": "Movie",
+    "ova": "OVA",
+    "ona": "ONA",
+    "special": "Special",
+    "tv_special": "TV Special",
+    "music": "Music",
+    "pv": "PV",
+    "cm": "CM",
+}
+
+# Strict MAL movie types
+_MOVIE_TYPES = frozenset({"movie", "film"})
+# Primary series list — TV only when type is known
+_TV_TYPES = frozenset({"tv"})
+# Non-TV / non-Movie extras
+_SPECIAL_TYPES = frozenset({
+    "ova",
+    "ona",
+    "special",
+    "tv_special",
+    "music",
+    "pv",
+    "cm",
+})
+
 
 def normalize_availability(value: str | None) -> str:
     v = (value or "").strip().casefold()
     if v in AVAIL_OPTIONS:
         return v
     return AVAIL_ALL
+
+
+def normalize_browse_kind(value: str | None) -> str:
+    v = (value or "").strip().casefold()
+    if v in KIND_OPTIONS:
+        return v
+    return KIND_ANIMES
+
+
+def normalize_media_type(value: str | None) -> str:
+    return (value or "").strip().casefold().replace(" ", "_").replace("-", "_")
+
+
+def format_type_label(media_type: str | None) -> str:
+    """Human badge for cards (TV, Movie, OVA, …). Missing → TV."""
+    key = normalize_media_type(media_type)
+    if not key:
+        return "TV"
+    if key in _TYPE_LABELS:
+        return _TYPE_LABELS[key]
+    return key.replace("_", " ").title()
+
+
+def classify_show_kind(show: Show) -> str:
+    """Map a show to Animes / Movies / Specials (mutually exclusive).
+
+    Rules (MAL ``media_type`` / ``type_label``):
+    - Movies: movie (and film)
+    - Specials: ova, ona, special, tv_special, music, pv, cm
+    - Animes: tv, or unknown/missing type (prefer main list so nothing disappears)
+    """
+    raw = normalize_media_type(show.media_type)
+    if not raw:
+        # Fall back to display label (e.g. demos / Jellyfin default "TV")
+        raw = normalize_media_type(show.type_label)
+    if raw in _MOVIE_TYPES:
+        return KIND_MOVIES
+    if raw in _SPECIAL_TYPES:
+        return KIND_SPECIALS
+    # tv, empty, or unrecognized → main Animes list
+    return KIND_ANIMES
+
+
+def filter_by_kind(shows: list[Show], kind: str = KIND_ANIMES) -> list[Show]:
+    want = normalize_browse_kind(kind)
+    return [s for s in shows if classify_show_kind(s) == want]
 
 
 def collect_genres(shows: list[Show]) -> list[str]:

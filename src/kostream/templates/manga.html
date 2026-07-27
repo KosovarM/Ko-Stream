@@ -12,10 +12,10 @@
     <p class="browse-meta">
       {% if mal_manga_count %}
       MyAnimeList · {{ mal_manga_count }} synced
-      · local files from <code>media/manga</code>
+      · available files from <code>media/manga</code>
       {% else %}
       Local library from <code>media/manga</code>
-      · run <strong>Sync</strong> on Catalog to pull your MAL mangalist
+      · run <strong>Sync mangas</strong> on Catalog to pull your MAL mangalist
       {% endif %}
       · {{ titles|length }} title{{ 's' if titles|length != 1 else '' }}
     </p>
@@ -82,11 +82,19 @@
         data-manga-title="{{ m.title }}"
         data-poster="{{ m.poster_url or '' }}"
         data-status="{{ status }}"
-        data-meta="{% if m.has_local %}{{ m.chapter_count }} ch · {{ m.page_count }} pages{% elif m.num_chapters_mal %}MAL · {{ m.num_chapters_mal }} ch{% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %}{% else %}MAL{% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %} · no local files{% endif %}"
+        data-meta="{% if m.has_local %}{{ m.chapter_count }} ch · {{ m.page_count }} pages{% elif m.num_chapters_mal %}MAL · {{ m.num_chapters_mal }} ch{% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %}{% else %}MAL{% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %} · no available files{% endif %}"
         data-synopsis="{{ m.synopsis or '' }}"
+        data-genres="{{ (m.genres or []) | join('|') }}"
+        data-release-year="{{ m.release_year or '' }}"
         data-chapter-count="{{ m.chapter_count }}"
         data-num-chapters-mal="{{ m.num_chapters_mal }}"
         data-chapters-read="{{ chapters_read_count(m, manga_completed) }}"
+        data-needs-request="{{ '1' if manga_needs_request(m) else '0' }}"
+        data-already-requested="{{ '1' if request_key(library_kind, m.id) in requested_ids else '0' }}"
+        data-local-count="{{ manga_local_counts(m)[0] }}"
+        data-expected-count="{{ manga_local_counts(m)[1] }}"
+        data-kind="{{ library_kind }}"
+        data-mal-id="{{ m.mal_id or '' }}"
         data-resume-chapter="{% if manga_page_progress is defined and manga_page_progress.get(m.id) %}{{ manga_page_progress[m.id].get('last_chapter_id') or '' }}{% endif %}"
         aria-label="Open {{ m.title }}"
       >
@@ -113,7 +121,7 @@
               {% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %}
             {% else %}
               MAL{% if m.list_status %} · {{ m.list_status.replace('_', ' ') }}{% endif %}
-              · no local files
+              · no available files
             {% endif %}
           </span>
           {% if m.genres %}
@@ -145,6 +153,7 @@
       <div class="manga-overview-info">
         <h2 id="overview-title" class="manga-overview-title"></h2>
         <p id="overview-meta" class="manga-overview-meta"></p>
+        <div id="overview-tags" class="meta-tags manga-overview-tags" hidden></div>
         <p id="overview-synopsis" class="manga-overview-synopsis"></p>
         <div class="manga-overview-actions">
           <button type="button" class="btn-watch manga-overview-continue" id="overview-continue" hidden>
@@ -153,6 +162,9 @@
           <button type="button" class="btn-detail manga-overview-complete-all" id="overview-complete-all" hidden
             title="{% if mal_connected %}Mark the whole title completed and sync to MAL{% else %}Mark the whole title as completed{% endif %}">
             Mark title completed{% if mal_connected %} on MAL{% endif %}
+          </button>
+          <button type="button" class="btn-detail btn-request" id="overview-request" hidden>
+            Request missing
           </button>
           <p id="overview-action-status" class="manga-overview-action-status" hidden></p>
         </div>
@@ -181,7 +193,7 @@
         <p id="overview-range-status" class="manga-overview-range-status" hidden></p>
       </div>
       <ul id="overview-chapters" class="manga-overview-chapters"></ul>
-      <p id="overview-empty" class="manga-overview-empty" hidden>No local chapters yet — add CBZ/images under media/manga.</p>
+      <p id="overview-empty" class="manga-overview-empty" hidden>No available chapters yet — add CBZ/images under media/manga.</p>
     </div>
   </div>
 </div>
@@ -238,9 +250,13 @@
   const overview = document.getElementById('manga-overview');
   const overviewCompleteAll = document.getElementById('overview-complete-all');
   const overviewContinue = document.getElementById('overview-continue');
+  const overviewRequest = document.getElementById('overview-request');
   const overviewActionStatus = document.getElementById('overview-action-status');
+  const libraryKind = {{ library_kind | tojson }};
+  const requestsCreateUrl = {{ url_for('api_requests_create') | tojson }};
   const overviewTitle = document.getElementById('overview-title');
   const overviewMeta = document.getElementById('overview-meta');
+  const overviewTags = document.getElementById('overview-tags');
   const overviewSynopsis = document.getElementById('overview-synopsis');
   const overviewPoster = document.getElementById('overview-poster');
   const overviewChapters = document.getElementById('overview-chapters');
@@ -657,7 +673,9 @@
     if (chapters.length) {
       return chapters.map((ch, idx) => ({
         value: String(idx + 1),
-        label: ch.title,
+        label: ch.number
+          ? (ch.name ? ch.number + ' · ' + ch.name : 'Chapter ' + ch.number)
+          : ch.title,
         chapterId: ch.id,
       }));
     }
@@ -750,6 +768,26 @@
     document.body.classList.toggle(className, locked);
   }
 
+  function fillOverviewTags(btn) {
+    if (!overviewTags) return;
+    overviewTags.innerHTML = '';
+    const genres = (btn.dataset.genres || '').split('|').filter(Boolean);
+    genres.slice(0, 4).forEach((genre) => {
+      const tag = document.createElement('span');
+      tag.className = 'tag genre';
+      tag.textContent = genre;
+      overviewTags.appendChild(tag);
+    });
+    const year = (btn.dataset.releaseYear || '').trim();
+    if (year) {
+      const tag = document.createElement('span');
+      tag.className = 'tag tag-year';
+      tag.textContent = year;
+      overviewTags.appendChild(tag);
+    }
+    overviewTags.hidden = genres.length === 0 && !year;
+  }
+
   function openOverview(btn) {
     const mid = btn.dataset.mangaId;
     const title = btn.dataset.mangaTitle || '';
@@ -758,6 +796,7 @@
     activeMangaTitle = title;
     overviewTitle.textContent = title;
     overviewMeta.textContent = btn.dataset.meta || '';
+    fillOverviewTags(btn);
     overviewSynopsis.textContent = btn.dataset.synopsis || '';
     overviewSynopsis.hidden = !btn.dataset.synopsis;
     setOverviewStatus('');
@@ -790,14 +829,22 @@
         b.dataset.chapterId = ch.id;
         b.setAttribute('aria-label', 'Read ' + ch.title);
         const showResume = !ch.done && ch.page_index > 0;
+        const numLabel = (ch.number || '').trim();
+        const nameLabel = (ch.name || '').trim() || (!numLabel ? (ch.title || '') : '');
         b.innerHTML =
+          (numLabel
+            ? '<span class="manga-overview-ch-num"></span>'
+            : '') +
           '<span class="manga-overview-ch-title"></span>' +
           '<span class="manga-overview-ch-meta">' +
           '<span class="manga-overview-ch-done"' + (ch.done ? '' : ' hidden') + '>Read</span>' +
           '<span class="manga-overview-ch-resume"' + (showResume ? '' : ' hidden') + '></span>' +
           '<span class="manga-overview-ch-pages"></span>' +
           '</span>';
-        b.querySelector('.manga-overview-ch-title').textContent = ch.title;
+        if (numLabel) {
+          b.querySelector('.manga-overview-ch-num').textContent = numLabel;
+        }
+        b.querySelector('.manga-overview-ch-title').textContent = nameLabel;
         b.querySelector('.manga-overview-ch-pages').textContent = ch.page_count + ' pages';
         if (showResume) {
           b.querySelector('.manga-overview-ch-resume').textContent =
@@ -841,6 +888,29 @@
       overviewCompleteAll.disabled = done;
       overviewCompleteAll.textContent = done ? 'Title completed' : completeAllLabel;
       overviewCompleteAll.dataset.mangaId = mid;
+    }
+
+    if (overviewRequest) {
+      const needs = btn.dataset.needsRequest === '1';
+      const already = btn.dataset.alreadyRequested === '1';
+      const showBtn = needs || already;
+      overviewRequest.hidden = !showBtn;
+      overviewRequest.disabled = !showBtn || already;
+      overviewRequest.classList.toggle('is-requested', already);
+      overviewRequest.textContent = already ? 'Requested' : 'Request missing';
+      if (already) {
+        overviewRequest.setAttribute('aria-disabled', 'true');
+      } else {
+        overviewRequest.removeAttribute('aria-disabled');
+      }
+      overviewRequest.dataset.mangaId = mid;
+      overviewRequest.dataset.kind = btn.dataset.kind || libraryKind || 'manga';
+      overviewRequest.dataset.title = title;
+      overviewRequest.dataset.posterUrl = btn.dataset.poster || '';
+      overviewRequest.dataset.malId = btn.dataset.malId || '';
+      overviewRequest.dataset.localCount = btn.dataset.localCount || '0';
+      overviewRequest.dataset.expectedCount = btn.dataset.expectedCount || '0';
+      overviewRequest.dataset.typeLabel = (btn.dataset.kind || libraryKind || 'manga') === 'manhwa' ? 'Manhwa' : 'Manga';
     }
 
     overview.hidden = false;
@@ -959,6 +1029,46 @@
     openReader(mid, chapterId, activeMangaTitle, row ? row.title : '', {
       startPage: row && row.page_index > 0 ? row.page_index : undefined,
     });
+  });
+
+  overviewRequest?.addEventListener('click', async () => {
+    if (overviewRequest.disabled || overviewRequest.classList.contains('is-requested')) return;
+    const mid = overviewRequest.dataset.mangaId || activeMangaId;
+    if (!mid) return;
+    overviewRequest.disabled = true;
+    const malId = overviewRequest.dataset.malId;
+    const payload = {
+      kind: overviewRequest.dataset.kind || libraryKind || 'manga',
+      media_id: mid,
+      title: overviewRequest.dataset.title || activeMangaTitle || mid,
+      poster_url: overviewRequest.dataset.posterUrl || null,
+      type_label: overviewRequest.dataset.typeLabel || null,
+      local_count: Number(overviewRequest.dataset.localCount || 0),
+      expected_count: Number(overviewRequest.dataset.expectedCount || 0),
+    };
+    if (malId) payload.mal_id = Number(malId);
+    try {
+      const resp = await fetch(requestsCreateUrl, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) {
+        setOverviewStatus(data.error || 'Could not save request', true);
+        overviewRequest.disabled = false;
+        return;
+      }
+      overviewRequest.textContent = 'Requested';
+      overviewRequest.classList.add('is-requested');
+      overviewRequest.setAttribute('aria-disabled', 'true');
+      const cardBtn = document.querySelector(`[data-open-overview][data-manga-id="${CSS.escape(mid)}"]`);
+      if (cardBtn) cardBtn.dataset.alreadyRequested = '1';
+      setOverviewStatus(data.created ? 'Added to Library → Requests' : 'Already in Requests', false);
+    } catch (_) {
+      setOverviewStatus('Could not save request', true);
+      overviewRequest.disabled = false;
+    }
   });
 
   overlay?.querySelectorAll('[data-reader-close]').forEach((el) => {

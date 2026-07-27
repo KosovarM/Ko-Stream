@@ -1,19 +1,27 @@
 from __future__ import annotations
 
+import os
 import random
+import secrets
 from pathlib import Path
 from datetime import datetime
 from urllib.error import URLError
 
-from flask import Flask, Response, abort, redirect, render_template, request, send_file, url_for
+from flask import Flask, Response, abort, redirect, render_template, request, send_file, session, url_for
 
 from kostream.anilist import AniListError, fetch_anime, fetch_mal_id, search_anime
 from kostream.browse import (
     AVAIL_ALL,
+    KIND_ANIMES,
+    KIND_LABELS,
+    KIND_MOVIES,
+    KIND_SPECIALS,
     PAGE_SIZE,
     collect_genres,
+    filter_by_kind,
     filter_shows,
     normalize_availability,
+    normalize_browse_kind,
     paginate,
 )
 from kostream.catalog import (
@@ -128,6 +136,7 @@ from kostream.proxy import proxy_remote_stream
 from kostream.watch_progress import (
     episode_completed,
     filter_currently_airing,
+    is_currently_airing,
     load_completed,
     mark_episode_watched,
     mark_show_completed,
@@ -138,9 +147,37 @@ from kostream.watch_progress import (
     should_persist_watch_progress,
     sort_by_mean_score,
 )
-from kostream.sync_jobs import get_sync_job, start_mal_sync
+from kostream.sync_jobs import (
+    get_sync_job,
+    start_anime_sync,
+    start_anime_title_sync,
+    start_chapter_title_sync,
+    start_manga_sync,
+)
+from kostream.sync_index import (
+    ANIME_INDEX_FILE,
+    MANGA_INDEX_FILE,
+    list_index_entries,
+    set_skip,
+)
 from kostream.schedule import WEEKDAY_KEYS, build_weekly_schedule
 from kostream.streaming import stream_file_with_range
+from kostream.requests_store import (
+    KIND_LABELS as REQUEST_KIND_LABELS,
+    REQUESTS_FILE,
+    group_requests,
+    has_request,
+    kind_for_show,
+    load_requests,
+    manga_local_counts,
+    manga_needs_request,
+    remove_request,
+    request_key,
+    requested_ids,
+    show_local_counts,
+    show_needs_request,
+    upsert_request,
+)
 
 
 import m3u8
@@ -148,6 +185,60 @@ from urllib.parse import urljoin
 
 PROGRESS_FILE = Path(__file__).resolve().parents[2] / "data" / "progress.json"
 COMPLETED_FILE = Path(__file__).resolve().parents[2] / "data" / "completed.json"
+_SECRET_FILE = Path(__file__).resolve().parents[2] / "data" / ".flask_secret"
+
+
+def _csrf_enabled() -> bool:
+    raw = (os.environ.get("KOSTREAM_CSRF") or "1").strip().lower()
+    return raw not in ("0", "false", "off", "no")
+
+
+def _load_or_create_secret_key() -> str:
+    """Flask session secret from env or a persisted local file."""
+    env = (
+        os.environ.get("KOSTREAM_SECRET_KEY")
+        or os.environ.get("FLASK_SECRET_KEY")
+        or ""
+    ).strip()
+    if env:
+        return env
+    try:
+        if _SECRET_FILE.is_file():
+            existing = _SECRET_FILE.read_text(encoding="utf-8").strip()
+            if existing:
+                return existing
+    except OSError:
+        pass
+    key = secrets.token_hex(32)
+    try:
+        _SECRET_FILE.parent.mkdir(parents=True, exist_ok=True)
+        _SECRET_FILE.write_text(key, encoding="utf-8")
+    except OSError:
+        pass
+    return key
+
+
+def _ensure_csrf_token() -> str:
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_hex(16)
+        session["csrf_token"] = token
+    return token
+
+
+def _extract_csrf_token() -> str | None:
+    header = request.headers.get("X-CSRF-Token") or request.headers.get("X-CSRFToken")
+    if header:
+        return header.strip()
+    form_token = (request.form.get("csrf_token") or "").strip()
+    if form_token:
+        return form_token
+    payload = request.get_json(silent=True)
+    if isinstance(payload, dict):
+        raw = payload.get("csrf_token")
+        if raw:
+            return str(raw).strip()
+    return None
 
 
 def create_app(
@@ -156,8 +247,10 @@ def create_app(
     grab_base: Path | None = None,
     manga_root: Path | None = None,
     manga_catalog_path: Path | None = None,
+    requests_path: Path | None = None,
 ) -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
+    app.secret_key = _load_or_create_secret_key()
     app.config["MEDIA_ROOT"] = media_root or MEDIA_ROOT
     app.config["CATALOG_PATH"] = catalog_path or SELECTED_FILE
     app.config["GRAB_DIR"] = grab_base if grab_base is not None else grab_dir()
@@ -165,6 +258,29 @@ def create_app(
     app.config["MANGA_CATALOG_PATH"] = (
         manga_catalog_path if manga_catalog_path is not None else MANGA_SELECTED_FILE
     )
+    app.config["REQUESTS_PATH"] = requests_path if requests_path is not None else REQUESTS_FILE
+    app.config["ANIME_SYNC_INDEX_PATH"] = ANIME_INDEX_FILE
+    app.config["MANGA_SYNC_INDEX_PATH"] = MANGA_INDEX_FILE
+    app.config["CSRF_ENABLED"] = _csrf_enabled()
+
+    @app.before_request
+    def _csrf_protect():
+        if request.method not in ("POST", "PUT", "PATCH", "DELETE"):
+            return None
+        if not _csrf_enabled():
+            return None
+        expected = session.get("csrf_token")
+        provided = _extract_csrf_token()
+        if (
+            not expected
+            or not provided
+            or not secrets.compare_digest(provided, expected)
+        ):
+            if request.path.startswith("/api/") or request.is_json:
+                return {"ok": False, "error": "CSRF validation failed"}, 403
+            abort(403)
+        return None
+
     @app.route("/favicon.ico")
     def favicon():
         return send_file(
@@ -184,6 +300,7 @@ def create_app(
             mal_configured = False
         return {
             "site_name": "Ko-Stream",
+            "csrf_token": _ensure_csrf_token(),
             "jellyfin_connected": jellyfin is not None,
             "mal_connected": mal_is_connected(),
             "mal_username": mal_tokens.username if mal_tokens else None,
@@ -217,11 +334,9 @@ def create_app(
         releasing_manhwa = filter_library_format(currently_releasing, kind="manhwa")
         return render_template(
             "home.html",
-            spotlight=shows[:10],
+            spotlight=_random_library_sample(shows, limit=10),
             trending=sort_by_mean_score(shows, limit=12),
             currently_airing=currently_airing[:12],
-            top_airing=currently_airing[:5],
-            most_popular=_random_library_sample(shows, limit=5),
             latest=_continue_watching(shows, progress, completed, limit=12),
             new_on_kostream=recently_added(shows, limit=12),
             currently_reading_manga=reading_manga[:12],
@@ -294,6 +409,10 @@ def create_app(
             manga_reading_status=manga_reading_status,
             chapters_read_count=chapters_read_count,
             title_matches_genre=title_matches_genre,
+            manga_needs_request=manga_needs_request,
+            manga_local_counts=manga_local_counts,
+            request_key=request_key,
+            requested_ids=requested_ids(app.config["REQUESTS_PATH"]),
             active_tab=tab,
             selected_avail=avail,
             selected_genre=genre,
@@ -309,7 +428,7 @@ def create_app(
             manga_id, app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
         )
         if not manga or not manga.chapters:
-            return {"ok": False, "error": "Manga not found or no local chapters"}, 404
+            return {"ok": False, "error": "Manga not found or no available chapters"}, 404
         chapter = manga.chapters[0]
         try:
             pages = list_page_refs(app.config["MANGA_ROOT"], manga, chapter)
@@ -555,6 +674,7 @@ def create_app(
         mal_client_hint = None
         if mal_cfg:
             mal_client_hint = f"{mal_cfg.client_id[:4]}…{mal_cfg.client_id[-4:]} ({len(mal_cfg.client_id)} chars)"
+        media_requests = load_requests(app.config["REQUESTS_PATH"])
         return render_template(
             "catalog.html",
             catalog=catalog,
@@ -566,6 +686,9 @@ def create_app(
             mal_message=request.args.get("mal_message"),
             mal_error=request.args.get("mal_error"),
             library_stats=_library_stats(app),
+            media_requests=media_requests,
+            media_requests_grouped=group_requests(media_requests),
+            request_kind_labels=REQUEST_KIND_LABELS,
         )
 
     @app.route("/auth/mal/connect")
@@ -640,24 +763,110 @@ def create_app(
                 ),
             )
         )
-    @app.route("/api/mal/sync", methods=["POST"])
-    def api_mal_sync():
+    @app.route("/api/mal/sync/animes", methods=["POST"])
+    def api_mal_sync_animes():
+        """Sync animelist + progress + anime request clear + enrich (not titles)."""
         cfg = MalConfig.from_env()
         if not cfg:
             return {"ok": False, "error": "MAL not configured"}, 400
         if not mal_is_connected():
             return {"ok": False, "error": "Not connected to MyAnimeList"}, 401
-        job = start_mal_sync(
+        job = start_anime_sync(
             cfg,
             app.config["CATALOG_PATH"],
+            media_root=app.config["MEDIA_ROOT"],
+            requests_path=app.config["REQUESTS_PATH"],
+            anime_index_path=app.config["ANIME_SYNC_INDEX_PATH"],
+        )
+        return {"ok": True, "started": True, **job.to_dict()}
+
+    @app.route("/api/mal/sync/mangas", methods=["POST"])
+    def api_mal_sync_mangas():
+        """Sync mangalist + manga request clear (not chapter titles)."""
+        cfg = MalConfig.from_env()
+        if not cfg:
+            return {"ok": False, "error": "MAL not configured"}, 400
+        if not mal_is_connected():
+            return {"ok": False, "error": "Not connected to MyAnimeList"}, 401
+        job = start_manga_sync(
+            cfg,
             manga_catalog_path=app.config["MANGA_CATALOG_PATH"],
             manga_media_root=app.config["MANGA_ROOT"],
+            requests_path=app.config["REQUESTS_PATH"],
+            manga_index_path=app.config["MANGA_SYNC_INDEX_PATH"],
+        )
+        return {"ok": True, "started": True, **job.to_dict()}
+
+    @app.route("/api/mal/sync/anime-titles", methods=["POST"])
+    def api_mal_sync_anime_titles():
+        """Sync anime episode titles only."""
+        cfg = MalConfig.from_env()
+        if not cfg:
+            return {"ok": False, "error": "MAL not configured"}, 400
+        if not mal_is_connected():
+            return {"ok": False, "error": "Not connected to MyAnimeList"}, 401
+        job = start_anime_title_sync(
+            app.config["CATALOG_PATH"],
+            anime_index_path=app.config["ANIME_SYNC_INDEX_PATH"],
+        )
+        return {"ok": True, "started": True, **job.to_dict()}
+
+    @app.route("/api/mal/sync/chapter-titles", methods=["POST"])
+    def api_mal_sync_chapter_titles():
+        """Sync MangaDex chapter titles only (metadata, no images)."""
+        cfg = MalConfig.from_env()
+        if not cfg:
+            return {"ok": False, "error": "MAL not configured"}, 400
+        if not mal_is_connected():
+            return {"ok": False, "error": "Not connected to MyAnimeList"}, 401
+        job = start_chapter_title_sync(
+            manga_catalog_path=app.config["MANGA_CATALOG_PATH"],
+            manga_media_root=app.config["MANGA_ROOT"],
+            manga_index_path=app.config["MANGA_SYNC_INDEX_PATH"],
         )
         return {"ok": True, "started": True, **job.to_dict()}
 
     @app.route("/api/mal/sync/status")
     def api_mal_sync_status():
         return get_sync_job().to_dict()
+
+    @app.route("/api/sync-index")
+    def api_sync_index_list():
+        section = (request.args.get("section") or "anime_sync").strip()
+        valid = {"anime_sync", "episode_titles", "manga_sync", "chapter_titles"}
+        if section not in valid:
+            return {"ok": False, "error": f"Invalid section (use one of {sorted(valid)})"}, 400
+        entries = list_index_entries(
+            section,  # type: ignore[arg-type]
+            catalog_path=app.config["CATALOG_PATH"],
+            media_root=app.config["MEDIA_ROOT"],
+            manga_catalog_path=app.config["MANGA_CATALOG_PATH"],
+            manga_media_root=app.config["MANGA_ROOT"],
+            anime_index_path=app.config["ANIME_SYNC_INDEX_PATH"],
+            manga_index_path=app.config["MANGA_SYNC_INDEX_PATH"],
+        )
+        return {"ok": True, "section": section, "entries": entries}
+
+    @app.route("/api/sync-index", methods=["POST"])
+    def api_sync_index_update():
+        payload = request.get_json(silent=True) or {}
+        section = (payload.get("section") or "").strip()
+        valid = {"anime_sync", "episode_titles", "manga_sync", "chapter_titles"}
+        if section not in valid:
+            return {"ok": False, "error": f"Invalid section (use one of {sorted(valid)})"}, 400
+        try:
+            mal_id = int(payload.get("mal_id"))
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "mal_id required"}, 400
+        if "skip" not in payload:
+            return {"ok": False, "error": "skip required (boolean)"}, 400
+        index_path = (
+            app.config["ANIME_SYNC_INDEX_PATH"]
+            if section in ("anime_sync", "episode_titles")
+            else app.config["MANGA_SYNC_INDEX_PATH"]
+        )
+        set_skip(mal_id, section, bool(payload.get("skip")), index_path=index_path)  # type: ignore[arg-type]
+        return {"ok": True, "mal_id": mal_id, "section": section, "skip": bool(payload.get("skip"))}
 
     @app.route("/api/show/<show_id>/relations-ready")
     def api_show_relations_ready(show_id: str):
@@ -804,6 +1013,11 @@ def create_app(
         local_info = build_local_info(
             show, app.config["MEDIA_ROOT"], catalog_path=app.config["CATALOG_PATH"]
         )
+        local_count, expected_count = show_local_counts(show, local_info)
+        req_kind = kind_for_show(show)
+        already_requested = has_request(
+            req_kind, show.id, app.config["REQUESTS_PATH"]
+        )
         return render_template(
             "show.html",
             show=show,
@@ -812,7 +1026,60 @@ def create_app(
             titles_pending=titles_pending,
             local_info=local_info,
             mal_page_url=mal_anime_url(show.mal_id) if show.mal_id else None,
+            show_request_kind=req_kind,
+            show_needs_request=show_needs_request(show, local_info),
+            already_requested=already_requested,
+            show_is_airing=is_currently_airing(show),
+            show_local_count=local_count,
+            show_expected_count=expected_count,
         )
+
+    @app.route("/api/requests", methods=["POST"])
+    def api_requests_create():
+        payload = request.get_json(silent=True) or {}
+        media_id = str(payload.get("media_id") or payload.get("id") or "").strip()
+        kind = str(payload.get("kind") or "").strip()
+        title = str(payload.get("title") or "").strip()
+        if not media_id:
+            return {"ok": False, "error": "media_id required"}, 400
+        if not kind:
+            return {"ok": False, "error": "kind required"}, 400
+        mal_raw = payload.get("mal_id")
+        mal_id = None
+        if mal_raw is not None and str(mal_raw).strip() != "":
+            try:
+                mal_id = int(mal_raw)
+            except (TypeError, ValueError):
+                return {"ok": False, "error": "mal_id must be an integer"}, 400
+        local_raw = payload.get("local_count")
+        expected_raw = payload.get("expected_count")
+        try:
+            local_count = int(local_raw) if local_raw is not None else None
+            expected_count = int(expected_raw) if expected_raw is not None else None
+        except (TypeError, ValueError):
+            return {"ok": False, "error": "local_count/expected_count must be integers"}, 400
+        try:
+            entry, created = upsert_request(
+                kind=kind,
+                media_id=media_id,
+                title=title or media_id,
+                path=app.config["REQUESTS_PATH"],
+                mal_id=mal_id,
+                poster_url=(str(payload.get("poster_url") or "").strip() or None),
+                type_label=(str(payload.get("type_label") or "").strip() or None),
+                local_count=local_count,
+                expected_count=expected_count,
+            )
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}, 400
+        return {"ok": True, "created": created, "request": entry}
+
+    @app.route("/api/requests/<path:request_id>", methods=["DELETE"])
+    def api_requests_delete(request_id: str):
+        removed = remove_request(request_id, app.config["REQUESTS_PATH"])
+        if not removed:
+            return {"ok": False, "error": "Request not found"}, 404
+        return {"ok": True, "removed": request_id}
 
     @app.route("/api/show/<show_id>/local-info")
     def api_show_local_info(show_id: str):
@@ -1127,7 +1394,7 @@ def create_app(
         if not episode:
             abort(404)
         if episode.filename != "demo.mp4":
-            return {"ok": False, "error": "Episode already has a local/remote file"}, 400
+            return {"ok": False, "error": "Episode already has an available or remote file"}, 400
         try:
             result = resolve_stream_url(
                 show, episode, base=app.config["GRAB_DIR"], force=force
@@ -1280,6 +1547,18 @@ def create_app(
 
     @app.route("/search")
     def search():
+        return _anime_browse_page(kind=KIND_ANIMES)
+
+    @app.route("/movies")
+    def movies_page():
+        return _anime_browse_page(kind=KIND_MOVIES)
+
+    @app.route("/specials")
+    def specials_page():
+        return _anime_browse_page(kind=KIND_SPECIALS)
+
+    def _anime_browse_page(*, kind: str):
+        browse_kind = normalize_browse_kind(kind)
         q = request.args.get("q", "").strip()
         genre = request.args.get("genre", "").strip()
         availability = normalize_availability(request.args.get("avail", AVAIL_ALL))
@@ -1289,9 +1568,17 @@ def create_app(
             page = 1
 
         all_shows = scan_library(app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
-        genres = collect_genres(all_shows)
-        filtered = filter_shows(all_shows, q, genre, availability)
+        kind_shows = filter_by_kind(all_shows, browse_kind)
+        genres = collect_genres(kind_shows)
+        if genre and genre not in genres:
+            genre = ""
+        filtered = filter_shows(kind_shows, q, genre, availability)
         shows, page, total_pages = paginate(filtered, page, PAGE_SIZE)
+        endpoint = {
+            KIND_ANIMES: "search",
+            KIND_MOVIES: "movies_page",
+            KIND_SPECIALS: "specials_page",
+        }[browse_kind]
 
         return render_template(
             "search.html",
@@ -1304,6 +1591,9 @@ def create_app(
             total_pages=total_pages,
             total_count=len(filtered),
             page_size=PAGE_SIZE,
+            browse_kind=browse_kind,
+            browse_label=KIND_LABELS[browse_kind],
+            browse_endpoint=endpoint,
         )
 
     return app
@@ -1369,53 +1659,110 @@ def _resolve_video_url(
     return url_for("stream_video", show_id=show_id, filename=episode.filename)
 
 
+def _path_is_under(path: Path, root: Path) -> bool:
+    try:
+        path.resolve().relative_to(root.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _contained_dir(base_root: Path, folder: Path) -> Path | None:
+    """Return resolved dir only if it stays under ``base_root``."""
+    try:
+        resolved = folder.resolve()
+    except OSError:
+        return None
+    if not resolved.is_dir():
+        return None
+    if not _path_is_under(resolved, base_root) and resolved != base_root:
+        return None
+    return resolved
+
+
 def _resolve_local_path(base: Path, show_id: str, filename: str) -> Path | None:
+    """Resolve a media file under ``base``; reject path traversal."""
     if not base.exists():
         return None
+    name = Path(filename).name
+    if name != filename or ".." in Path(filename).parts:
+        return None
+    root = base.resolve()
+
+    def _safe_file(folder: Path) -> Path | None:
+        contained = _contained_dir(root, folder)
+        if not contained:
+            return None
+        target = (contained / name).resolve()
+        if not _path_is_under(target, root):
+            return None
+        return target if target.is_file() else None
+
     for folder in base.iterdir():
         if folder.is_dir() and slugify(folder.name) == show_id:
-            target = folder / filename
-            if target.is_file():
-                return target
+            found = _safe_file(folder)
+            if found:
+                return found
     catalog = load_catalog()
     entry = catalog.get(show_id)
     if entry and entry.folder:
-        target = base / entry.folder / filename
-        if target.is_file():
-            return target
+        # Reject catalog folders that escape the media root (e.g. "..\\..").
+        if ".." in Path(entry.folder).parts:
+            return None
+        found = _safe_file(base / entry.folder)
+        if found:
+            return found
     return None
 
 
 def _resolve_local_poster(base: Path, show_id: str) -> Path | None:
     if not base.exists():
         return None
+    root = base.resolve()
+
+    def _safe_poster(folder: Path) -> Path | None:
+        contained = _contained_dir(root, folder)
+        if not contained:
+            return None
+        for name in ("poster.jpg", "poster.png", "folder.jpg", "cover.jpg"):
+            candidate = (contained / name).resolve()
+            if _path_is_under(candidate, root) and candidate.is_file():
+                return candidate
+        return None
+
     for folder in base.iterdir():
         if folder.is_dir() and slugify(folder.name) == show_id:
-            for name in ("poster.jpg", "poster.png", "folder.jpg", "cover.jpg"):
-                candidate = folder / name
-                if candidate.is_file():
-                    return candidate
+            found = _safe_poster(folder)
+            if found:
+                return found
     catalog = load_catalog()
     entry = catalog.get(show_id)
     if entry and entry.folder:
-        folder = base / entry.folder
-        for name in ("poster.jpg", "poster.png", "folder.jpg", "cover.jpg"):
-            candidate = folder / name
-            if candidate.is_file():
-                return candidate
+        if ".." in Path(entry.folder).parts:
+            return None
+        return _safe_poster(base / entry.folder)
     return None
 
 
 
 def _random_library_sample(shows: list[Show], limit: int = 5) -> list[Show]:
-    """Pick up to `limit` shows at random, preferring titles with posters."""
-    if len(shows) <= limit:
-        return list(shows)
-    with_poster = [s for s in shows if s.poster_url or getattr(s, "poster", None)]
-    without = [s for s in shows if s not in with_poster]
-    random.shuffle(with_poster)
-    random.shuffle(without)
-    return (with_poster + without)[:limit]
+    """Pick up to `limit` shows at random for Featured / recommendations.
+
+    Samples from the full library each call (new set/order per page load).
+    Prefers titles with posters when choosing, then shuffles the result.
+    """
+    if not shows or limit <= 0:
+        return []
+
+    with_poster = [s for s in shows if s.poster_url or s.poster]
+    without = [s for s in shows if not (s.poster_url or s.poster)]
+    picks: list[Show] = []
+    if with_poster:
+        picks.extend(random.sample(with_poster, min(limit, len(with_poster))))
+    if len(picks) < limit and without:
+        picks.extend(random.sample(without, min(limit - len(picks), len(without))))
+    random.shuffle(picks)
+    return picks
 
 
 def _continue_watching(

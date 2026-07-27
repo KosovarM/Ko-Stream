@@ -22,12 +22,14 @@ class MangaCatalogEntry:
     mal_id: int | None = None
     title: str | None = None
     media_type: str | None = None  # manga | manhwa | manhua | …
+    mangadex_id: str | None = None  # optional UUID override for chapter-title sync
     added_at: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict) -> MangaCatalogEntry:
         entry_id = data.get("id") or slugify(data.get("folder") or data.get("title", "manga"))
         mal_id = data.get("mal_id")
+        mdx = data.get("mangadex_id")
         return cls(
             id=entry_id,
             enabled=bool(data.get("enabled", True)),
@@ -36,6 +38,7 @@ class MangaCatalogEntry:
             mal_id=int(mal_id) if mal_id is not None else None,
             title=data.get("title"),
             media_type=data.get("media_type"),
+            mangadex_id=str(mdx).strip() if mdx else None,
             added_at=data.get("added_at"),
         )
 
@@ -53,6 +56,8 @@ class MangaCatalogEntry:
             payload["title"] = self.title
         if self.media_type:
             payload["media_type"] = self.media_type
+        if self.mangadex_id:
+            payload["mangadex_id"] = self.mangadex_id
         if self.added_at:
             payload["added_at"] = self.added_at
         return payload

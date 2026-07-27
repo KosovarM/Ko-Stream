@@ -31,6 +31,7 @@ class Show:
     poster_url: str | None = None
     banner_url: str | None = None
     type_label: str = "TV"
+    media_type: str | None = None  # MAL: tv | movie | ova | ona | special | …
     episodes: list[Episode] = field(default_factory=list)
     genres: list[str] = field(default_factory=list)
     anilist_id: int | None = None
@@ -44,6 +45,7 @@ class Show:
     related_anime: list[RelatedAnime] = field(default_factory=list)
     broadcast_day: str | None = None  # monday..sunday (MAL / JST)
     broadcast_time: str | None = None  # HH:MM JST
+    release_year: int | None = None  # MAL start_date.year
 
     @property
     def episode_count(self) -> int:

@@ -1,11 +1,19 @@
-"""Background MAL sync / enrich jobs so the UI is not blocked."""
+"""Background MAL / MangaDex sync jobs so the UI is not blocked.
+
+Four job kinds share one global lock (only one sync at a time):
+
+- ``animes`` — animelist, anime progress reconcile, anime request clear, enrich
+- ``mangas`` — mangalist + manga request clear
+- ``anime_titles`` — episode titles only (Jikan/MAL cache)
+- ``chapter_titles`` — MangaDex chapter titles only
+"""
 
 from __future__ import annotations
 
 import threading
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 from kostream.mal import (
     ENRICH_BATCH_SIZE,
@@ -17,6 +25,18 @@ from kostream.mal import (
     sync_catalog_episode_titles,
     sync_mangalist_to_catalog,
 )
+from kostream.mangadex import (
+    CHAPTER_TITLE_BATCH_SIZE,
+    ChapterTitleSyncResult,
+    sync_catalog_chapter_titles,
+)
+from kostream.sync_index import (
+    refresh_anime_index,
+    refresh_manga_index,
+    skipped_mal_ids,
+)
+
+JobKind = Literal["animes", "mangas", "anime_titles", "chapter_titles"]
 
 _lock = threading.Lock()
 _job: SyncJob | None = None
@@ -25,11 +45,13 @@ _job: SyncJob | None = None
 @dataclass
 class SyncJob:
     status: str = "idle"  # idle | running | done | error
-    phase: str = ""  # list | manga | enrich | episode_titles | done
+    kind: str = ""  # animes | mangas | anime_titles | chapter_titles | ""
+    phase: str = ""  # list | progress | enrich | manga | episode_titles | chapter_titles | done
     synced: int = 0
     manga_synced: int = 0
     enriched: int = 0
     episode_titles: int = 0
+    chapter_titles: int = 0
     message: str = ""
     error: str | None = None
     started_at: float = field(default_factory=time.time)
@@ -38,11 +60,13 @@ class SyncJob:
     def to_dict(self) -> dict[str, Any]:
         return {
             "status": self.status,
+            "kind": self.kind,
             "phase": self.phase,
             "synced": self.synced,
             "manga_synced": self.manga_synced,
             "enriched": self.enriched,
             "episode_titles": self.episode_titles,
+            "chapter_titles": self.chapter_titles,
             "message": self.message,
             "error": self.error,
             "running": self.status == "running",
@@ -55,25 +79,51 @@ def get_sync_job() -> SyncJob:
         return _job or SyncJob(status="idle", message="No sync yet.")
 
 
-def start_mal_sync(
-    cfg: MalConfig,
-    catalog_path,
-    *,
-    manga_catalog_path=None,
-    manga_media_root=None,
-) -> SyncJob:
-    """Start anime + manga list sync + background enrich + episode titles.
-
-    Manga/manhwa Sync covers list status and chapter *counts* only. MAL/Jikan
-    do not expose per-chapter titles, so there is no chapter-title phase
-    analogous to ``sync_catalog_episode_titles``.
-    """
+def _begin_job(kind: JobKind, phase: str, message: str) -> SyncJob | None:
+    """Create a running job if none is active. Returns None when busy (caller gets current)."""
     global _job
     with _lock:
         if _job and _job.status == "running":
-            return _job
-        job = SyncJob(status="running", phase="list", message="Syncing animelist…")
+            return None
+        job = SyncJob(
+            status="running",
+            kind=kind,
+            phase=phase,
+            message=message,
+        )
         _job = job
+        return job
+
+
+def _finish_ok(job: SyncJob, message: str) -> None:
+    with _lock:
+        job.status = "done"
+        job.phase = "done"
+        job.finished_at = time.time()
+        job.message = message
+
+
+def _finish_error(job: SyncJob, message: str, exc: BaseException | None = None) -> None:
+    with _lock:
+        job.status = "error"
+        job.phase = "done"
+        job.error = str(exc) if exc is not None else message
+        job.finished_at = time.time()
+        job.message = message
+
+
+def start_anime_sync(
+    cfg: MalConfig,
+    catalog_path,
+    *,
+    media_root=None,
+    requests_path=None,
+    anime_index_path=None,
+) -> SyncJob:
+    """Animelist + progress reconcile + anime request clear + metadata enrich."""
+    job = _begin_job("animes", "list", "Syncing animelist…")
+    if job is None:
+        return get_sync_job()
 
     def runner() -> None:
         nonlocal job
@@ -81,95 +131,308 @@ def start_mal_sync(
             count = sync_animelist_to_catalog(cfg, catalog_path, enrich=False)
             with _lock:
                 job.synced = count
-                job.phase = "manga"
-                job.message = f"List synced ({count} anime). Syncing mangalist…"
-            manga_count = 0
+                job.phase = "progress"
+                job.message = f"List synced ({count} anime). Reconciling watch progress…"
+
+            skip_anime = skipped_mal_ids("anime_sync", index_path=anime_index_path)
             try:
-                manga_count = sync_mangalist_to_catalog(
-                    cfg,
-                    manga_catalog_path=manga_catalog_path,
-                    manga_media_root=manga_media_root,
+                from kostream.library import MEDIA_ROOT, scan_library
+                from kostream.watch_progress import reconcile_anime_progress
+
+                root = media_root or MEDIA_ROOT
+                for show in scan_library(root, catalog_path):
+                    if show.mal_id and int(show.mal_id) not in skip_anime:
+                        reconcile_anime_progress(show, mal_cfg=cfg)
+            except (OSError, ValueError):
+                pass
+
+            try:
+                from kostream.library import MEDIA_ROOT
+                from kostream.requests_store import clear_fulfilled_requests
+
+                cleared = clear_fulfilled_requests(
+                    path=requests_path,
+                    media_root=media_root or MEDIA_ROOT,
+                    catalog_path=catalog_path,
+                    scope="anime",
                 )
-            except (MalError, TimeoutError, OSError) as exc:
-                with _lock:
-                    job.manga_synced = 0
-                    job.phase = "enrich"
+                if cleared:
+                    with _lock:
+                        job.message = (
+                            f"Synced {count} anime. "
+                            f"Cleared {cleared} fulfilled request"
+                            f"{'s' if cleared != 1 else ''}. "
+                            "Fetching prequel/sequel metadata…"
+                        )
+            except (OSError, ValueError, TypeError):
+                pass
+
+            with _lock:
+                job.phase = "enrich"
+                if "Cleared" not in (job.message or ""):
                     job.message = (
-                        f"List synced ({count} anime). Manga sync failed ({exc}); "
-                        "fetching prequel/sequel metadata…"
-                    )
-            else:
-                with _lock:
-                    job.manga_synced = manga_count
-                    job.phase = "enrich"
-                    job.message = (
-                        f"Synced {count} anime · {manga_count} manga. "
-                        "Fetching prequel/sequel metadata…"
+                        f"Synced {count} anime. Fetching prequel/sequel metadata…"
                     )
             enriched = 0
             try:
                 enriched = enrich_catalog_mal_details(
-                    cfg, catalog_path, limit=ENRICH_BATCH_SIZE
+                    cfg,
+                    catalog_path,
+                    limit=ENRICH_BATCH_SIZE,
+                    skip_mal_ids=skip_anime,
                 )
             except (MalError, TimeoutError, OSError) as exc:
                 with _lock:
                     job.enriched = enriched
-                    job.phase = "episode_titles"
-                    job.message = (
-                        f"Synced {count} anime · {manga_count} manga. "
-                        f"Metadata enrich partial ({enriched}): {exc}. "
-                        "Fetching episode titles…"
+                try:
+                    refresh_anime_index(
+                        catalog_path=catalog_path,
+                        media_root=media_root,
+                        index_path=anime_index_path,
                     )
-            else:
-                with _lock:
-                    job.enriched = enriched
-                    job.phase = "episode_titles"
-                    job.message = (
-                        f"Synced {count} anime · {manga_count} manga · "
-                        f"enriched {enriched}. Fetching episode titles…"
-                    )
-
-            titles_updated = 0
-            try:
-                titles_updated = sync_catalog_episode_titles(
-                    catalog_path, limit=EPISODE_TITLE_BATCH_SIZE
+                except (OSError, ValueError):
+                    pass
+                _finish_ok(
+                    job,
+                    f"Animes synced: {count}. Metadata enrich partial ({enriched}): {exc}",
                 )
-            except (TimeoutError, OSError) as exc:
-                with _lock:
-                    job.episode_titles = titles_updated
-                    job.status = "done"
-                    job.phase = "done"
-                    job.finished_at = time.time()
-                    job.message = (
-                        f"Synced {count} anime · {manga_count} manga · "
-                        f"enriched {enriched}. Episode titles partial "
-                        f"({titles_updated}): {exc}"
-                    )
                 return
 
             with _lock:
-                job.episode_titles = titles_updated
-                job.status = "done"
-                job.phase = "done"
-                job.finished_at = time.time()
-                more_hint = (
-                    " Run Sync again later for more batches if needed."
-                    if enriched >= ENRICH_BATCH_SIZE
-                    or titles_updated >= EPISODE_TITLE_BATCH_SIZE
-                    else ""
+                job.enriched = enriched
+            try:
+                refresh_anime_index(
+                    catalog_path=catalog_path,
+                    media_root=media_root,
+                    index_path=anime_index_path,
                 )
-                job.message = (
-                    f"Synced {count} anime · {manga_count} manga · "
-                    f"enriched {enriched} · episode titles {titles_updated}."
-                    f"{more_hint}"
-                )
+            except (OSError, ValueError):
+                pass
+            more_hint = (
+                " Run Sync animes again later for more enrich batches if needed."
+                if enriched >= ENRICH_BATCH_SIZE
+                else ""
+            )
+            _finish_ok(
+                job,
+                f"Animes synced: {count} · enriched {enriched}.{more_hint}",
+            )
         except (MalError, TimeoutError, OSError) as exc:
-            with _lock:
-                job.status = "error"
-                job.phase = "done"
-                job.error = str(exc)
-                job.finished_at = time.time()
-                job.message = f"Sync failed: {exc}"
+            _finish_error(job, f"Anime sync failed: {exc}", exc)
 
-    threading.Thread(target=runner, daemon=True, name="mal-sync").start()
+    threading.Thread(target=runner, daemon=True, name="mal-sync-animes").start()
     return job
+
+
+def start_manga_sync(
+    cfg: MalConfig,
+    *,
+    manga_catalog_path=None,
+    manga_media_root=None,
+    requests_path=None,
+    manga_index_path=None,
+) -> SyncJob:
+    """Mangalist sync + manga request clear (no chapter titles)."""
+    job = _begin_job("mangas", "manga", "Syncing mangalist…")
+    if job is None:
+        return get_sync_job()
+
+    def runner() -> None:
+        nonlocal job
+        try:
+            manga_count = sync_mangalist_to_catalog(
+                cfg,
+                manga_catalog_path=manga_catalog_path,
+                manga_media_root=manga_media_root,
+            )
+            with _lock:
+                job.manga_synced = manga_count
+                job.message = f"Synced {manga_count} manga. Clearing fulfilled requests…"
+
+            try:
+                from kostream.requests_store import clear_fulfilled_requests
+
+                cleared = clear_fulfilled_requests(
+                    path=requests_path,
+                    manga_root=manga_media_root,
+                    manga_catalog_path=manga_catalog_path,
+                    scope="manga",
+                )
+                if cleared:
+                    try:
+                        refresh_manga_index(
+                            manga_catalog_path=manga_catalog_path,
+                            manga_media_root=manga_media_root,
+                            index_path=manga_index_path,
+                        )
+                    except (OSError, ValueError):
+                        pass
+                    _finish_ok(
+                        job,
+                        f"Mangas synced: {manga_count}. "
+                        f"Cleared {cleared} fulfilled request"
+                        f"{'s' if cleared != 1 else ''}.",
+                    )
+                    return
+            except (OSError, ValueError, TypeError):
+                pass
+
+            try:
+                refresh_manga_index(
+                    manga_catalog_path=manga_catalog_path,
+                    manga_media_root=manga_media_root,
+                    index_path=manga_index_path,
+                )
+            except (OSError, ValueError):
+                pass
+
+            _finish_ok(job, f"Mangas synced: {manga_count}.")
+        except (MalError, TimeoutError, OSError) as exc:
+            _finish_error(job, f"Manga sync failed: {exc}", exc)
+
+    threading.Thread(target=runner, daemon=True, name="mal-sync-mangas").start()
+    return job
+
+
+def start_anime_title_sync(catalog_path, *, anime_index_path=None) -> SyncJob:
+    """Fetch/refresh anime episode titles only."""
+    job = _begin_job("anime_titles", "episode_titles", "Fetching episode titles…")
+    if job is None:
+        return get_sync_job()
+
+    def runner() -> None:
+        nonlocal job
+        try:
+            skip_titles = skipped_mal_ids("episode_titles", index_path=anime_index_path)
+            titles_updated = sync_catalog_episode_titles(
+                catalog_path,
+                limit=EPISODE_TITLE_BATCH_SIZE,
+                skip_mal_ids=skip_titles,
+            )
+            with _lock:
+                job.episode_titles = titles_updated
+            try:
+                refresh_anime_index(
+                    catalog_path=catalog_path,
+                    index_path=anime_index_path,
+                )
+            except (OSError, ValueError):
+                pass
+            more_hint = (
+                " Run Sync anime titles again later for more batches if needed."
+                if titles_updated >= EPISODE_TITLE_BATCH_SIZE
+                else ""
+            )
+            _finish_ok(
+                job,
+                f"Anime titles synced: {titles_updated}.{more_hint}",
+            )
+        except (TimeoutError, OSError) as exc:
+            _finish_error(job, f"Anime title sync failed: {exc}", exc)
+
+    threading.Thread(target=runner, daemon=True, name="mal-sync-anime-titles").start()
+    return job
+
+
+def start_chapter_title_sync(
+    *,
+    manga_catalog_path=None,
+    manga_media_root=None,
+    manga_index_path=None,
+) -> SyncJob:
+    """Fetch MangaDex chapter titles only (metadata, no images)."""
+    job = _begin_job("chapter_titles", "chapter_titles", "Fetching chapter titles…")
+    if job is None:
+        return get_sync_job()
+
+    def runner() -> None:
+        nonlocal job
+        try:
+            skip_chapters = skipped_mal_ids("chapter_titles", index_path=manga_index_path)
+            chapter_result = sync_catalog_chapter_titles(
+                manga_catalog_path,
+                manga_media_root=manga_media_root,
+                limit=CHAPTER_TITLE_BATCH_SIZE,
+                skip_mal_ids=skip_chapters,
+            )
+            with _lock:
+                job.chapter_titles = chapter_result.updated
+            try:
+                refresh_manga_index(
+                    manga_catalog_path=manga_catalog_path,
+                    manga_media_root=manga_media_root,
+                    index_path=manga_index_path,
+                )
+            except (OSError, ValueError):
+                pass
+            more_hint = (
+                " Run Sync chapter titles again later for more batches if needed."
+                if chapter_result.updated >= CHAPTER_TITLE_BATCH_SIZE
+                or (
+                    chapter_result.attempted > 0
+                    and chapter_result.updated < chapter_result.attempted
+                )
+                else ""
+            )
+            chapter_note = f"chapter titles {chapter_result.updated}"
+            if (
+                chapter_result.attempted
+                and chapter_result.updated == 0
+                and (chapter_result.failed or chapter_result.unresolved)
+            ):
+                bits = []
+                if chapter_result.unresolved:
+                    bits.append(f"{chapter_result.unresolved} unresolved")
+                if chapter_result.failed:
+                    bits.append(f"{chapter_result.failed} failed")
+                chapter_note = (
+                    f"chapter titles 0/{chapter_result.attempted} "
+                    f"({', '.join(bits)}"
+                    + (
+                        f": {chapter_result.last_error}"
+                        if chapter_result.last_error
+                        else ""
+                    )
+                    + ")"
+                )
+            _finish_ok(job, f"Chapter titles synced: {chapter_note}.{more_hint}")
+        except (TimeoutError, OSError) as exc:
+            _finish_error(job, f"Chapter title sync failed: {exc}", exc)
+
+    threading.Thread(target=runner, daemon=True, name="mal-sync-chapter-titles").start()
+    return job
+
+
+# Back-compat aliases used by older callers / tests during transition.
+def start_mal_sync(
+    cfg: MalConfig,
+    catalog_path,
+    *,
+    manga_catalog_path=None,
+    manga_media_root=None,
+    media_root=None,
+    requests_path=None,
+) -> SyncJob:
+    """Deprecated: prefer ``start_anime_sync`` / ``start_manga_sync``.
+
+    Runs anime sync only (manga is a separate job).
+    """
+    return start_anime_sync(
+        cfg,
+        catalog_path,
+        media_root=media_root,
+        requests_path=requests_path,
+    )
+
+
+def start_title_sync(
+    catalog_path,
+    *,
+    manga_catalog_path=None,
+    manga_media_root=None,
+) -> SyncJob:
+    """Deprecated: prefer ``start_anime_title_sync`` / ``start_chapter_title_sync``.
+
+    Runs episode-title sync only.
+    """
+    return start_anime_title_sync(catalog_path)

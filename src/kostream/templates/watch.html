@@ -3,56 +3,42 @@
 {% block content %}
 <section class="player-section">
   <a class="player-back" href="{{ url_for('show_detail', show_id=show.id) }}">‹ Episodes overview</a>
-  <div class="player-wrap">
-    {% if is_demo %}
-    <div class="player-demo">
-      <p>Stream only — no local file for this episode.</p>
-      {% if grab_has_resolver %}
-      <p>Press <strong>Resolve stream</strong> to fetch a URL via your Grab resolver.</p>
-      {% elif grab_demo_enabled %}
-      <p>Demo samples are enabled, but no URL resolved yet.</p>
+  <div class="player-stage">
+    <div class="player-wrap">
+      {% if is_demo %}
+      <div class="player-demo">
+        <p>Stream only — no available file for this episode.</p>
+        {% if grab_has_resolver %}
+        <p>Press <strong>Resolve stream</strong> to fetch a URL via your Grab resolver.</p>
+        {% elif grab_demo_enabled %}
+        <p>Demo samples are enabled, but no URL resolved yet.</p>
+        {% else %}
+        <p>Paste a direct HTTPS URL below, or set <code>KOSTREAM_GRAB_CMD</code> to your resolver.</p>
+        {% endif %}
+        <p class="player-hint">Available files go in <code>media/shows/…/S01E0N.mp4</code> when you prefer downloads.</p>
+      </div>
       {% else %}
-      <p>Paste a direct HTTPS URL below, or set <code>KOSTREAM_GRAB_CMD</code> to your resolver.</p>
+      <video id="player" controls autoplay playsinline {% if video_url %}src="{{ video_url }}"{% endif %}></video>
       {% endif %}
-      <p class="player-hint">Local files go in <code>media/shows/…/S01E0N.mp4</code> when you prefer downloads.</p>
     </div>
-    {% else %}
-    <video id="player" controls autoplay playsinline {% if video_url %}src="{{ video_url }}"{% endif %}></video>
-    {% if is_grab %}
-    <p class="player-hint">
-      On-demand stream (grab{% if grab_source %}: {{ grab_source }}{% endif %}) — no local copy stored.
+    {% if not is_demo and (is_grab or is_external) %}
+    <p class="player-hint player-hint--below">
+      {% if is_grab %}
+      On-demand stream{% if grab_source %} · {{ grab_source }}{% endif %} — no available copy stored.
+      {% else %}
+      On-demand stream — no available copy stored by Ko-Stream.
+      {% endif %}
     </p>
-    {% elif is_external %}
-    <p class="player-hint">On-demand stream — no local copy stored by Ko-Stream.</p>
-    {% endif %}
     {% endif %}
   </div>
-  <div class="player-meta">
-    <h1>{{ show.title }}</h1>
-    <p class="player-ep-label">{{ episode.title }}</p>
-    {% if grab_enabled and episode.filename == 'demo.mp4' %}
-    <div class="grab-actions">
-      {% if grab_has_resolver or grab_demo_enabled %}
-      <button type="button" class="btn-watch grab-resolve-btn" id="grab-resolve">
-        {% if is_demo %}Resolve stream{% else %}Refresh stream URL{% endif %}
-      </button>
-      {% endif %}
-      <form class="grab-override" id="grab-override-form">
-        <label for="grab-url">Direct stream URL (HTTPS .mp4 / .m3u8)</label>
-        <div class="grab-override-row">
-          <input type="url" id="grab-url" name="url" placeholder="https://example.com/episode.m3u8" required>
-          <button type="submit" class="btn-detail grab-action-btn" name="action" value="play">Save &amp; play</button>
-        </div>
-        <div class="grab-override-tools">
-          <button type="submit" class="btn-watch grab-action-btn" name="action" value="fetch" id="grab-fetch-local">
-            Download to library
-          </button>
-        </div>
-        <p class="grab-override-msg" id="grab-override-msg" hidden></p>
-      </form>
+
+  <div class="player-footer">
+    <div class="player-footer-main">
+      <p class="player-ep-code">S{{ '%02d'|format(episode.season) }}E{{ '%02d'|format(episode.number) }}</p>
+      <h1 class="player-show-title">{{ show.title }}</h1>
+      <p class="player-ep-title">{{ episode.title }}</p>
     </div>
-    {% endif %}
-    <div class="player-actions">
+    <div class="player-toolbar">
       <div class="player-nav">
         {% if prev_episode %}
         <a class="btn-detail player-nav-btn" href="{{ url_for('watch', show_id=show.id, episode_id=prev_episode.id) }}">← Prev</a>
@@ -65,11 +51,39 @@
         <span class="player-nav-btn is-disabled" aria-hidden="true">Next →</span>
         {% endif %}
       </div>
-      <button type="button" class="btn-watch player-complete" id="mark-complete">
-        ✓ Complete{% if mal_connected %} on MAL{% endif %}
+      <button
+        type="button"
+        class="btn-watch player-complete"
+        id="mark-complete"
+        {% if episode_completed_flag %}disabled{% endif %}
+      >
+        {% if episode_completed_flag %}✓ Completed{% else %}✓ Complete{% if mal_connected %} on MAL{% endif %}{% endif %}
       </button>
     </div>
   </div>
+
+  {% if grab_enabled and episode.filename == 'demo.mp4' %}
+  <div class="grab-actions">
+    {% if grab_has_resolver or grab_demo_enabled %}
+    <button type="button" class="btn-watch grab-resolve-btn" id="grab-resolve">
+      {% if is_demo %}Resolve stream{% else %}Refresh stream URL{% endif %}
+    </button>
+    {% endif %}
+    <form class="grab-override" id="grab-override-form">
+      <label for="grab-url">Direct stream URL (HTTPS .mp4 / .m3u8)</label>
+      <div class="grab-override-row">
+        <input type="url" id="grab-url" name="url" placeholder="https://example.com/episode.m3u8" required>
+        <button type="submit" class="btn-detail grab-action-btn" name="action" value="play">Save &amp; play</button>
+      </div>
+      <div class="grab-override-tools">
+        <button type="submit" class="btn-watch grab-action-btn" name="action" value="fetch" id="grab-fetch-local">
+          Download to library
+        </button>
+      </div>
+      <p class="grab-override-msg" id="grab-override-msg" hidden></p>
+    </form>
+  </div>
+  {% endif %}
 </section>
 {% endblock %}
 

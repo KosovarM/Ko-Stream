@@ -1,25 +1,25 @@
 {% extends "base.html" %}
-{% block title %}Animes — {{ site_name }}{% endblock %}
+{% block title %}{{ browse_label }} — {{ site_name }}{% endblock %}
 {% block content %}
 <section class="section page-search browse-page">
   <header class="browse-header">
     <div class="browse-header-row">
-      <h1 class="section-title">Animes</h1>
+      <h1 class="section-title">{{ browse_label }}</h1>
       <div class="manga-tabs browse-avail-tabs" role="tablist" aria-label="Availability">
         <a
-          href="{{ url_for('search', q=query, genre=selected_genre, avail='all') }}"
+          href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail='all') }}"
           class="manga-tab{% if selected_avail == 'all' %} is-active{% endif %}"
           role="tab"
           aria-selected="{{ 'true' if selected_avail == 'all' else 'false' }}"
         >All</a>
         <a
-          href="{{ url_for('search', q=query, genre=selected_genre, avail='local') }}"
+          href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail='local') }}"
           class="manga-tab{% if selected_avail == 'local' %} is-active{% endif %}"
           role="tab"
           aria-selected="{{ 'true' if selected_avail == 'local' else 'false' }}"
-        >Local</a>
+        >Available</a>
         <a
-          href="{{ url_for('search', q=query, genre=selected_genre, avail='stream') }}"
+          href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail='stream') }}"
           class="manga-tab{% if selected_avail == 'stream' %} is-active{% endif %}"
           role="tab"
           aria-selected="{{ 'true' if selected_avail == 'stream' else 'false' }}"
@@ -33,7 +33,7 @@
     </p>
   </header>
 
-  <form class="browse-filters" action="{{ url_for('search') }}" method="get">
+  <form class="browse-filters" action="{{ url_for(browse_endpoint) }}" method="get">
     <input type="hidden" name="avail" value="{{ selected_avail }}">
     <label class="browse-field browse-field-search">
       <span class="browse-label">Search</span>
@@ -57,7 +57,7 @@
     <div class="browse-actions">
       <button type="submit" class="btn-browse">Apply</button>
       {% if query or selected_genre or selected_avail != 'all' %}
-      <a href="{{ url_for('search') }}" class="btn-browse-secondary">Clear</a>
+      <a href="{{ url_for(browse_endpoint) }}" class="btn-browse-secondary">Clear</a>
       {% endif %}
     </div>
   </form>
@@ -96,9 +96,9 @@
   </div>
 
   {% if total_pages > 1 %}
-        <nav class="browse-pagination" aria-label="Anime pages">
+        <nav class="browse-pagination" aria-label="{{ browse_label }} pages">
     {% if page > 1 %}
-    <a class="browse-page-btn" href="{{ url_for('search', q=query, genre=selected_genre, avail=selected_avail, page=page - 1) }}">‹ Previous</a>
+    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail=selected_avail, page=page - 1) }}">‹ Previous</a>
     {% else %}
     <span class="browse-page-btn disabled">‹ Previous</span>
     {% endif %}
@@ -106,7 +106,7 @@
     <span class="browse-page-status">Page {{ page }} of {{ total_pages }}</span>
 
     {% if page < total_pages %}
-    <a class="browse-page-btn" href="{{ url_for('search', q=query, genre=selected_genre, avail=selected_avail, page=page + 1) }}">Next ›</a>
+    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail=selected_avail, page=page + 1) }}">Next ›</a>
     {% else %}
     <span class="browse-page-btn disabled">Next ›</span>
     {% endif %}
@@ -117,7 +117,7 @@
   <div class="browse-empty">
     <p class="empty">No titles match your filters.</p>
     {% if query or selected_genre or selected_avail != 'all' %}
-    <a href="{{ url_for('search') }}" class="btn-browse-secondary">Show all titles</a>
+    <a href="{{ url_for(browse_endpoint) }}" class="btn-browse-secondary">Show all titles</a>
     {% else %}
     <p class="browse-empty-hint">Add shows in Library or connect MyAnimeList to populate your library.</p>
     {% endif %}

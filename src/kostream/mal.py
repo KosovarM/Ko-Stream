@@ -39,15 +39,17 @@ MAL_EPISODE_TITLE_RE = re.compile(
 )
 
 ANIMELIST_FIELDS = (
-    "list_status,num_episodes,synopsis,genres,main_picture,mean,media_type,status,start_date,broadcast"
+    "list_status,num_episodes,synopsis,genres,main_picture,mean,media_type,status,"
+    "start_date,start_season,broadcast"
 )
 
 MANGALIST_FIELDS = (
-    "list_status,num_volumes,num_chapters,synopsis,genres,main_picture,mean,media_type,status"
+    "list_status,num_volumes,num_chapters,synopsis,genres,main_picture,mean,media_type,status,start_date"
 )
 
 ANIME_DETAIL_FIELDS = (
-    "related_anime,synopsis,genres,main_picture,mean,num_episodes,status,media_type,title,broadcast"
+    "related_anime,synopsis,genres,main_picture,mean,num_episodes,status,media_type,title,"
+    "broadcast,start_date,start_season"
 )
 
 MANGA_CACHE_DIR = MAL_DATA_DIR / "manga_cache"
@@ -112,6 +114,8 @@ class MalAnimeEntry:
     broadcast_time: str | None = None  # HH:MM JST
     # Episode number → title (from MAL episode pages via Jikan; official API has none)
     episode_titles: dict[int, str] = field(default_factory=dict)
+    media_type: str | None = None  # tv | movie | ova | ona | special | …
+    release_year: int | None = None
 
 
 @dataclass
@@ -130,6 +134,57 @@ class MalMangaEntry:
     score: int
     mean_score: float | None
     media_type: str | None = None  # manga | manhwa | manhua | novel | …
+    release_year: int | None = None
+
+
+def _year_in_range(year: int) -> int | None:
+    return year if 1900 <= year <= 2100 else None
+
+
+def _year_from_mal_date_string(value: str) -> int | None:
+    """Parse MAL ``date`` fields: ``YYYY``, ``YYYY-MM``, or ``YYYY-MM-DD``."""
+    text = value.strip()
+    if not text:
+        return None
+    head = text.split("-", 1)[0]
+    try:
+        return _year_in_range(int(head))
+    except ValueError:
+        return None
+
+
+def parse_mal_start_year(source: dict[str, Any] | None) -> int | None:
+    """Extract release/start year from a MAL API node or ``start_date`` value.
+
+    MAL v2 returns ``start_date`` as an ISO date string (e.g. ``"2011-07-22"``),
+    not as ``{year, month, day}``. ``start_season.year`` is used as a fallback.
+    """
+    if not isinstance(source, dict):
+        return None
+
+    start = source.get("start_date") if "start_date" in source else source
+    if isinstance(start, str):
+        year = _year_from_mal_date_string(start)
+        if year is not None:
+            return year
+    elif isinstance(start, dict):
+        try:
+            year = int(start.get("year") or 0)
+        except (TypeError, ValueError):
+            year = 0
+        found = _year_in_range(year)
+        if found is not None:
+            return found
+
+    season = source.get("start_season")
+    if isinstance(season, dict):
+        try:
+            year = int(season.get("year") or 0)
+        except (TypeError, ValueError):
+            year = 0
+        return _year_in_range(year)
+
+    return None
 
 
 def is_connected() -> bool:
@@ -332,9 +387,9 @@ def sync_mangalist_to_catalog(
     """Fetch MAL mangalist into data/manga/selected.json. Returns count synced.
 
     MAL (official API) and Jikan only provide series metadata such as
-    ``num_chapters`` — there is no per-chapter title list analogous to anime
-    ``/anime/{id}/episodes``. Chapter labels in the reader come from local
-    folder/CBZ names and optional ComicInfo.xml (see ``kostream.manga``).
+    ``num_chapters`` — there is no per-chapter title list. Chapter names for
+    local files come from ComicInfo/filenames, with MangaDex titles filled in
+    by Sync (``kostream.mangadex.sync_catalog_chapter_titles``).
     """
     from kostream.manga import MANGA_ROOT
     from kostream.manga_catalog import (
@@ -369,6 +424,7 @@ def sync_mangalist_to_catalog(
             mal_id=item.mal_id,
             title=item.title,
             media_type=item.media_type or (previous.media_type if previous else None),
+            mangadex_id=previous.mangadex_id if previous else None,
             added_at=previous.added_at if previous else None,
         )
         state = upsert_manga_entry(state, entry)
@@ -434,6 +490,7 @@ def enrich_catalog_mal_details(
     *,
     limit: int | None = ENRICH_BATCH_SIZE,
     force: bool = False,
+    skip_mal_ids: set[int] | frozenset[int] | None = None,
 ) -> int:
     """Fetch GET /anime/{id} details (relations) for catalog MAL ids missing them."""
     try:
@@ -442,6 +499,8 @@ def enrich_catalog_mal_details(
         pass
     catalog = load_catalog(catalog_path)
     mal_ids = {entry.mal_id for entry in catalog.shows if entry.mal_id}
+    if skip_mal_ids:
+        mal_ids -= {int(x) for x in skip_mal_ids}
     if not mal_ids:
         return 0
     access_token = get_valid_access_token(cfg)
@@ -461,6 +520,7 @@ def sync_catalog_episode_titles(
     *,
     limit: int | None = EPISODE_TITLE_BATCH_SIZE,
     enabled_only: bool = True,
+    skip_mal_ids: set[int] | frozenset[int] | None = None,
 ) -> int:
     """Fetch missing Jikan episode titles into MAL cache for catalog titles.
 
@@ -470,10 +530,13 @@ def sync_catalog_episode_titles(
     """
     catalog = load_catalog(catalog_path)
     entries = catalog.enabled if enabled_only else catalog.shows
+    skip = {int(x) for x in skip_mal_ids} if skip_mal_ids else set()
     pending_entries = [
         entry
         for entry in entries
-        if entry.mal_id and episode_titles_need_fetch(entry.mal_id)
+        if entry.mal_id
+        and int(entry.mal_id) not in skip
+        and episode_titles_need_fetch(entry.mal_id)
     ]
     # Dedupe by mal_id, keeping the highest-priority catalog row.
     best: dict[int, CatalogEntry] = {}
@@ -863,6 +926,8 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
         day = existing.broadcast_day
         btime = existing.broadcast_time
 
+    media_type = node.get("media_type") or (existing.media_type if existing else None)
+    release_year = parse_mal_start_year(node) or (existing.release_year if existing else None)
     entry = MalAnimeEntry(
         mal_id=mal_id,
         title=str(node.get("title") or (existing.title if existing else title_fallback or f"Anime {mal_id}")),
@@ -882,6 +947,8 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
         related_anime=related,
         broadcast_day=day,
         broadcast_time=btime,
+        media_type=str(media_type) if media_type else None,
+        release_year=release_year,
     )
     write_cached_anime(entry, preserve_relations=False)
     # Always mark as enriched after a successful details fetch (even if no relations).
@@ -898,9 +965,15 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
 
 
 def update_episodes_watched(cfg: MalConfig, mal_id: int, num_watched: int, status: str | None = None) -> None:
-    """Push local watch progress to MAL (PATCH my_list_status)."""
+    """Push local watch progress to MAL (PATCH my_list_status).
+
+    Never decreases MAL progress: the value sent is at least the cached remote count.
+    """
     access_token = get_valid_access_token(cfg)
-    form: dict[str, str] = {"num_watched_episodes": str(max(0, num_watched))}
+    cached = load_cached_anime(mal_id)
+    floor = cached.num_episodes_watched if cached else 0
+    num_watched = max(0, int(num_watched), floor)
+    form: dict[str, str] = {"num_watched_episodes": str(num_watched)}
     if status:
         form["status"] = status
     try:
@@ -908,10 +981,9 @@ def update_episodes_watched(cfg: MalConfig, mal_id: int, num_watched: int, statu
     except MalError as exc:
         if "404" not in str(exc):
             raise
-        put_form = {"status": status or "watching", "num_watched_episodes": str(max(0, num_watched))}
+        put_form = {"status": status or "watching", "num_watched_episodes": str(num_watched)}
         _api_form_raw(access_token, f"/anime/{mal_id}/my_list_status", put_form, method="PUT")
 
-    cached = load_cached_anime(mal_id)
     if cached:
         cached.num_episodes_watched = max(cached.num_episodes_watched, num_watched)
         if status:
@@ -925,9 +997,15 @@ def update_chapters_read(
     num_chapters_read: int,
     status: str | None = None,
 ) -> None:
-    """Push manga chapter progress to MAL (PATCH my_list_status)."""
+    """Push manga chapter progress to MAL (PATCH my_list_status).
+
+    Never decreases MAL chapter progress relative to the local cache floor.
+    """
     access_token = get_valid_access_token(cfg)
-    form: dict[str, str] = {"num_chapters_read": str(max(0, num_chapters_read))}
+    cached = load_cached_manga(mal_id)
+    floor = cached.num_chapters_read if cached else 0
+    num_chapters_read = max(0, int(num_chapters_read), floor)
+    form: dict[str, str] = {"num_chapters_read": str(num_chapters_read)}
     if status:
         form["status"] = status
     try:
@@ -937,11 +1015,10 @@ def update_chapters_read(
             raise
         put_form = {
             "status": status or "reading",
-            "num_chapters_read": str(max(0, num_chapters_read)),
+            "num_chapters_read": str(num_chapters_read),
         }
         _api_form_raw(access_token, f"/manga/{mal_id}/my_list_status", put_form, method="PUT")
 
-    cached = load_cached_manga(mal_id)
     if cached:
         cached.num_chapters_read = max(cached.num_chapters_read, num_chapters_read)
         if status:
@@ -956,6 +1033,8 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
     broadcast_day = entry.broadcast_day
     broadcast_time = entry.broadcast_time
     episode_titles = dict(entry.episode_titles)
+    media_type = entry.media_type
+    release_year = entry.release_year
     existing_path = CACHE_DIR / f"{entry.mal_id}.json"
     if existing_path.exists():
         try:
@@ -968,6 +1047,10 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
                 broadcast_time = old.get("broadcast_time")
             if not episode_titles and old.get("episode_titles"):
                 episode_titles = _episode_titles_from_cache(old.get("episode_titles") or {})
+            if not media_type and old.get("media_type"):
+                media_type = old.get("media_type")
+            if release_year is None and old.get("release_year"):
+                release_year = old.get("release_year")
         except (OSError, json.JSONDecodeError, ValueError):
             pass
     if related:
@@ -986,6 +1069,8 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
         "mean_score": entry.mean_score,
         "broadcast_day": broadcast_day,
         "broadcast_time": broadcast_time,
+        "media_type": media_type,
+        "release_year": release_year,
         "related_anime": [
             {"mal_id": rel.mal_id, "title": rel.title, "relation_type": rel.relation_type}
             for rel in related
@@ -1079,6 +1164,7 @@ def load_cached_manga(mal_id: int) -> MalMangaEntry | None:
         score=int(data.get("score", 0)),
         mean_score=data.get("mean_score"),
         media_type=(data.get("media_type") or None),
+        release_year=data.get("release_year"),
     )
 
 
@@ -1091,6 +1177,14 @@ def _write_manga_cache(entries: list[MalMangaEntry]) -> None:
 def write_cached_manga(entry: MalMangaEntry) -> None:
     MANGA_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = MANGA_CACHE_DIR / f"{entry.mal_id}.json"
+    release_year = entry.release_year
+    if path.exists():
+        try:
+            old = json.loads(path.read_text(encoding="utf-8"))
+            if release_year is None and old.get("release_year"):
+                release_year = old.get("release_year")
+        except (OSError, json.JSONDecodeError, ValueError):
+            pass
     payload = {
         "mal_id": entry.mal_id,
         "title": entry.title,
@@ -1106,6 +1200,7 @@ def write_cached_manga(entry: MalMangaEntry) -> None:
         "score": entry.score,
         "mean_score": entry.mean_score,
         "media_type": entry.media_type,
+        "release_year": release_year,
     }
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
@@ -1135,6 +1230,7 @@ def _parse_mangalist_row(row: dict[str, Any]) -> MalMangaEntry | None:
         score=int(list_status.get("score") or 0),
         mean_score=node.get("mean"),
         media_type=str(media_type) if media_type else None,
+        release_year=parse_mal_start_year(node),
     )
 
 
@@ -1159,6 +1255,8 @@ def load_cached_anime(mal_id: int) -> MalAnimeEntry | None:
         broadcast_day=data.get("broadcast_day"),
         broadcast_time=data.get("broadcast_time"),
         episode_titles=_episode_titles_from_cache(data.get("episode_titles") or {}),
+        media_type=(data.get("media_type") or None),
+        release_year=data.get("release_year"),
     )
 
 
@@ -1194,6 +1292,7 @@ def _parse_animelist_row(row: dict[str, Any]) -> MalAnimeEntry | None:
     genres = [g.get("name", "") for g in (node.get("genres") or []) if g.get("name")]
     list_status = row.get("list_status") or {}
     day, btime = _parse_broadcast(node)
+    media_type = node.get("media_type")
 
     return MalAnimeEntry(
         mal_id=int(mal_id),
@@ -1210,6 +1309,8 @@ def _parse_animelist_row(row: dict[str, Any]) -> MalAnimeEntry | None:
         related_anime=[],
         broadcast_day=day,
         broadcast_time=btime,
+        media_type=str(media_type) if media_type else None,
+        release_year=parse_mal_start_year(node),
     )
 
 

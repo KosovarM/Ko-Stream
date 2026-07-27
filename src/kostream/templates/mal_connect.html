@@ -24,6 +24,7 @@
     <h2>Step 3 — Finish (automatic or manual)</h2>
     <p>Normally you are redirected back to Ko-Stream automatically. If the browser shows “can’t connect” but the address bar contains <code>?code=...</code>, copy the full URL or just the code below.</p>
     <form class="mal-manual-form" method="post" action="{{ url_for('mal_complete_manual') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <textarea name="code" rows="3" placeholder="Paste callback URL or authorization code here"></textarea>
       <button type="submit" class="btn-watch">Complete connection</button>
     </form>

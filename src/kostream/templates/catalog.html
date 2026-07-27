@@ -33,6 +33,56 @@
     {% endif %}
   </header>
 
+  <section class="catalog-section requests-section" id="library-requests">
+    <h2>Requests</h2>
+    <p class="catalog-meta">
+      Wishlist for titles with missing available episodes or chapters.
+      {% if media_requests %}{{ media_requests|length }} open{% else %}None yet{% endif %}.
+    </p>
+    {% if media_requests %}
+    {% for kind, label in request_kind_labels.items() %}
+      {% set rows = media_requests_grouped.get(kind, []) %}
+      {% if rows %}
+      <div class="requests-group">
+        <h3 class="requests-group-title">{{ label }} <span class="requests-group-count">{{ rows|length }}</span></h3>
+        <ul class="requests-list">
+          {% for item in rows %}
+          <li class="requests-row" data-request-id="{{ item.id }}">
+            {% if item.poster_url %}
+            <img class="requests-poster" src="{{ item.poster_url }}" alt="" width="40" height="56" loading="lazy" referrerpolicy="no-referrer">
+            {% else %}
+            <span class="requests-poster requests-poster--empty" aria-hidden="true">{{ (item.title or '?')[:1] }}</span>
+            {% endif %}
+            <div class="requests-body">
+              {% if kind in ('manga', 'manhwa') %}
+              <a class="requests-title" href="{{ url_for('manga_page' if kind == 'manga' else 'manhwa_page', open=item.media_id) }}">{{ item.title }}</a>
+              {% else %}
+              <a class="requests-title" href="{{ url_for('show_detail', show_id=item.media_id) }}">{{ item.title }}</a>
+              {% endif %}
+              <div class="requests-meta">
+                <span class="tag">{{ item.type_label or label }}</span>
+                {% if item.expected_count is defined and item.expected_count is not none %}
+                <span class="requests-counts">{{ item.local_count or 0 }}/{{ item.expected_count }} available</span>
+                {% endif %}
+              </div>
+            </div>
+            <button
+              type="button"
+              class="btn-detail requests-dismiss"
+              data-request-id="{{ item.id }}"
+              title="Remove request"
+            >Dismiss</button>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+    {% endfor %}
+    {% else %}
+    <p class="empty">No open requests. Use <strong>Request missing</strong> on a show or manga overview when available files are incomplete.</p>
+    {% endif %}
+  </section>
+
   <section class="catalog-section mal-section">
     <h2>MyAnimeList</h2>
     {% if not mal_configured %}
@@ -45,8 +95,12 @@
     <p class="catalog-meta mal-last-sync">Last sync: never</p>
     {% endif %}
     <p class="catalog-meta" id="mal-sync-status" hidden></p>
-    <div class="mal-actions">
-      <button type="button" class="btn-watch" id="mal-sync">Sync anime + manga + metadata</button>
+    <div class="mal-actions sync-actions" id="mal-sync-actions">
+      <button type="button" class="btn-watch btn-sync" id="mal-sync-animes" title="Update animelist, watch progress, and anime metadata (not episode titles)">Sync animes</button>
+      <button type="button" class="btn-watch btn-sync" id="mal-sync-mangas" title="Update mangalist and clear fulfilled manga requests (not chapter titles)">Sync mangas</button>
+      <button type="button" class="btn-watch btn-sync" id="mal-sync-anime-titles" title="Fetch anime episode titles for available media">Sync anime titles</button>
+      <button type="button" class="btn-watch btn-sync" id="mal-sync-chapter-titles" title="Fetch MangaDex chapter titles for available manga">Sync chapter titles</button>
+      <button type="button" class="btn-detail" id="sync-index-open" title="Manage which titles are skipped on sync">Manage sync index</button>
       <button type="button" class="btn-detail" id="mal-disconnect">Disconnect</button>
     </div>
     {% else %}
@@ -71,10 +125,58 @@
     <ul id="anilist-results" class="catalog-results"></ul>
   </section>
 </section>
+
+<div class="sync-index-modal" id="sync-index-modal" hidden aria-hidden="true">
+  <div class="sync-index-backdrop" id="sync-index-backdrop" tabindex="-1"></div>
+  <div class="sync-index-panel" role="dialog" aria-labelledby="sync-index-title" aria-modal="true">
+    <header class="sync-index-header">
+      <h2 id="sync-index-title">Sync index</h2>
+      <button type="button" class="sync-index-close" id="sync-index-close" aria-label="Close">×</button>
+    </header>
+    <p class="catalog-meta sync-index-help">
+      Checked titles are skipped on the next sync. Uncheck to force a re-sync.
+      Completed titles are auto-checked after each sync run.
+    </p>
+    <nav class="sync-index-tabs" role="tablist" aria-label="Sync index sections">
+      <button type="button" class="sync-index-tab is-active" role="tab" data-section="anime_sync" aria-selected="true">Anime sync</button>
+      <button type="button" class="sync-index-tab" role="tab" data-section="episode_titles" aria-selected="false">Episode titles</button>
+      <button type="button" class="sync-index-tab" role="tab" data-section="manga_sync" aria-selected="false">Manga sync</button>
+      <button type="button" class="sync-index-tab" role="tab" data-section="chapter_titles" aria-selected="false">Chapter titles</button>
+    </nav>
+    <ul class="sync-index-list" id="sync-index-list" aria-live="polite"></ul>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+  document.querySelectorAll('.requests-dismiss').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.requestId;
+      if (!id) return;
+      btn.disabled = true;
+      try {
+        const resp = await fetch('/api/requests/' + encodeURIComponent(id), {
+          method: 'DELETE',
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          alert(data.error || 'Could not remove request');
+          btn.disabled = false;
+          return;
+        }
+        const row = btn.closest('.requests-row');
+        const group = btn.closest('.requests-group');
+        if (row) row.remove();
+        if (group && !group.querySelector('.requests-row')) group.remove();
+        if (!document.querySelector('.requests-row')) location.reload();
+      } catch (_) {
+        alert('Could not remove request');
+        btn.disabled = false;
+      }
+    });
+  });
+
   document.getElementById('anilist-search').addEventListener('submit', async (event) => {
     event.preventDefault();
     const q = new FormData(event.target).get('q');
@@ -84,26 +186,51 @@
     const data = await resp.json();
     list.innerHTML = '';
     if (data.error) {
-      list.innerHTML = `<li class="empty catalog-error">${data.error}</li>`;
+      const err = document.createElement('li');
+      err.className = 'empty catalog-error';
+      err.textContent = String(data.error);
+      list.appendChild(err);
       return;
     }
     (data.results || []).forEach((item) => {
       const li = document.createElement('li');
       li.className = 'catalog-result';
-      li.innerHTML = `
-        ${item.poster_url ? `<img src="${item.poster_url}" alt="" width="48">` : ''}
-        <div>
-          <strong>${item.title.replace(/</g, '&lt;')}</strong>
-          <div class="catalog-tags">${(item.genres || []).map(g => `<span class="tag genre">${g}</span>`).join('')}</div>
-        </div>
-        <button type="button" class="btn-watch">Add</button>
-      `;
-      li.querySelector('button').addEventListener('click', async () => {
+
+      if (item.poster_url) {
+        const img = document.createElement('img');
+        img.src = String(item.poster_url);
+        img.alt = '';
+        img.width = 48;
+        img.referrerPolicy = 'no-referrer';
+        li.appendChild(img);
+      }
+
+      const body = document.createElement('div');
+      const title = document.createElement('strong');
+      title.textContent = String(item.title || '');
+      body.appendChild(title);
+
+      const tags = document.createElement('div');
+      tags.className = 'catalog-tags';
+      (item.genres || []).forEach((g) => {
+        const tag = document.createElement('span');
+        tag.className = 'tag genre';
+        tag.textContent = String(g);
+        tags.appendChild(tag);
+      });
+      body.appendChild(tags);
+      li.appendChild(body);
+
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn-watch';
+      btn.textContent = 'Add';
+      btn.addEventListener('click', async () => {
         await fetch('{{ url_for("api_catalog_add") }}', {
           method: 'POST',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify({
-            source: 'demo',
+            source: 'anilist',
             id: 'anilist-' + item.anilist_id,
             anilist_id: item.anilist_id,
             title: item.title
@@ -111,14 +238,110 @@
         });
         location.reload();
       });
+      li.appendChild(btn);
       list.appendChild(li);
     });
-    if (!list.children.length) list.innerHTML = '<li class="empty">No results</li>';
+    if (!list.children.length) {
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = 'No results';
+      list.appendChild(empty);
+    }
   });
 
-  const malSync = document.getElementById('mal-sync');
+  const malSyncAnimes = document.getElementById('mal-sync-animes');
+  const malSyncMangas = document.getElementById('mal-sync-mangas');
+  const malSyncAnimeTitles = document.getElementById('mal-sync-anime-titles');
+  const malSyncChapterTitles = document.getElementById('mal-sync-chapter-titles');
   const malSyncStatus = document.getElementById('mal-sync-status');
-  if (malSync) {
+  const syncButtons = [
+    malSyncAnimes, malSyncMangas, malSyncAnimeTitles, malSyncChapterTitles,
+  ].filter(Boolean);
+
+  if (syncButtons.length) {
+    const LABELS = {
+      animes: 'Sync animes',
+      mangas: 'Sync mangas',
+      anime_titles: 'Sync anime titles',
+      chapter_titles: 'Sync chapter titles',
+    };
+    const BUSY = {
+      animes: {
+        list: 'Syncing animes…',
+        progress: 'Reconciling progress…',
+        enrich: 'Enriching metadata…',
+        default: 'Syncing animes…',
+      },
+      mangas: { default: 'Syncing mangas…' },
+      anime_titles: { default: 'Syncing anime titles…' },
+      chapter_titles: { default: 'Syncing chapter titles…' },
+    };
+
+    const malSyncActions = document.getElementById('mal-sync-actions');
+
+    const clearSyncVisuals = () => {
+      malSyncActions?.classList.remove('is-syncing');
+      malSyncActions?.removeAttribute('aria-busy');
+      syncButtons.forEach((btn) => {
+        btn.classList.remove('is-active-sync');
+        btn.removeAttribute('aria-busy');
+      });
+    };
+
+    const applySyncVisuals = (kind) => {
+      malSyncActions?.classList.add('is-syncing');
+      malSyncActions?.setAttribute('aria-busy', 'true');
+      syncButtons.forEach((btn) => btn.classList.remove('is-active-sync'));
+      const active = activeButtonForKind(kind);
+      if (active) {
+        active.classList.add('is-active-sync');
+        active.setAttribute('aria-busy', 'true');
+      }
+    };
+
+    const setButtonsIdle = () => {
+      clearSyncVisuals();
+      if (malSyncAnimes) {
+        malSyncAnimes.disabled = false;
+        malSyncAnimes.textContent = LABELS.animes;
+      }
+      if (malSyncMangas) {
+        malSyncMangas.disabled = false;
+        malSyncMangas.textContent = LABELS.mangas;
+      }
+      if (malSyncAnimeTitles) {
+        malSyncAnimeTitles.disabled = false;
+        malSyncAnimeTitles.textContent = LABELS.anime_titles;
+      }
+      if (malSyncChapterTitles) {
+        malSyncChapterTitles.disabled = false;
+        malSyncChapterTitles.textContent = LABELS.chapter_titles;
+      }
+    };
+
+    const activeButtonForKind = (kind) => {
+      if (kind === 'animes') return malSyncAnimes;
+      if (kind === 'mangas') return malSyncMangas;
+      if (kind === 'anime_titles') return malSyncAnimeTitles;
+      if (kind === 'chapter_titles') return malSyncChapterTitles;
+      return null;
+    };
+
+    const setButtonsBusy = (kind, phase) => {
+      syncButtons.forEach((btn) => { btn.disabled = true; });
+      applySyncVisuals(kind);
+      // Reset labels, then show busy text on the active kind.
+      if (malSyncAnimes) malSyncAnimes.textContent = LABELS.animes;
+      if (malSyncMangas) malSyncMangas.textContent = LABELS.mangas;
+      if (malSyncAnimeTitles) malSyncAnimeTitles.textContent = LABELS.anime_titles;
+      if (malSyncChapterTitles) malSyncChapterTitles.textContent = LABELS.chapter_titles;
+      const active = activeButtonForKind(kind);
+      const labels = BUSY[kind] || {};
+      if (active) {
+        active.textContent = labels[phase] || labels.default || 'Syncing…';
+      }
+    };
+
     const pollStatus = async () => {
       const resp = await fetch('{{ url_for("api_mal_sync_status") }}');
       const data = await resp.json();
@@ -127,48 +350,51 @@
         malSyncStatus.textContent = data.message || data.phase || 'Working…';
       }
       if (data.running) {
-        malSync.disabled = true;
-        malSync.textContent =
-          data.phase === 'episode_titles'
-            ? 'Syncing episode titles…'
-            : data.phase === 'enrich'
-              ? 'Enriching metadata…'
-              : data.phase === 'manga'
-                ? 'Syncing mangalist…'
-                : 'Syncing list…';
+        setButtonsBusy(data.kind || 'animes', data.phase);
         setTimeout(pollStatus, 1200);
         return;
       }
-      malSync.disabled = false;
-      malSync.textContent = 'Sync anime + manga + metadata';
+      setButtonsIdle();
       if (data.status === 'done' || data.status === 'error') {
         const msg = data.message || (data.error ? `Sync failed: ${data.error}` : 'Sync finished.');
         location.href = '{{ url_for("catalog_page") }}?mal_message=' + encodeURIComponent(msg);
       }
     };
 
-    malSync.addEventListener('click', async () => {
-      malSync.disabled = true;
-      malSync.textContent = 'Starting sync…';
+    const startSync = async (endpoint, kind, startLabel) => {
+      setButtonsBusy(kind, '');
+      const active = activeButtonForKind(kind);
+      if (active) active.textContent = startLabel;
       if (malSyncStatus) {
         malSyncStatus.hidden = false;
         malSyncStatus.textContent = 'Starting…';
       }
       try {
-        const resp = await fetch('{{ url_for("api_mal_sync") }}', { method: 'POST' });
+        const resp = await fetch(endpoint, { method: 'POST' });
         const data = await resp.json();
         if (!data.ok) {
           alert(data.error || 'Sync failed');
-          malSync.disabled = false;
-          malSync.textContent = 'Sync anime + manga + metadata';
+          setButtonsIdle();
           return;
         }
         pollStatus();
       } catch (err) {
         alert('Could not start sync.');
-        malSync.disabled = false;
-        malSync.textContent = 'Sync anime + manga + metadata';
+        setButtonsIdle();
       }
+    };
+
+    malSyncAnimes?.addEventListener('click', () => {
+      startSync('{{ url_for("api_mal_sync_animes") }}', 'animes', 'Starting anime sync…');
+    });
+    malSyncMangas?.addEventListener('click', () => {
+      startSync('{{ url_for("api_mal_sync_mangas") }}', 'mangas', 'Starting manga sync…');
+    });
+    malSyncAnimeTitles?.addEventListener('click', () => {
+      startSync('{{ url_for("api_mal_sync_anime_titles") }}', 'anime_titles', 'Starting anime titles…');
+    });
+    malSyncChapterTitles?.addEventListener('click', () => {
+      startSync('{{ url_for("api_mal_sync_chapter_titles") }}', 'chapter_titles', 'Starting chapter titles…');
     });
 
     // Resume status UI if a sync is already running (e.g. after refresh).
@@ -186,5 +412,127 @@
       location.reload();
     });
   }
+
+  const syncIndexOpen = document.getElementById('sync-index-open');
+  const syncIndexModal = document.getElementById('sync-index-modal');
+  const syncIndexClose = document.getElementById('sync-index-close');
+  const syncIndexBackdrop = document.getElementById('sync-index-backdrop');
+  const syncIndexList = document.getElementById('sync-index-list');
+  const syncIndexTabs = document.querySelectorAll('.sync-index-tab');
+  let syncIndexSection = 'anime_sync';
+
+  const csrfToken = () => document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+
+  const loadSyncIndex = async () => {
+    if (!syncIndexList) return;
+    syncIndexList.innerHTML = '<li class="empty">Loading…</li>';
+    try {
+      const resp = await fetch('/api/sync-index?section=' + encodeURIComponent(syncIndexSection));
+      const data = await resp.json();
+      syncIndexList.innerHTML = '';
+      if (!data.ok) {
+        const err = document.createElement('li');
+        err.className = 'empty catalog-error';
+        err.textContent = data.error || 'Could not load sync index';
+        syncIndexList.appendChild(err);
+        return;
+      }
+      (data.entries || []).forEach((row) => {
+        const li = document.createElement('li');
+        li.className = 'sync-index-row';
+        const label = document.createElement('label');
+        label.className = 'sync-index-label';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = !!row.skip;
+        cb.dataset.malId = String(row.mal_id);
+        label.appendChild(cb);
+        const body = document.createElement('span');
+        body.className = 'sync-index-body';
+        const title = document.createElement('span');
+        title.className = 'sync-index-title-text';
+        title.textContent = row.title || ('MAL ' + row.mal_id);
+        body.appendChild(title);
+        if (row.hint) {
+          const hint = document.createElement('span');
+          hint.className = 'sync-index-hint';
+          hint.textContent = row.hint;
+          body.appendChild(hint);
+        }
+        label.appendChild(body);
+        cb.addEventListener('change', async () => {
+          cb.disabled = true;
+          try {
+            const upd = await fetch('/api/sync-index', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrfToken(),
+              },
+              body: JSON.stringify({
+                section: syncIndexSection,
+                mal_id: row.mal_id,
+                skip: cb.checked,
+              }),
+            });
+            const payload = await upd.json().catch(() => ({}));
+            if (!upd.ok || !payload.ok) {
+              cb.checked = !cb.checked;
+              alert(payload.error || 'Could not update sync index');
+            }
+          } catch (_) {
+            cb.checked = !cb.checked;
+            alert('Could not update sync index');
+          } finally {
+            cb.disabled = false;
+          }
+        });
+        li.appendChild(label);
+        syncIndexList.appendChild(li);
+      });
+      if (!syncIndexList.children.length) {
+        const empty = document.createElement('li');
+        empty.className = 'empty';
+        empty.textContent = 'No catalog entries for this section.';
+        syncIndexList.appendChild(empty);
+      }
+    } catch (_) {
+      syncIndexList.innerHTML = '<li class="empty catalog-error">Could not load sync index</li>';
+    }
+  };
+
+  const openSyncIndex = () => {
+    if (!syncIndexModal) return;
+    syncIndexModal.hidden = false;
+    syncIndexModal.setAttribute('aria-hidden', 'false');
+    document.body.classList.add('sync-index-open');
+    loadSyncIndex();
+    syncIndexClose?.focus();
+  };
+
+  const closeSyncIndex = () => {
+    if (!syncIndexModal) return;
+    syncIndexModal.hidden = true;
+    syncIndexModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('sync-index-open');
+  };
+
+  syncIndexOpen?.addEventListener('click', openSyncIndex);
+  syncIndexClose?.addEventListener('click', closeSyncIndex);
+  syncIndexBackdrop?.addEventListener('click', closeSyncIndex);
+  syncIndexTabs.forEach((tab) => {
+    tab.addEventListener('click', () => {
+      syncIndexSection = tab.dataset.section || 'anime_sync';
+      syncIndexTabs.forEach((t) => {
+        const active = t === tab;
+        t.classList.toggle('is-active', active);
+        t.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+      loadSyncIndex();
+    });
+  });
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape' && syncIndexModal && !syncIndexModal.hidden) closeSyncIndex();
+  });
 </script>
 {% endblock %}
