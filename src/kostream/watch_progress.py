@@ -225,6 +225,8 @@ def apply_mal_metadata(show: Show, cached, list_row: dict | None = None) -> None
         show.media_type = str(media_type)
         show.type_label = format_type_label(media_type)
     show.release_year = getattr(cached, "release_year", None)
+    studios = getattr(cached, "studios", None) or []
+    show.studios = [str(s).strip() for s in studios if str(s or "").strip()]
 
 
 def reconcile_anime_progress(

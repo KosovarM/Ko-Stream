@@ -2,12 +2,14 @@ from kostream.browse import (
     AVAIL_COOKIE,
     AVAIL_LOCAL,
     AVAIL_STREAM,
+    KIND_ALL,
     KIND_ANIMES,
     KIND_MOVIES,
     KIND_SPECIALS,
     PAGE_SIZE,
     classify_show_kind,
     collect_genres,
+    collect_studios,
     filter_by_kind,
     filter_shows,
     format_type_label,
@@ -57,6 +59,15 @@ def test_collect_genres_excludes_meta_tags():
     assert collect_genres(shows) == ["Action", "Fantasy"]
 
 
+def test_collect_studios():
+    shows = [
+        Show(id="a", title="A", description="", studios=["Madhouse", "Bones"]),
+        Show(id="b", title="B", description="", studios=["Bones"]),
+        Show(id="c", title="C", description="", studios=[]),
+    ]
+    assert collect_studios(shows) == ["Bones", "Madhouse"]
+
+
 def test_filter_shows_by_query_and_genre():
     shows = [
         Show(id="a", title="One Piece", description="pirates", genres=["Action"]),
@@ -66,6 +77,17 @@ def test_filter_shows_by_query_and_genre():
     assert len(filter_shows(shows, query="piece")) == 1
     assert len(filter_shows(shows, genre="Action")) == 2
     assert len(filter_shows(shows, query="ninja", genre="Action")) == 1
+
+
+def test_filter_shows_by_studio():
+    shows = [
+        Show(id="a", title="A", description="", studios=["Madhouse"], genres=["Action"]),
+        Show(id="b", title="B", description="", studios=["Kyoto Animation"], genres=["Action"]),
+        Show(id="c", title="C", description="", studios=["Madhouse", "Bones"], genres=["Fantasy"]),
+    ]
+    assert [s.id for s in filter_shows(shows, studio="Madhouse")] == ["a", "c"]
+    assert [s.id for s in filter_shows(shows, studio="Kyoto Animation")] == ["b"]
+    assert len(filter_shows(shows, studio="Madhouse", genre="Fantasy")) == 1
 
 
 def test_filter_shows_by_availability():
@@ -160,6 +182,16 @@ def test_filter_by_kind_mutually_exclusive():
     # No overlap
     ids = [s.id for s in animes + movies + specials]
     assert len(ids) == len(set(ids)) == len(shows)
+
+
+def test_filter_by_kind_all_includes_everything():
+    shows = [
+        Show(id="tv", title="A", description="", media_type="tv"),
+        Show(id="movie", title="B", description="", media_type="movie"),
+        Show(id="ova", title="C", description="", media_type="ova"),
+    ]
+    assert {s.id for s in filter_by_kind(shows, KIND_ALL)} == {"tv", "movie", "ova"}
+    assert normalize_browse_kind("all") == KIND_ALL
 
 
 def test_normalize_browse_kind():

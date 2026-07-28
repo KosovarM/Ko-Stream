@@ -30,12 +30,15 @@ from kostream.anilist import (
 from kostream.browse import (
     AVAIL_COOKIE,
     AVAIL_COOKIE_MAX_AGE,
+    KIND_ALL,
     KIND_ANIMES,
     KIND_LABELS,
     KIND_MOVIES,
     KIND_SPECIALS,
     PAGE_SIZE,
+    classify_show_kind,
     collect_genres,
+    collect_studios,
     filter_by_kind,
     filter_shows,
     normalize_browse_kind,
@@ -202,6 +205,7 @@ from kostream.notifications import (
     list_notifications,
     mark_all_read,
     mark_read,
+    notify_request_created,
     notify_request_fulfilled,
 )
 from kostream.recommendations import (
@@ -693,9 +697,14 @@ def create_app(
                             item["poster_url"] = _manga_poster_for(manga)
                     elif not item.get("poster_url") and item.get("mal_id"):
                         item["poster_url"] = _manga_poster_from_mal_id(item.get("mal_id"))
+        spotlight = _random_library_sample(shows, limit=10)
+        # Same as show detail: fill AniList wide banners so Featured is not
+        # stretched from local card thumbnails / small posters.
+        for show in spotlight:
+            _hydrate_show_banner(show)
         return render_template(
             "home.html",
-            spotlight=_random_library_sample(shows, limit=10),
+            spotlight=spotlight,
             trending=sort_by_mean_score(shows, limit=12),
             currently_airing=currently_airing[:12],
             latest=_continue_watching(shows, progress, completed, limit=12),
@@ -1756,6 +1765,13 @@ def create_app(
             )
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}, 400
+        if created:
+            notify_request_created(
+                entry,
+                users_path=app.config["USERS_PATH"],
+                base=app.config["USER_DATA_DIR"],
+                exclude_user_id=user.id if user else None,
+            )
         return {"ok": True, "created": created, "request": entry}
 
     @app.route("/api/requests/<path:request_id>/fulfill", methods=["POST"])
@@ -2363,9 +2379,14 @@ def create_app(
         return _anime_browse_page(kind=KIND_SPECIALS)
 
     def _anime_browse_page(*, kind: str):
-        browse_kind = normalize_browse_kind(kind)
+        scope = (request.args.get("scope") or "").strip().casefold()
+        if scope == KIND_ALL:
+            browse_kind = KIND_ALL
+        else:
+            browse_kind = normalize_browse_kind(kind)
         q = request.args.get("q", "").strip()
         genre = request.args.get("genre", "").strip()
+        studio = request.args.get("studio", "").strip()
         availability, persist_avail = resolve_request_availability(
             has_avail_param="avail" in request.args,
             avail_param=request.args.get("avail"),
@@ -2379,15 +2400,20 @@ def create_app(
         all_shows = _scan_shows()
         kind_shows = filter_by_kind(all_shows, browse_kind)
         genres = collect_genres(kind_shows)
+        studios = collect_studios(kind_shows)
         if genre and genre not in genres:
             genre = ""
-        filtered = filter_shows(kind_shows, q, genre, availability)
+        if studio and studio not in studios:
+            studio = ""
+        filtered = filter_shows(kind_shows, q, genre, availability, studio=studio)
         shows, page, total_pages = paginate(filtered, page, PAGE_SIZE)
         endpoint = {
             KIND_ANIMES: "search",
             KIND_MOVIES: "movies_page",
             KIND_SPECIALS: "specials_page",
+            KIND_ALL: "search",
         }[browse_kind]
+        browse_scope = KIND_ALL if browse_kind == KIND_ALL else ""
 
         resp = make_response(
             render_template(
@@ -2395,8 +2421,10 @@ def create_app(
                 shows=shows,
                 query=q,
                 selected_genre=genre,
+                selected_studio=studio,
                 selected_avail=availability,
                 genres=genres,
+                studios=studios,
                 page=page,
                 total_pages=total_pages,
                 total_count=len(filtered),
@@ -2404,6 +2432,9 @@ def create_app(
                 browse_kind=browse_kind,
                 browse_label=KIND_LABELS[browse_kind],
                 browse_endpoint=endpoint,
+                browse_scope=browse_scope,
+                classify_show_kind=classify_show_kind,
+                kind_labels=KIND_LABELS,
             )
         )
         if persist_avail:
@@ -2496,7 +2527,7 @@ def _anilist_banner_url(show: Show, *, network: bool = False) -> str | None:
 
 
 def _hydrate_show_banner(show: Show) -> None:
-    """Fill ``show.banner_url`` from AniList when missing (show-detail path)."""
+    """Fill ``show.banner_url`` from AniList when missing (detail + Featured)."""
     if show.banner_url:
         return
     banner = _anilist_banner_url(show, network=True)
@@ -2514,6 +2545,8 @@ def _backdrop_for(show: Show) -> str | None:
         return show.banner_url
     banner = _anilist_banner_url(show, network=False)
     if banner:
+        # Keep template ``bg_is_poster`` checks in sync (Featured + detail).
+        show.banner_url = banner
         return banner
     remote = _remote_poster_url(show)
     if remote:

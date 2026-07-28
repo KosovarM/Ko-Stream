@@ -49,8 +49,9 @@
         <span aria-hidden="true">⌕</span>
       </button>
       <form class="search-form" id="header-search" action="{{ url_for('search') }}" method="get">
+        <input type="hidden" name="scope" value="all">
         <span class="search-icon" aria-hidden="true">⌕</span>
-        <input type="search" name="q" placeholder="{{ _('Search anime...') }}" value="{{ request.args.get('q', '') }}" id="header-search-input">
+        <input type="search" name="q" placeholder="{{ _('Search anime...') }}" value="{{ request.args.get('q', '') if request.args.get('scope') == 'all' else '' }}" id="header-search-input">
       </form>
       <div class="lang-switch" role="group" aria-label="{{ _('Language') }}">
         <a

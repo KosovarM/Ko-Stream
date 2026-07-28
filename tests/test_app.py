@@ -1,7 +1,9 @@
 from pathlib import Path
+from unittest.mock import patch
 
 from kostream.app import create_app
 from kostream.catalog import CatalogEntry, load_catalog, save_catalog, upsert_entry
+from kostream.models import Show
 
 from conftest import bootstrap_test_users, login_client
 
@@ -132,3 +134,115 @@ def test_catalog_page(tmp_path: Path):
     assert resp.status_code == 200
     assert b"Library" in resp.data
     assert b'name="csrf-token"' in resp.data
+
+
+def test_browse_studio_filter(tmp_path: Path):
+    app = _test_app(tmp_path)
+    client = _logged_in_client(app)
+    fake = [
+        Show(
+            id="mad-1",
+            title="Madhouse Hit",
+            description="",
+            media_type="tv",
+            type_label="TV",
+            studios=["Madhouse"],
+            genres=["Action"],
+        ),
+        Show(
+            id="kyo-1",
+            title="Kyo Hit",
+            description="",
+            media_type="tv",
+            type_label="TV",
+            studios=["Kyoto Animation"],
+            genres=["Action"],
+        ),
+        Show(
+            id="mad-movie",
+            title="Madhouse Film",
+            description="",
+            media_type="movie",
+            type_label="Movie",
+            studios=["Madhouse"],
+            genres=["Action"],
+        ),
+    ]
+    with patch("kostream.app.scan_library", return_value=fake):
+        series = client.get("/search?studio=Madhouse")
+        assert series.status_code == 200
+        assert b"Madhouse Hit" in series.data
+        assert b"Kyo Hit" not in series.data
+        assert b'name="studio"' in series.data
+        assert b"studio=Madhouse" in series.data or b"selected" in series.data
+
+        movies = client.get("/movies?studio=Madhouse")
+        assert movies.status_code == 200
+        assert b"Madhouse Film" in movies.data
+        assert b"Madhouse Hit" not in movies.data
+
+
+def test_header_search_scope_all_includes_movies_and_specials(tmp_path: Path):
+    app = _test_app(tmp_path)
+    client = _logged_in_client(app)
+    fake = [
+        Show(
+            id="s1",
+            title="Zeta Probe Series",
+            description="x",
+            media_type="tv",
+            type_label="TV",
+        ),
+        Show(
+            id="m1",
+            title="Zeta Probe Movie",
+            description="x",
+            media_type="movie",
+            type_label="Movie",
+        ),
+        Show(
+            id="o1",
+            title="Zeta Probe OVA",
+            description="x",
+            media_type="ova",
+            type_label="OVA",
+        ),
+        Show(
+            id="other",
+            title="Unrelated Title",
+            description="x",
+            media_type="tv",
+            type_label="TV",
+        ),
+    ]
+    with patch("kostream.app.scan_library", return_value=fake):
+        scoped = client.get("/search?q=Zeta+Probe&scope=all")
+        assert scoped.status_code == 200
+        assert b"Search results" in scoped.data
+        assert b"Zeta Probe Series" in scoped.data
+        assert b"Zeta Probe Movie" in scoped.data
+        assert b"Zeta Probe OVA" in scoped.data
+        assert b"Unrelated Title" not in scoped.data
+        assert b"card-kind" in scoped.data
+        assert b'name="scope" value="all"' in scoped.data
+
+        # Series browse without scope stays TV-only.
+        series_only = client.get("/search?q=Zeta+Probe")
+        assert series_only.status_code == 200
+        assert b"Zeta Probe Series" in series_only.data
+        assert b"Zeta Probe Movie" not in series_only.data
+        assert b"Zeta Probe OVA" not in series_only.data
+
+    home = client.get("/")
+    assert home.status_code == 200
+    assert b'name="scope" value="all"' in home.data
+
+
+def test_browse_pages_expose_studio_control(tmp_path: Path):
+    app = _test_app(tmp_path)
+    client = _logged_in_client(app)
+    for path in ("/search", "/movies", "/specials"):
+        resp = client.get(path)
+        assert resp.status_code == 200
+        assert b'name="studio"' in resp.data
+        assert b"All studios" in resp.data

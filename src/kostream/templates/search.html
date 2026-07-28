@@ -1,25 +1,26 @@
 {% extends "base.html" %}
 {% block title %}{{ _(browse_label) }} — {{ site_name }}{% endblock %}
 {% block content %}
+{% set scope_arg = browse_scope if browse_scope else none %}
 <section class="section page-search browse-page">
   <header class="browse-header">
     <div class="browse-header-row">
       <h1 class="section-title">{{ _(browse_label) }}</h1>
       <div class="manga-tabs browse-avail-tabs" role="tablist" aria-label="{{ _('Availability') }}">
         <a
-          href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail='all') }}"
+          href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail='all', scope=scope_arg) }}"
           class="manga-tab{% if selected_avail == 'all' %} is-active{% endif %}"
           role="tab"
           aria-selected="{{ 'true' if selected_avail == 'all' else 'false' }}"
         >{{ _('All') }}</a>
         <a
-          href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail='local') }}"
+          href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail='local', scope=scope_arg) }}"
           class="manga-tab{% if selected_avail == 'local' %} is-active{% endif %}"
           role="tab"
           aria-selected="{{ 'true' if selected_avail == 'local' else 'false' }}"
         >{{ _('Available') }}</a>
         <a
-          href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail='stream') }}"
+          href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail='stream', scope=scope_arg) }}"
           class="manga-tab{% if selected_avail == 'stream' %} is-active{% endif %}"
           role="tab"
           aria-selected="{{ 'true' if selected_avail == 'stream' else 'false' }}"
@@ -28,13 +29,16 @@
     </div>
     <p class="browse-meta">
       {{ total_count }} {{ _('titles') if total_count != 1 else _('title') }}
-      {% if query or selected_genre or selected_avail != 'all' %} · {{ _('filtered') }}{% endif %}
+      {% if query or selected_genre or selected_studio or selected_avail != 'all' %} · {{ _('filtered') }}{% endif %}
       {% if total_pages > 1 %} · {{ _('Page') }} {{ page }} {{ _('of') }} {{ total_pages }}{% endif %}
     </p>
   </header>
 
   <form class="browse-filters" action="{{ url_for(browse_endpoint) }}" method="get">
     <input type="hidden" name="avail" value="{{ selected_avail }}">
+    {% if browse_scope %}
+    <input type="hidden" name="scope" value="{{ browse_scope }}">
+    {% endif %}
     <label class="browse-field browse-field-search">
       <span class="browse-label">{{ _('Search') }}</span>
       <input
@@ -54,10 +58,19 @@
         {% endfor %}
       </select>
     </label>
+    <label class="browse-field browse-field-studio">
+      <span class="browse-label">{{ _('Studio') }}</span>
+      <select name="studio">
+        <option value="">{{ _('All studios') }}</option>
+        {% for s in studios %}
+        <option value="{{ s }}" {% if s == selected_studio %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
     <div class="browse-actions">
       <button type="submit" class="btn-browse">{{ _('Apply') }}</button>
-      {% if query or selected_genre or selected_avail != 'all' %}
-      <a href="{{ url_for(browse_endpoint, avail='all') }}" class="btn-browse-secondary">{{ _('Clear') }}</a>
+      {% if query or selected_genre or selected_studio or selected_avail != 'all' %}
+      <a href="{{ url_for(browse_endpoint, avail='all', scope=scope_arg) }}" class="btn-browse-secondary">{{ _('Clear') }}</a>
       {% endif %}
     </div>
   </form>
@@ -77,6 +90,10 @@
         <span class="card-ep-badge">EP {{ show.latest_episode.number }}</span>
         {% endif %}
         <span class="card-type">{{ show.type_label }}</span>
+        {% if browse_kind == 'all' %}
+        {% set show_kind = classify_show_kind(show) %}
+        <span class="card-kind">{{ _('Series') if show_kind == 'animes' else _(kind_labels.get(show_kind, 'Animes')) }}</span>
+        {% endif %}
         <div class="card-shade"></div>
       </div>
       <h3 class="card-title">{{ show.title }}</h3>
@@ -87,6 +104,9 @@
         {% if show.user_score %}
         <span class="tag tag-my-score">{{ show.user_score }}/10</span>
         {% endif %}
+        {% for studio in show.studios[:2] %}
+        <span class="tag studio">{{ studio }}</span>
+        {% endfor %}
         {% for g in show.genres if g not in ['Local', 'Demo', 'Catalog', 'MAL'] %}
         <span class="tag genre">{{ g }}</span>
         {% endfor %}
@@ -98,7 +118,7 @@
   {% if total_pages > 1 %}
         <nav class="browse-pagination" aria-label="{{ _(browse_label) }} pages">
     {% if page > 1 %}
-    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail=selected_avail, page=page - 1) }}">‹ {{ _('Previous') }}</a>
+    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=page - 1, scope=scope_arg) }}">‹ {{ _('Previous') }}</a>
     {% else %}
     <span class="browse-page-btn disabled">‹ {{ _('Previous') }}</span>
     {% endif %}
@@ -106,7 +126,7 @@
     <span class="browse-page-status">{{ _('Page') }} {{ page }} {{ _('of') }} {{ total_pages }}</span>
 
     {% if page < total_pages %}
-    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, avail=selected_avail, page=page + 1) }}">{{ _('Next') }} ›</a>
+    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=page + 1, scope=scope_arg) }}">{{ _('Next') }} ›</a>
     {% else %}
     <span class="browse-page-btn disabled">{{ _('Next') }} ›</span>
     {% endif %}
@@ -116,8 +136,8 @@
   {% else %}
   <div class="browse-empty">
     <p class="empty">{{ _('No titles match your filters.') }}</p>
-    {% if query or selected_genre or selected_avail != 'all' %}
-    <a href="{{ url_for(browse_endpoint, avail='all') }}" class="btn-browse-secondary">{{ _('Show all titles') }}</a>
+    {% if query or selected_genre or selected_studio or selected_avail != 'all' %}
+    <a href="{{ url_for(browse_endpoint, avail='all', scope=scope_arg) }}" class="btn-browse-secondary">{{ _('Show all titles') }}</a>
     {% else %}
     <p class="browse-empty-hint">{{ _('Add shows in Library or connect MyAnimeList to populate your library.') }}</p>
     {% endif %}

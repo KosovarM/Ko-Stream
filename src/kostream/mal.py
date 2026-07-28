@@ -49,7 +49,7 @@ MAL_EPISODE_TITLE_RE = re.compile(
 )
 
 ANIMELIST_FIELDS = (
-    "list_status,num_episodes,synopsis,genres,main_picture,mean,media_type,status,"
+    "list_status,num_episodes,synopsis,genres,studios,main_picture,mean,media_type,status,"
     "start_date,start_season,broadcast"
 )
 
@@ -58,7 +58,7 @@ MANGALIST_FIELDS = (
 )
 
 ANIME_DETAIL_FIELDS = (
-    "related_anime,synopsis,genres,main_picture,mean,num_episodes,status,media_type,title,"
+    "related_anime,synopsis,genres,studios,main_picture,mean,num_episodes,status,media_type,title,"
     "broadcast,start_date,start_season"
 )
 
@@ -126,6 +126,7 @@ class MalAnimeEntry:
     episode_titles: dict[int, str] = field(default_factory=dict)
     media_type: str | None = None  # tv | movie | ova | ona | special | …
     release_year: int | None = None
+    studios: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -149,6 +150,30 @@ class MalMangaEntry:
 
 def _year_in_range(year: int) -> int | None:
     return year if 1900 <= year <= 2100 else None
+
+
+def _parse_studio_names(node: dict[str, Any] | None) -> list[str]:
+    """Extract studio display names from a MAL anime node or cache payload."""
+    if not isinstance(node, dict):
+        return []
+    raw = node.get("studios")
+    if not isinstance(raw, list):
+        return []
+    names: list[str] = []
+    seen: set[str] = set()
+    for item in raw:
+        if isinstance(item, dict):
+            name = str(item.get("name") or "").strip()
+        else:
+            name = str(item or "").strip()
+        if not name:
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        names.append(name)
+    return names
 
 
 def _year_from_mal_date_string(value: str) -> int | None:
@@ -870,6 +895,9 @@ def _cache_needs_enrichment(mal_id: int) -> bool:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, ValueError):
         return True
+    # Older caches were marked enriched before studios were stored — backfill.
+    if "studios" not in data:
+        return True
     if data.get("details_enriched"):
         return False
     return not (data.get("related_anime") or [])
@@ -1181,6 +1209,7 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
     existing = load_cached_anime(mal_id)
     picture = node.get("main_picture") or {}
     genres = [g.get("name", "") for g in (node.get("genres") or []) if g.get("name")]
+    studios = _parse_studio_names(node) or (list(existing.studios) if existing else [])
     related = _parse_related_anime(node)
     day, btime = _parse_broadcast(node)
     if day is None and existing:
@@ -1211,6 +1240,7 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
         broadcast_time=btime,
         media_type=str(media_type) if media_type else None,
         release_year=release_year,
+        studios=studios,
     )
     write_cached_anime(entry, preserve_relations=False)
     # Always mark as enriched after a successful details fetch (even if no relations).
@@ -1346,6 +1376,7 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
     episode_titles = dict(entry.episode_titles)
     media_type = entry.media_type
     release_year = entry.release_year
+    studios = list(entry.studios or [])
     existing_path = CACHE_DIR / f"{entry.mal_id}.json"
     if existing_path.exists():
         try:
@@ -1362,6 +1393,8 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
                 media_type = old.get("media_type")
             if release_year is None and old.get("release_year"):
                 release_year = old.get("release_year")
+            if not studios and old.get("studios") is not None:
+                studios = _parse_studio_names(old)
         except (OSError, json.JSONDecodeError, ValueError):
             pass
     if related:
@@ -1373,6 +1406,7 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
         "synopsis": entry.synopsis,
         "poster_url": entry.poster_url,
         "genres": entry.genres,
+        "studios": studios,
         "num_episodes": entry.num_episodes,
         "anime_status": entry.anime_status,
         "mean_score": entry.mean_score,
@@ -1595,6 +1629,7 @@ def load_cached_anime(mal_id: int) -> MalAnimeEntry | None:
         episode_titles=_episode_titles_from_cache(data.get("episode_titles") or {}),
         media_type=(data.get("media_type") or None),
         release_year=data.get("release_year"),
+        studios=_parse_studio_names(data),
     )
 
 
@@ -1649,6 +1684,7 @@ def _parse_animelist_row(row: dict[str, Any]) -> MalAnimeEntry | None:
         broadcast_time=btime,
         media_type=str(media_type) if media_type else None,
         release_year=parse_mal_start_year(node),
+        studios=_parse_studio_names(node),
     )
 
 

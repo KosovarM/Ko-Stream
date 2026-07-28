@@ -6,6 +6,8 @@ from pathlib import Path
 
 from kostream.app import create_app
 from kostream.notifications import (
+    HREF_LIBRARY_REQUESTS,
+    TYPE_REQUEST_CREATED,
     TYPE_REQUEST_FULFILLED,
     add_notification,
     href_for_request,
@@ -14,6 +16,7 @@ from kostream.notifications import (
     mark_all_read,
     mark_read,
     notifications_path,
+    notify_request_created,
     notify_request_fulfilled,
 )
 
@@ -84,7 +87,7 @@ def test_list_and_mark_read(tmp_path: Path):
     assert a and b
     items, unread = list_notifications("u_a", base=base)
     assert unread == 2
-    assert [n["id"] for n in items] == [b["id"], a["id"]]
+    assert {n["id"] for n in items} == {a["id"], b["id"]}
     changed = mark_read("u_a", [a["id"]], base=base)
     assert changed == 1
     items, unread = list_notifications("u_a", base=base)
@@ -116,8 +119,10 @@ def test_fulfill_creates_notification_for_requester(tmp_path: Path):
     assert "Need This" in note["body"]
     assert note["href"] == "/show/mal-n1"
 
-    # Fulfiller / other users get nothing
-    assert list_notifications("u_manager1", base=user_data)[1] == 0
+    # Manager already had request_created from sister's create; no fulfill ping.
+    mgr_items, mgr_unread = list_notifications("u_manager1", base=user_data)
+    assert mgr_unread == 1
+    assert mgr_items[0]["type"] == TYPE_REQUEST_CREATED
     assert list_notifications("u_brother", base=user_data)[1] == 0
 
 
@@ -192,3 +197,91 @@ def test_header_includes_notifications_bell(tmp_path: Path):
     assert home.status_code == 200
     assert b'id="header-notify-toggle"' in home.data
     assert b'id="header-notify-tray"' in home.data
+
+
+def test_notify_request_created_writes_staff_only(tmp_path: Path):
+    users = tmp_path / "users.json"
+    base = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    add_test_user(users, "manager1", "mgrpass", role="manager")
+    add_test_user(users, "sister", "sispass", role="user")
+    entry = {
+        "id": "series:mal-20",
+        "kind": "series",
+        "media_id": "mal-20",
+        "title": "Staff Ping",
+        "requester_id": "u_sister",
+        "requester_username": "sister",
+    }
+    notes = notify_request_created(entry, users_path=users, base=base)
+    assert len(notes) == 2
+    assert {n["type"] for n in notes} == {TYPE_REQUEST_CREATED}
+    master_items, master_unread = list_notifications("u_testuser", base=base)
+    mgr_items, mgr_unread = list_notifications("u_manager1", base=base)
+    assert master_unread == 1 and mgr_unread == 1
+    assert master_items[0]["title"] == "New request"
+    assert 'sister requested "Staff Ping".' == master_items[0]["body"]
+    assert master_items[0]["href"] == HREF_LIBRARY_REQUESTS
+    assert mgr_items[0]["href"] == HREF_LIBRARY_REQUESTS
+    assert list_notifications("u_sister", base=base)[1] == 0
+
+
+def test_create_request_notifies_master_and_manager(tmp_path: Path):
+    app, user_data, _requests = _app(tmp_path)
+    client = app.test_client()
+    login_client(client, "sister", "sispass")
+    resp = client.post(
+        "/api/requests",
+        json={"kind": "series", "media_id": "mal-c1", "title": "Fresh Ask"},
+    )
+    assert resp.status_code == 200
+    assert resp.get_json()["created"] is True
+
+    for uid in ("u_testuser", "u_manager1"):
+        items, unread = list_notifications(uid, base=user_data)
+        assert unread == 1
+        assert len(items) == 1
+        note = items[0]
+        assert note["type"] == TYPE_REQUEST_CREATED
+        assert note["title"] == "New request"
+        assert 'sister requested "Fresh Ask".' == note["body"]
+        assert note["href"] == HREF_LIBRARY_REQUESTS
+        assert note["read"] is False
+
+    assert list_notifications("u_sister", base=user_data)[1] == 0
+    assert list_notifications("u_brother", base=user_data)[1] == 0
+
+
+def test_duplicate_create_does_not_spam_staff(tmp_path: Path):
+    app, user_data, _requests = _app(tmp_path)
+    client = app.test_client()
+    login_client(client, "sister", "sispass")
+    payload = {"kind": "manga", "media_id": "mal-c2", "title": "Twice"}
+    first = client.post("/api/requests", json=payload)
+    second = client.post("/api/requests", json=payload)
+    assert first.get_json()["created"] is True
+    assert second.get_json()["created"] is False
+    for uid in ("u_testuser", "u_manager1"):
+        items, unread = list_notifications(uid, base=user_data)
+        assert unread == 1
+        assert len(items) == 1
+        assert items[0]["type"] == TYPE_REQUEST_CREATED
+    assert list_notifications("u_sister", base=user_data)[1] == 0
+
+
+def test_manager_requester_skips_self_notification(tmp_path: Path):
+    app, user_data, _requests = _app(tmp_path)
+    client = app.test_client()
+    login_client(client, "manager1", "mgrpass")
+    resp = client.post(
+        "/api/requests",
+        json={"kind": "movie", "media_id": "mal-c3", "title": "Mgr Ask"},
+    )
+    assert resp.get_json()["created"] is True
+    # Master notified; manager requester skipped
+    items, unread = list_notifications("u_testuser", base=user_data)
+    assert unread == 1
+    assert items[0]["type"] == TYPE_REQUEST_CREATED
+    assert 'manager1 requested "Mgr Ask".' == items[0]["body"]
+    assert list_notifications("u_manager1", base=user_data)[1] == 0
+

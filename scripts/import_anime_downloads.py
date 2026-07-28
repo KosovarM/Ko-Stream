@@ -238,6 +238,27 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
     "Mob_Psycho_100_III_sub": ("Mob Psycho 100 III", "mal-50172"),
     "Vinland_Saga_sub": ("Vinland Saga", "mal-37521"),
     "Vinland_Saga__2nd_Season_sub": ("Vinland Saga Season 2", "mal-49387"),
+    # --- 2026-07-28 inbox batch (Ghibli + BC movie) ---
+    "Black_Clover__Sword_of_the_Wizard_King_sub": (
+        "Black Clover Sword of the Wizard King",
+        "mal-48561",
+    ),
+    "Spirited_Away_sub": ("Spirited Away", "mal-199"),
+    "Princess_Mononoke_sub": ("Princess Mononoke", "mal-164"),
+    "Grave_of_the_Fireflies_sub": ("Grave of the Fireflies", "mal-578"),
+    "The_Secret_World_of_Arrietty_sub": (
+        "The Secret World of Arrietty",
+        "mal-7711",
+    ),
+    "My_Neighbor_Totoro_sub": ("My Neighbor Totoro", "mal-523"),
+    "Nausica__of_the_Valley_of_the_Wind_sub": (
+        "Nausicaa of the Valley of the Wind",
+        "mal-572",
+    ),
+    "Ponyo_sub": ("Ponyo", "mal-2890"),
+    "Kiki_s_Delivery_Service_sub": ("Kikis Delivery Service", "mal-512"),
+    "Howl_s_Moving_Castle_sub": ("Howls Moving Castle", "mal-431"),
+    "Castle_in_the_Sky_sub": ("Castle in the Sky", "mal-513"),
 }
 
 EP_PATTERN = re.compile(r"^(\d+)Ep\.(\w+)$", re.IGNORECASE)

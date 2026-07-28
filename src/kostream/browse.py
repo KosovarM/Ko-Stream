@@ -1,4 +1,4 @@
-"""Browse/search helpers — grid pagination, kind filters, and MAL genre filtering."""
+"""Browse/search helpers — grid pagination, kind filters, and MAL genre/studio filtering."""
 
 from __future__ import annotations
 
@@ -18,12 +18,14 @@ AVAIL_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 year
 KIND_ANIMES = "animes"  # Hauptanimes — TV (+ unknown/missing)
 KIND_MOVIES = "movies"
 KIND_SPECIALS = "specials"  # OVA, Special, ONA, Music, …
+KIND_ALL = "all"  # Header search across Series + Movies + Specials
 KIND_OPTIONS = frozenset({KIND_ANIMES, KIND_MOVIES, KIND_SPECIALS})
 
 KIND_LABELS = {
     KIND_ANIMES: "Animes",
     KIND_MOVIES: "Movies",
     KIND_SPECIALS: "Specials",
+    KIND_ALL: "Search results",
 }
 
 _TYPE_LABELS = {
@@ -79,6 +81,8 @@ def resolve_request_availability(
 
 def normalize_browse_kind(value: str | None) -> str:
     v = (value or "").strip().casefold()
+    if v == KIND_ALL:
+        return KIND_ALL
     if v in KIND_OPTIONS:
         return v
     return KIND_ANIMES
@@ -120,6 +124,8 @@ def classify_show_kind(show: Show) -> str:
 
 def filter_by_kind(shows: list[Show], kind: str = KIND_ANIMES) -> list[Show]:
     want = normalize_browse_kind(kind)
+    if want == KIND_ALL:
+        return list(shows)
     return [s for s in shows if classify_show_kind(s) == want]
 
 
@@ -132,11 +138,22 @@ def collect_genres(shows: list[Show]) -> list[str]:
     return sorted(found, key=str.casefold)
 
 
+def collect_studios(shows: list[Show]) -> list[str]:
+    found: set[str] = set()
+    for show in shows:
+        for studio in show.studios or []:
+            name = (studio or "").strip()
+            if name:
+                found.add(name)
+    return sorted(found, key=str.casefold)
+
+
 def filter_shows(
     shows: list[Show],
     query: str = "",
     genre: str = "",
     availability: str = AVAIL_ALL,
+    studio: str = "",
 ) -> list[Show]:
     result = list(shows)
     q = query.strip().casefold()
@@ -149,6 +166,9 @@ def filter_shows(
     g = genre.strip()
     if g:
         result = [s for s in result if g in (s.genres or [])]
+    st = studio.strip()
+    if st:
+        result = [s for s in result if st in (s.studios or [])]
     avail = normalize_availability(availability)
     if avail == AVAIL_LOCAL:
         result = [s for s in result if s.has_local_files]

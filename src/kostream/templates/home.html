@@ -6,9 +6,10 @@
     {% for show in spotlight %}
     {% set poster = poster_for(show) %}
     {% set bg = backdrop_for(show) %}
+    {% set bg_is_poster = bg and not show.banner_url %}
     {% set watch_ep = next_unwatched_episode(show, progress, completed) %}
     <article class="spotlight-slide {% if loop.first %}active{% endif %}" data-index="{{ loop.index0 }}">
-      <div class="spotlight-bg" {% if bg %}style="background-image: url('{{ bg }}')"{% endif %}></div>
+      <div class="spotlight-bg{% if bg_is_poster %} spotlight-bg--poster{% endif %}" {% if bg %}style="background-image: url('{{ bg }}')"{% endif %}></div>
       <div class="spotlight-shade"></div>
       <div class="spotlight-layout">
         <div class="spotlight-content">
@@ -30,11 +31,6 @@
           </div>
           <p class="spotlight-desc">{{ show.description[:320] }}{% if show.description|length > 320 %}…{% endif %}</p>
           <div class="spotlight-actions">
-            {% if watch_ep %}
-            <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=watch_ep.id) }}">
-              ▶ {% if show.episodes_watched %}{{ _('Continue') }}{% else %}{{ _('Open') }}{% endif %}
-            </a>
-            {% endif %}
             <a class="btn-detail" href="{{ url_for('show_detail', show_id=show.id) }}">{{ _('Detail ›') }}</a>
           </div>
         </div>

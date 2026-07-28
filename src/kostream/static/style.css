@@ -781,10 +781,29 @@ a.header-notify-item:hover {
   background-size: cover;
   background-position: center 20%;
 }
+/* Portrait/poster fallback: soft blur so upscales look intentional (same as detail). */
+.spotlight-bg--poster::before {
+  content: "";
+  position: absolute;
+  inset: -24px;
+  background-image: inherit;
+  background-size: cover;
+  background-position: center;
+  filter: blur(32px) saturate(1.05);
+  transform: scale(1.12);
+  z-index: 0;
+  pointer-events: none;
+}
+.spotlight-bg--poster {
+  background-size: cover;
+  background-position: center top;
+  overflow: hidden;
+}
 
 .spotlight-shade {
   position: absolute;
   inset: 0;
+  z-index: 1;
   background:
     linear-gradient(90deg, rgba(7, 8, 16, 0.97) 0%, rgba(7, 8, 16, 0.75) 45%, rgba(7, 8, 16, 0.35) 100%),
     linear-gradient(0deg, rgba(7, 8, 16, 0.95) 0%, transparent 50%);
@@ -868,6 +887,7 @@ a.header-notify-item:hover {
 .tag-icon { color: var(--text); }
 .tag-hd { color: var(--hd); border-color: rgba(110, 231, 183, 0.35); }
 .tag.genre { color: var(--accent-muted); }
+.tag.studio { color: var(--text); border-color: rgba(255, 255, 255, 0.14); }
 .tag.tag-year { color: var(--text); border-color: rgba(255, 255, 255, 0.12); }
 
 .manga-overview-tags { margin-top: 0.35rem; margin-bottom: 0.5rem; }
@@ -1101,6 +1121,18 @@ a.header-notify-item:hover {
   position: absolute;
   bottom: 8px;
   left: 8px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.65);
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  z-index: 2;
+}
+
+.card-kind {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
   font-size: 0.65rem;
   font-weight: 700;
   background: rgba(0, 0, 0, 0.65);
@@ -1496,7 +1528,7 @@ a.header-notify-item:hover {
 
 .browse-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(140px, 200px) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, 180px) minmax(120px, 180px) auto;
   gap: 0.75rem;
   align-items: end;
   margin-bottom: 1.5rem;
@@ -1686,7 +1718,6 @@ a.header-notify-item:hover {
   .spotlight-actions {
     flex-direction: column;
   }
-  .spotlight-actions .btn-watch,
   .spotlight-actions .btn-detail {
     width: 100%;
     justify-content: center;

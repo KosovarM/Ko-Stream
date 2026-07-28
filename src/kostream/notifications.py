@@ -9,8 +9,13 @@ from pathlib import Path
 from typing import Any
 
 from kostream.user_paths import USER_DATA_DIR, user_data_paths
+from kostream.users import USERS_FILE, load_users
 
 TYPE_REQUEST_FULFILLED = "request_fulfilled"
+TYPE_REQUEST_CREATED = "request_created"
+
+HREF_LIBRARY_REQUESTS = "/catalog#library-requests"
+STAFF_ROLES = frozenset({"master", "manager"})
 
 DEFAULT_LIST_LIMIT = 30
 
@@ -184,3 +189,63 @@ def notify_request_fulfilled(
             "kind": kind or None,
         },
     )
+
+
+def staff_recipient_ids(
+    *,
+    users_path: Path | None = None,
+    exclude_user_id: str | None = None,
+) -> list[str]:
+    """Return ids of master/manager users, optionally skipping one user."""
+    skip = (exclude_user_id or "").strip()
+    ids: list[str] = []
+    for user in load_users(users_path or USERS_FILE):
+        if user.role.casefold() not in STAFF_ROLES:
+            continue
+        if skip and user.id == skip:
+            continue
+        ids.append(user.id)
+    return ids
+
+
+def notify_request_created(
+    request_entry: dict[str, Any],
+    *,
+    users_path: Path | None = None,
+    base: Path | None = None,
+    exclude_user_id: str | None = None,
+) -> list[dict[str, Any]]:
+    """Notify every master/manager about a newly created open request.
+
+    Skips ``exclude_user_id`` (typically the requester) so self-requests do not
+    ping the same account. Stored copy is English (same pattern as fulfill).
+    """
+    requester_id = str(request_entry.get("requester_id") or "").strip()
+    skip = (exclude_user_id or requester_id or "").strip() or None
+    username = str(
+        request_entry.get("requester_username")
+        or request_entry.get("requester_id")
+        or "Someone"
+    ).strip() or "Someone"
+    title_name = str(request_entry.get("title") or request_entry.get("media_id") or "a title")
+    kind = str(request_entry.get("kind") or "")
+    media_id = str(request_entry.get("media_id") or "")
+    created: list[dict[str, Any]] = []
+    for uid in staff_recipient_ids(users_path=users_path, exclude_user_id=skip):
+        note = add_notification(
+            uid,
+            type=TYPE_REQUEST_CREATED,
+            title="New request",
+            body=f'{username} requested "{title_name}".',
+            href=HREF_LIBRARY_REQUESTS,
+            base=base,
+            extra={
+                "request_id": request_entry.get("id"),
+                "media_id": media_id or None,
+                "kind": kind or None,
+                "requester_id": requester_id or None,
+            },
+        )
+        if note is not None:
+            created.append(note)
+    return created

@@ -34,6 +34,7 @@ class Show:
     media_type: str | None = None  # MAL: tv | movie | ova | ona | special | …
     episodes: list[Episode] = field(default_factory=list)
     genres: list[str] = field(default_factory=list)
+    studios: list[str] = field(default_factory=list)
     anilist_id: int | None = None
     mal_id: int | None = None
     episodes_watched: int = 0
