@@ -120,3 +120,56 @@ def test_mal_show_keeps_full_list_with_local_files(tmp_path: Path, monkeypatch):
     assert show.has_local_files is True
     assert show.latest_local_mtime is not None
     assert show.latest_local_mtime > 0
+
+def test_scan_missing_media_root_uses_catalog_metadata(tmp_path: Path, monkeypatch):
+    """UI-only local testing: catalog loads even when MEDIA_ROOT is absent."""
+    from kostream import library as lib
+    from kostream.mal import MalAnimeEntry
+
+    catalog = tmp_path / 'selected.json'
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id='mal-1',
+                    enabled=True,
+                    source='mal',
+                    folder='Does Not Exist',
+                    mal_id=1,
+                    title='Cowboy Bebop',
+                ),
+                CatalogEntry(
+                    id='demo-x',
+                    enabled=True,
+                    source='demo',
+                    title='Demo X',
+                    anilist_id=21,
+                ),
+            ]
+        ),
+        catalog,
+    )
+    cached = MalAnimeEntry(
+        mal_id=1,
+        title='Cowboy Bebop',
+        synopsis='Space bounty hunters.',
+        poster_url=None,
+        genres=['Action'],
+        num_episodes=26,
+        list_status='completed',
+        num_episodes_watched=26,
+        anime_status='finished_airing',
+        score=0,
+        mean_score=8.0,
+    )
+    monkeypatch.setattr(lib, 'load_cached_anime', lambda mal_id: cached if mal_id == 1 else None)
+    monkeypatch.setattr(lib, 'fetch_anime', lambda *a, **k: None)
+
+    missing = tmp_path / 'no-media-root'
+    shows = scan_library(missing, catalog)
+    by_id = {s.id: s for s in shows}
+    assert 'mal-1' in by_id
+    assert by_id['mal-1'].is_stream_only
+    assert len(by_id['mal-1'].episodes) == 26
+    assert 'demo-x' in by_id
+    assert by_id['demo-x'].is_stream_only

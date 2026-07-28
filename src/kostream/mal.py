@@ -50,16 +50,17 @@ MAL_EPISODE_TITLE_RE = re.compile(
 
 ANIMELIST_FIELDS = (
     "list_status,num_episodes,synopsis,genres,studios,main_picture,mean,media_type,status,"
-    "start_date,start_season,broadcast"
+    "start_date,start_season,broadcast,alternative_titles"
 )
 
 MANGALIST_FIELDS = (
-    "list_status,num_volumes,num_chapters,synopsis,genres,main_picture,mean,media_type,status,start_date"
+    "list_status,num_volumes,num_chapters,synopsis,genres,main_picture,mean,media_type,status,"
+    "start_date,alternative_titles"
 )
 
 ANIME_DETAIL_FIELDS = (
     "related_anime,synopsis,genres,studios,main_picture,mean,num_episodes,status,media_type,title,"
-    "broadcast,start_date,start_season"
+    "broadcast,start_date,start_season,alternative_titles"
 )
 
 MANGA_CACHE_DIR = MAL_DATA_DIR / "manga_cache"
@@ -127,6 +128,10 @@ class MalAnimeEntry:
     media_type: str | None = None  # tv | movie | ova | ona | special | …
     release_year: int | None = None
     studios: list[str] = field(default_factory=list)
+    title_en: str | None = None
+    title_ja: str | None = None
+    title_ger: str | None = None  # not in MAL API; reserved for future / manual
+    title_synonyms: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -146,6 +151,10 @@ class MalMangaEntry:
     mean_score: float | None
     media_type: str | None = None  # manga | manhwa | manhua | novel | …
     release_year: int | None = None
+    title_en: str | None = None
+    title_ja: str | None = None
+    title_ger: str | None = None
+    title_synonyms: list[str] = field(default_factory=list)
 
 
 def _year_in_range(year: int) -> int | None:
@@ -175,6 +184,39 @@ def _parse_studio_names(node: dict[str, Any] | None) -> list[str]:
         names.append(name)
     return names
 
+
+
+def _parse_alternative_titles(node: dict[str, Any] | None) -> tuple[str | None, str | None, str | None, list[str]]:
+    """Return ``(en, ja, ger, synonyms)`` from a MAL node or cache payload.
+
+    MAL does not expose German titles; ``ger`` is only filled if a nonstandard
+    ``ger``/``de`` key appears (manual cache / future sources).
+    """
+    if not isinstance(node, dict):
+        return None, None, None, []
+    alt = node.get("alternative_titles")
+    if not isinstance(alt, dict):
+        # Flat cache fields
+        en = str(node.get("title_en") or "").strip() or None
+        ja = str(node.get("title_ja") or "").strip() or None
+        ger = str(node.get("title_ger") or "").strip() or None
+        raw_syn = node.get("title_synonyms") or []
+        synonyms: list[str] = []
+        if isinstance(raw_syn, list):
+            for item in raw_syn:
+                name = str(item or "").strip()
+                if name:
+                    synonyms.append(name)
+        return en, ja, ger, synonyms
+    en = str(alt.get("en") or "").strip() or None
+    ja = str(alt.get("ja") or "").strip() or None
+    ger = str(alt.get("ger") or alt.get("de") or "").strip() or None
+    synonyms = []
+    for item in alt.get("synonyms") or []:
+        name = str(item or "").strip()
+        if name:
+            synonyms.append(name)
+    return en, ja, ger, synonyms
 
 def _year_from_mal_date_string(value: str) -> int | None:
     """Parse MAL ``date`` fields: ``YYYY``, ``YYYY-MM``, or ``YYYY-MM-DD``."""
@@ -1249,6 +1291,7 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
 
     media_type = node.get("media_type") or (existing.media_type if existing else None)
     release_year = parse_mal_start_year(node) or (existing.release_year if existing else None)
+    title_en, title_ja, title_ger, title_synonyms = _parse_alternative_titles(node)
     # List fields are personal overlays — details enrich only updates shared metadata.
     entry = MalAnimeEntry(
         mal_id=mal_id,
@@ -1272,6 +1315,10 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
         media_type=str(media_type) if media_type else None,
         release_year=release_year,
         studios=studios,
+        title_en=title_en or (existing.title_en if existing else None),
+        title_ja=title_ja or (existing.title_ja if existing else None),
+        title_ger=title_ger or (existing.title_ger if existing else None),
+        title_synonyms=title_synonyms or (list(existing.title_synonyms) if existing else []),
     )
     write_cached_anime(entry, preserve_relations=False)
     # Always mark as enriched after a successful details fetch (even if no relations).
@@ -1464,6 +1511,14 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
                 release_year = old.get("release_year")
             if not studios and old.get("studios") is not None:
                 studios = _parse_studio_names(old)
+            if not entry.title_en and not entry.title_ja and not entry.title_synonyms:
+                old_en, old_ja, old_ger, old_syn = _parse_alternative_titles(old)
+                if old_en or old_ja or old_ger or old_syn:
+                    entry.title_en = entry.title_en or old_en
+                    entry.title_ja = entry.title_ja or old_ja
+                    entry.title_ger = entry.title_ger or old_ger
+                    if not entry.title_synonyms:
+                        entry.title_synonyms = list(old_syn)
         except (OSError, json.JSONDecodeError, ValueError):
             pass
     if related:
@@ -1489,6 +1544,10 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
         ],
         "details_enriched": details_enriched,
         "episode_titles": {str(k): v for k, v in sorted(episode_titles.items())},
+        "title_en": entry.title_en,
+        "title_ja": entry.title_ja,
+        "title_ger": entry.title_ger,
+        "title_synonyms": list(entry.title_synonyms or []),
     }
     if existing_path.exists():
         try:
@@ -1558,6 +1617,7 @@ def load_cached_manga(mal_id: int) -> MalMangaEntry | None:
     if not path.exists():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
+    title_en, title_ja, title_ger, title_synonyms = _parse_alternative_titles(data)
     return MalMangaEntry(
         mal_id=int(data["mal_id"]),
         title=data["title"],
@@ -1575,6 +1635,10 @@ def load_cached_manga(mal_id: int) -> MalMangaEntry | None:
         mean_score=data.get("mean_score"),
         media_type=(data.get("media_type") or None),
         release_year=data.get("release_year"),
+        title_en=title_en,
+        title_ja=title_ja,
+        title_ger=title_ger,
+        title_synonyms=title_synonyms,
     )
 
 
@@ -1593,6 +1657,13 @@ def write_cached_manga(entry: MalMangaEntry) -> None:
             old = json.loads(path.read_text(encoding="utf-8"))
             if release_year is None and old.get("release_year"):
                 release_year = old.get("release_year")
+            if not entry.title_en and not entry.title_ja and not entry.title_synonyms:
+                old_en, old_ja, old_ger, old_syn = _parse_alternative_titles(old)
+                entry.title_en = entry.title_en or old_en
+                entry.title_ja = entry.title_ja or old_ja
+                entry.title_ger = entry.title_ger or old_ger
+                if not entry.title_synonyms:
+                    entry.title_synonyms = list(old_syn)
         except (OSError, json.JSONDecodeError, ValueError):
             pass
     payload = {
@@ -1607,6 +1678,10 @@ def write_cached_manga(entry: MalMangaEntry) -> None:
         "mean_score": entry.mean_score,
         "media_type": entry.media_type,
         "release_year": release_year,
+        "title_en": entry.title_en,
+        "title_ja": entry.title_ja,
+        "title_ger": entry.title_ger,
+        "title_synonyms": list(entry.title_synonyms or []),
     }
     atomic_write_json(path, payload, ensure_ascii=False, trailing_newline=False)
 
@@ -1621,6 +1696,7 @@ def _parse_mangalist_row(row: dict[str, Any]) -> MalMangaEntry | None:
     genres = [g.get("name", "") for g in (node.get("genres") or []) if g.get("name")]
     list_status = row.get("list_status") or {}
     media_type = node.get("media_type")
+    title_en, title_ja, title_ger, title_synonyms = _parse_alternative_titles(node)
     return MalMangaEntry(
         mal_id=int(mal_id),
         title=str(title),
@@ -1637,6 +1713,10 @@ def _parse_mangalist_row(row: dict[str, Any]) -> MalMangaEntry | None:
         mean_score=node.get("mean"),
         media_type=str(media_type) if media_type else None,
         release_year=parse_mal_start_year(node),
+        title_en=title_en,
+        title_ja=title_ja,
+        title_ger=title_ger,
+        title_synonyms=title_synonyms,
     )
 
 
@@ -1676,6 +1756,7 @@ def load_cached_anime(mal_id: int) -> MalAnimeEntry | None:
     if not path.exists():
         return None
     data = json.loads(path.read_text(encoding="utf-8"))
+    title_en, title_ja, title_ger, title_synonyms = _parse_alternative_titles(data)
     return MalAnimeEntry(
         mal_id=int(data["mal_id"]),
         title=data["title"],
@@ -1696,6 +1777,10 @@ def load_cached_anime(mal_id: int) -> MalAnimeEntry | None:
         media_type=(data.get("media_type") or None),
         release_year=data.get("release_year"),
         studios=_parse_studio_names(data),
+        title_en=title_en,
+        title_ja=title_ja,
+        title_ger=title_ger,
+        title_synonyms=title_synonyms,
     )
 
 
@@ -1733,6 +1818,7 @@ def _parse_animelist_row(row: dict[str, Any]) -> MalAnimeEntry | None:
     day, btime = _parse_broadcast(node)
     media_type = node.get("media_type")
 
+    title_en, title_ja, title_ger, title_synonyms = _parse_alternative_titles(node)
     return MalAnimeEntry(
         mal_id=int(mal_id),
         title=str(title),
@@ -1751,6 +1837,10 @@ def _parse_animelist_row(row: dict[str, Any]) -> MalAnimeEntry | None:
         media_type=str(media_type) if media_type else None,
         release_year=parse_mal_start_year(node),
         studios=_parse_studio_names(node),
+        title_en=title_en,
+        title_ja=title_ja,
+        title_ger=title_ger,
+        title_synonyms=title_synonyms,
     )
 
 

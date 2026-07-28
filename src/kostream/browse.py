@@ -155,11 +155,15 @@ def filter_shows(
     result = list(shows)
     q = query.strip().casefold()
     if q:
-        result = [
-            s
-            for s in result
-            if q in s.title.casefold() or q in (s.description or "").casefold()
-        ]
+        def _matches(s: Show) -> bool:
+            if q in s.title.casefold() or q in (s.description or "").casefold():
+                return True
+            for alias in getattr(s, "title_aliases", None) or []:
+                if q in str(alias).casefold():
+                    return True
+            return False
+
+        result = [s for s in result if _matches(s)]
     g = genre.strip()
     if g:
         result = [s for s in result if g in (s.genres or [])]

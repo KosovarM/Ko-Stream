@@ -16,4 +16,5 @@ def user_data_paths(user_id: str, base: Path | None = None) -> dict[str, Path]:
         "manga_completed": root / "manga_completed.json",
         "manga_page_progress": root / "manga_page_progress.json",
         "notifications": root / "notifications.json",
+        "settings": root / "settings.json",
     }

@@ -11,6 +11,7 @@ from flask import (
     Flask,
     Response,
     abort,
+    g,
     make_response,
     redirect,
     render_template,
@@ -136,9 +137,12 @@ from kostream.episode_fetch import fetch_episode_from_url
 from kostream.local_media import (
     LocalMediaError,
     build_local_info,
+    list_incomplete_shows,
+    list_missing_episodes,
     open_folder_in_os,
     prepare_show_folder,
     save_episode_file,
+    save_subtitle_file,
 )
 from kostream.media_import import import_media_to_catalog, preview_media_import, summarize_import
 from kostream.local_registry import list_for_show
@@ -251,6 +255,12 @@ from kostream.i18n import (
     set_request_theme,
 )
 from kostream.user_paths import USER_DATA_DIR, user_data_paths
+from kostream.user_settings import get_title_language, set_title_language
+from kostream.titles import (
+    DEFAULT_TITLE_LANG,
+    TITLE_LANG_LABELS,
+    normalize_title_lang,
+)
 from kostream.users import (
     USERS_FILE,
     UsersError,
@@ -461,6 +471,12 @@ def create_app(
     def _resolve_locale():
         set_request_locale(request.cookies.get(LANG_COOKIE))
         set_request_theme(request.cookies.get(THEME_COOKIE))
+        uid = current_user_id()
+        if uid:
+            settings_path = user_data_paths(uid, app.config["USER_DATA_DIR"])["settings"]
+            g.title_language = get_title_language(settings_path)
+        else:
+            g.title_language = DEFAULT_TITLE_LANG
 
     @app.before_request
     def _csrf_protect():
@@ -583,6 +599,21 @@ def create_app(
         )
         return resp
 
+    @app.route("/title-language")
+    def set_title_lang():
+        """Persist per-user title language preference and redirect back."""
+        uid = current_user_id()
+        next_url = _safe_next_url(
+            request.args.get("next") or request.referrer or url_for("catalog_page")
+        )
+        if not uid:
+            return redirect(url_for("login", next=next_url))
+        lang = normalize_title_lang(request.args.get("lang"))
+        settings_path = user_data_paths(uid, app.config["USER_DATA_DIR"])["settings"]
+        set_title_language(settings_path, lang)
+        g.title_language = lang
+        return redirect(next_url)
+
     @app.route("/admin/users", methods=["GET", "POST"])
     @role_required("master")
     def admin_users():
@@ -685,9 +716,12 @@ def create_app(
             "theme_labels": THEME_LABELS,
             "supported_themes": (
                 DEFAULT_THEME,
-                "red-light",
+                "pink-light",
                 "blue-green",
             ),
+            "title_language": getattr(g, "title_language", DEFAULT_TITLE_LANG),
+            "title_lang_labels": TITLE_LANG_LABELS,
+            "supported_title_langs": ("jp", "en", "ger"),
             "csrf_token": _ensure_csrf_token(),
             "current_user": current_user(),
             "is_master": user_has_role("master"),
@@ -1580,6 +1614,112 @@ def create_app(
         message = summarize_import(result)
         return {"ok": True, "message": message, **result.to_dict()}
 
+    @app.route("/api/catalog/incomplete-shows")
+    def api_catalog_incomplete_shows():
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
+        shows = _scan_shows()
+        rows = list_incomplete_shows(
+            shows,
+            app.config["MEDIA_ROOT"],
+            catalog_path=app.config["CATALOG_PATH"],
+        )
+        return {"ok": True, "shows": rows, "count": len(rows)}
+
+    @app.route("/api/catalog/<show_id>/missing-episodes")
+    def api_catalog_missing_episodes(show_id: str):
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
+        show = _get_show(show_id)
+        if not show:
+            return {"ok": False, "error": "Show not found"}, 404
+        missing = list_missing_episodes(
+            show,
+            app.config["MEDIA_ROOT"],
+            catalog_path=app.config["CATALOG_PATH"],
+        )
+        return {
+            "ok": True,
+            "show_id": show.id,
+            "title": show.title,
+            "episodes": missing,
+            "count": len(missing),
+        }
+
+    @app.route("/api/catalog/upload-episode", methods=["POST"])
+    def api_catalog_upload_episode():
+        """Upload a missing episode video (+ optional .vtt) into the anime folder."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
+        show_id = (request.form.get("show_id") or "").strip()
+        episode_id = (request.form.get("episode_id") or "").strip()
+        if not show_id:
+            return {"ok": False, "error": "show_id required"}, 400
+        if not episode_id:
+            return {"ok": False, "error": "episode_id required"}, 400
+        show = _get_show(show_id)
+        if not show:
+            return {"ok": False, "error": "Show not found"}, 404
+        episode = next((e for e in show.episodes if e.id == episode_id), None)
+        if not episode:
+            return {"ok": False, "error": "Episode not found"}, 404
+        missing_ids = {
+            ep.get("episode_id")
+            for ep in list_missing_episodes(
+                show,
+                app.config["MEDIA_ROOT"],
+                catalog_path=app.config["CATALOG_PATH"],
+            )
+        }
+        if episode_id not in missing_ids:
+            return {"ok": False, "error": "Episode is already available"}, 400
+        video = request.files.get("video") or request.files.get("file")
+        if not video or not video.filename:
+            return {"ok": False, "error": "Video file required"}, 400
+        subtitle = request.files.get("subtitle")
+        try:
+            result = save_episode_file(
+                show,
+                episode,
+                video.filename,
+                video.read(),
+                app.config["MEDIA_ROOT"],
+                catalog_path=app.config["CATALOG_PATH"],
+                require_missing=True,
+            )
+            subtitle_result = None
+            if subtitle and subtitle.filename:
+                subtitle_result = save_subtitle_file(
+                    show,
+                    episode,
+                    subtitle.filename,
+                    subtitle.read(),
+                    app.config["MEDIA_ROOT"],
+                    catalog_path=app.config["CATALOG_PATH"],
+                )
+        except LocalMediaError as exc:
+            return {"ok": False, "error": str(exc)}, 400
+        refreshed = _get_show(show_id) or show
+        local_info = build_local_info(
+            refreshed,
+            app.config["MEDIA_ROOT"],
+            catalog_path=app.config["CATALOG_PATH"],
+        )
+        remaining = [ep for ep in local_info["episodes"] if not ep.get("is_local")]
+        local_count, expected_count = show_local_counts(refreshed, local_info)
+        return {
+            "ok": True,
+            **result,
+            "subtitle": subtitle_result,
+            "missing_episodes": remaining,
+            "missing_count": len(remaining),
+            "local_count": local_count,
+            "expected_count": expected_count,
+        }
+
     @app.route("/api/catalog/remove", methods=["POST", "DELETE"])
     def api_catalog_remove():
         denied = _require_api_roles("master")
@@ -2016,6 +2156,9 @@ def create_app(
 
     @app.route("/api/show/<show_id>/upload-episode", methods=["POST"])
     def api_show_upload_episode(show_id: str):
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         show = _get_show(show_id)
         if not show:
             abort(404)

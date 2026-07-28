@@ -42,6 +42,9 @@ class AniListMedia:
     banner_url: str | None
     mal_id: int | None = None
     episodes: int | None = None
+    title_english: str | None = None
+    title_romaji: str | None = None
+    title_native: str | None = None
 
 
 def search_anime(query: str, limit: int = 8) -> list[AniListMedia]:
@@ -138,7 +141,10 @@ def fetch_anime_by_mal_id(mal_id: int, *, network: bool = True) -> AniListMedia 
 
 def _parse_media(item: dict[str, Any]) -> AniListMedia:
     titles = item.get("title") or {}
-    title = titles.get("english") or titles.get("romaji") or titles.get("native") or "Unknown"
+    english = (titles.get("english") or "").strip() or None
+    romaji = (titles.get("romaji") or "").strip() or None
+    native = (titles.get("native") or "").strip() or None
+    title = english or romaji or native or "Unknown"
     cover = item.get("coverImage") or {}
     poster = cover.get("extraLarge") or cover.get("large")
     description = (item.get("description") or "").replace("<br>", "\n")
@@ -151,6 +157,9 @@ def _parse_media(item: dict[str, Any]) -> AniListMedia:
         banner_url=item.get("bannerImage"),
         mal_id=int(item["idMal"]) if item.get("idMal") else None,
         episodes=int(item["episodes"]) if item.get("episodes") else None,
+        title_english=english,
+        title_romaji=romaji,
+        title_native=native,
     )
 
 
@@ -181,6 +190,31 @@ def _post_graphql(query: str, variables: dict[str, Any]) -> dict[str, Any]:
     if payload.get("errors"):
         raise ValueError(str(payload["errors"]))
     return payload
+
+
+
+def _media_from_cache_dict(data: dict[str, Any]) -> AniListMedia:
+    """Rebuild ``AniListMedia`` from a cache JSON object (legacy-safe)."""
+    def _opt_str(key: str) -> str | None:
+        raw = data.get(key)
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        return text or None
+
+    return AniListMedia(
+        anilist_id=int(data["anilist_id"]),
+        title=str(data.get("title") or "Unknown"),
+        description=str(data.get("description") or ""),
+        genres=list(data.get("genres") or []),
+        poster_url=data.get("poster_url"),
+        banner_url=data.get("banner_url"),
+        mal_id=int(data["mal_id"]) if data.get("mal_id") else None,
+        episodes=int(data["episodes"]) if data.get("episodes") else None,
+        title_english=_opt_str("title_english"),
+        title_romaji=_opt_str("title_romaji"),
+        title_native=_opt_str("title_native"),
+    )
 
 
 def _cache_path(anilist_id: int) -> Path:
@@ -223,16 +257,9 @@ def _scan_cache_for_mal(mal_id: int) -> AniListMedia | None:
                 continue
             if time.time() - path.stat().st_mtime > CACHE_TTL_SECONDS:
                 continue
-            return AniListMedia(
-                anilist_id=int(data["anilist_id"]),
-                title=data["title"],
-                description=data.get("description", ""),
-                genres=data.get("genres", []),
-                poster_url=data.get("poster_url"),
-                banner_url=data.get("banner_url"),
-                mal_id=mid,
-                episodes=int(data["episodes"]) if data.get("episodes") else None,
-            )
+            media = _media_from_cache_dict(data)
+            media.mal_id = mid
+            return media
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
             continue
     return None
@@ -242,19 +269,13 @@ def _read_cache(anilist_id: int) -> AniListMedia | None:
     path = _cache_path(anilist_id)
     if not path.exists():
         return None
-    if time.time() - path.stat().st_mtime > CACHE_TTL_SECONDS:
+    try:
+        if time.time() - path.stat().st_mtime > CACHE_TTL_SECONDS:
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return _media_from_cache_dict(data)
+    except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
         return None
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return AniListMedia(
-        anilist_id=int(data["anilist_id"]),
-        title=data["title"],
-        description=data.get("description", ""),
-        genres=data.get("genres", []),
-        poster_url=data.get("poster_url"),
-        banner_url=data.get("banner_url"),
-        mal_id=int(data["mal_id"]) if data.get("mal_id") else None,
-        episodes=int(data["episodes"]) if data.get("episodes") else None,
-    )
 
 
 def _write_cache(media: AniListMedia) -> None:
@@ -268,6 +289,9 @@ def _write_cache(media: AniListMedia) -> None:
         "banner_url": media.banner_url,
         "mal_id": media.mal_id,
         "episodes": media.episodes,
+        "title_english": media.title_english,
+        "title_romaji": media.title_romaji,
+        "title_native": media.title_native,
     }
     _cache_path(media.anilist_id).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     if media.mal_id:

@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-from kostream.anilist import fetch_anime
+from kostream.anilist import AniListError, fetch_anime, fetch_anime_by_mal_id
 from kostream.catalog import CatalogEntry, load_catalog
 from kostream.jsonio import atomic_write_json
 from kostream.models import (
@@ -17,6 +17,14 @@ from kostream.models import (
 )
 from kostream.jellyfin import JellyfinConfig, fetch_shows as jellyfin_fetch_shows
 from kostream.mal import apply_list_row_to_anime, get_anime_list_row, load_cached_anime
+from kostream.titles import (
+    all_searchable_titles,
+    merge_title_variants,
+    pick_display_title,
+    resolve_title_language,
+    variants_from_anilist_fields,
+    variants_from_mal_fields,
+)
 from kostream.watch_progress import apply_mal_metadata
 
 _REPO_MEDIA_SHOWS = Path(__file__).resolve().parents[2] / "media" / "shows"
@@ -49,6 +57,45 @@ SEASON_LABEL_PATTERN = re.compile(
 )
 
 
+def _current_title_pref(explicit: str | None = None) -> str:
+    return resolve_title_language(explicit)
+
+
+def _apply_title_variants(show: Show, variants, *, title_language: str | None = None) -> Show:
+    pref = _current_title_pref(title_language)
+    show.title = pick_display_title(variants, pref)
+    show.title_aliases = all_searchable_titles(variants)
+    return show
+
+
+def _variants_for_mal_entry(cached, *, anilist_meta=None):
+    mal_v = variants_from_mal_fields(
+        title=cached.title,
+        title_en=cached.title_en,
+        title_ja=cached.title_ja,
+        title_ger=cached.title_ger,
+        synonyms=cached.title_synonyms,
+    )
+    al_v = None
+    if anilist_meta is not None:
+        al_v = variants_from_anilist_fields(
+            title=anilist_meta.title,
+            english=anilist_meta.title_english,
+            romaji=anilist_meta.title_romaji,
+            native=anilist_meta.title_native,
+        )
+    elif getattr(cached, "mal_id", None):
+        meta = fetch_anime_by_mal_id(cached.mal_id, network=False)
+        if meta:
+            al_v = variants_from_anilist_fields(
+                title=meta.title,
+                english=meta.title_english,
+                romaji=meta.title_romaji,
+                native=meta.title_native,
+            )
+    return merge_title_variants(mal_v, al_v)
+
+
 def scan_library(
     root: Path | None = None,
     catalog_path: Path | None = None,
@@ -73,11 +120,17 @@ def scan_library(
             raw = list_state.get(str(int(entry.mal_id)))
             return dict(raw) if isinstance(raw, dict) else None
 
-        shows = [
-            _build_show_from_entry(entry, base, user_id=user_id, list_row=_row_for(entry))
-            for entry in enabled
-        ]
-        shows = [s for s in shows if s is not None]
+        shows: list[Show] = []
+        for entry in enabled:
+            try:
+                built = _build_show_from_entry(
+                    entry, base, user_id=user_id, list_row=_row_for(entry)
+                )
+            except (OSError, ValueError, TypeError, KeyError, AniListError):
+                # Missing disks / corrupt cache / bad catalog row must not 500 UI.
+                continue
+            if built is not None:
+                shows.append(built)
         return shows if shows else _demo_shows()
 
     return _scan_all(base)
@@ -91,11 +144,23 @@ def _attach_catalog_meta(show: Show, entry: CatalogEntry) -> Show:
 def _scan_all(base: Path) -> list[Show]:
     shows: list[Show] = []
 
-    if base.exists():
-        for show_dir in sorted(base.iterdir()):
+    try:
+        root_ok = base.is_dir()
+    except OSError:
+        root_ok = False
+
+    if root_ok:
+        try:
+            children = sorted(base.iterdir())
+        except OSError:
+            children = []
+        for show_dir in children:
             if not show_dir.is_dir():
                 continue
-            episodes, latest_mtime = _scan_show_folder(show_dir)
+            try:
+                episodes, latest_mtime = _scan_show_folder(show_dir)
+            except OSError:
+                continue
             if not episodes:
                 continue
             show_id = slugify(show_dir.name)
@@ -223,6 +288,7 @@ def _mal_show_for_entry(
             episodes=episodes,
             latest_local_mtime=latest_mtime,
         )
+        _apply_title_variants(show, _variants_for_mal_entry(cached))
         apply_mal_metadata(show, cached, list_row)
         return _attach_catalog_meta(show, entry)
 
@@ -346,7 +412,7 @@ def _metadata_only_show(entry: CatalogEntry) -> Show:
     meta = fetch_anime(entry.anilist_id) if entry.anilist_id else None
     title = entry.title or (meta.title if meta else show_id.replace("-", " ").title())
     description = meta.description[:500] if meta and meta.description else "No local episodes yet."
-    return Show(
+    show = Show(
         id=show_id,
         title=title,
         description=description,
@@ -358,6 +424,20 @@ def _metadata_only_show(entry: CatalogEntry) -> Show:
             Episode(f"{show_id}-demo", show_id, 1, 1, "Episode 1 (add files)", "demo.mp4"),
         ],
     )
+    if meta:
+        variants = merge_title_variants(
+            variants_from_anilist_fields(
+                title=meta.title,
+                english=meta.title_english,
+                romaji=meta.title_romaji,
+                native=meta.title_native,
+            ),
+            variants_from_mal_fields(title=entry.title) if entry.title else None,
+        )
+        _apply_title_variants(show, variants)
+    elif entry.title:
+        _apply_title_variants(show, variants_from_mal_fields(title=entry.title))
+    return show
 
 
 def _demo_show_for_entry(entry: CatalogEntry) -> Show:
@@ -379,12 +459,23 @@ def _jellyfin_show_for_entry(entry: CatalogEntry) -> Show | None:
     if entry.anilist_id:
         meta = fetch_anime(entry.anilist_id)
         if meta:
-            match.title = entry.title or meta.title
             match.description = meta.description[:500] or match.description
             match.poster_url = meta.poster_url
             match.banner_url = meta.banner_url
             match.genres = meta.genres or match.genres
             match.anilist_id = entry.anilist_id
+            _apply_title_variants(
+                match,
+                merge_title_variants(
+                    variants_from_anilist_fields(
+                        title=meta.title,
+                        english=meta.title_english,
+                        romaji=meta.title_romaji,
+                        native=meta.title_native,
+                    ),
+                    variants_from_mal_fields(title=entry.title or match.title),
+                ),
+            )
     return match
 
 
@@ -393,12 +484,23 @@ def _enrich_show(show: Show, show_dir: Path, anilist_id: int | None = None) -> S
     if aid:
         meta = fetch_anime(aid)
         if meta:
-            show.title = meta.title
             show.description = meta.description[:500] or show.description
             show.poster_url = meta.poster_url
             show.banner_url = meta.banner_url
             show.genres = meta.genres or show.genres
             show.anilist_id = aid
+            _apply_title_variants(
+                show,
+                merge_title_variants(
+                    variants_from_anilist_fields(
+                        title=meta.title,
+                        english=meta.title_english,
+                        romaji=meta.title_romaji,
+                        native=meta.title_native,
+                    ),
+                    variants_from_mal_fields(title=show.title),
+                ),
+            )
     local_poster = _find_poster(show_dir)
     if local_poster:
         show.poster = local_poster

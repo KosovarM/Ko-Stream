@@ -91,18 +91,18 @@ def test_set_theme_sets_cookie_and_redirects(tmp_path: Path):
     client = app.test_client()
     login_client(client)
 
-    resp = client.get("/theme?scheme=red-light&next=/catalog", follow_redirects=False)
+    resp = client.get("/theme?scheme=pink-light&next=/catalog", follow_redirects=False)
     assert resp.status_code in (302, 303)
     assert resp.headers["Location"].endswith("/catalog")
     cookies = resp.headers.getlist("Set-Cookie")
-    assert any(c.startswith("kostream_theme=red-light") for c in cookies)
+    assert any(c.startswith("kostream_theme=pink-light") for c in cookies)
     assert any("Path=/" in c for c in cookies if c.startswith("kostream_theme="))
     assert any("SameSite=Lax" in c for c in cookies if c.startswith("kostream_theme="))
 
-    client.set_cookie(THEME_COOKIE, "red-light")
+    client.set_cookie(THEME_COOKIE, "pink-light")
     page = client.get("/catalog")
     assert page.status_code == 200
-    assert b'data-theme="red-light"' in page.data
+    assert b'data-theme="pink-light"' in page.data
     assert b"Skip to content" in page.data
     assert b'id="main"' in page.data
     assert b"Color scheme" in page.data
@@ -141,7 +141,7 @@ def test_skip_link_and_catalog_label(tmp_path: Path):
     assert catalog.status_code == 200
     assert b">Catalog<" in catalog.data
     assert b"Gold / Dark" in catalog.data
-    assert b"Red / Light" in catalog.data
+    assert b"Pink / Light" in catalog.data
     assert b"Blue / Green" in catalog.data
 
 
@@ -179,3 +179,41 @@ def test_login_rejects_external_next(tmp_path: Path):
     loc = resp.headers.get("Location") or ""
     assert "evil.example" not in loc
     assert loc.endswith("/") or loc.rstrip("/").endswith("5001") or "/login" not in loc
+
+
+def test_red_light_theme_alias_normalizes_to_pink(tmp_path: Path):
+    from kostream.i18n import THEME_COOKIE, normalize_theme
+
+    assert normalize_theme("red-light") == "pink-light"
+    app = _test_app(tmp_path)
+    client = app.test_client()
+    login_client(client)
+    client.set_cookie(THEME_COOKIE, "red-light")
+    page = client.get("/catalog")
+    assert page.status_code == 200
+    assert b'data-theme="pink-light"' in page.data
+
+
+def test_set_title_language_persists_per_user(tmp_path: Path):
+    app = _test_app(tmp_path)
+    client = app.test_client()
+    login_client(client)
+
+    resp = client.get("/title-language?lang=jp&next=/catalog", follow_redirects=False)
+    assert resp.status_code in (302, 303)
+    assert resp.headers["Location"].endswith("/catalog")
+
+    settings = tmp_path / "user_data" / "u_test" / "settings.json"
+    # bootstrap may use different user id — discover from user_data
+    user_dirs = list((tmp_path / "user_data").iterdir()) if (tmp_path / "user_data").exists() else []
+    assert user_dirs, "expected per-user data dir"
+    settings = user_dirs[0] / "settings.json"
+    assert settings.exists()
+    import json
+    data = json.loads(settings.read_text(encoding="utf-8"))
+    assert data.get("title_language") == "jp"
+
+    page = client.get("/catalog")
+    assert page.status_code == 200
+    assert b"Title language" in page.data
+    assert b"Japanese" in page.data

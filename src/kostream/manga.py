@@ -133,6 +133,7 @@ class MangaTitle:
     media_type: str | None = None  # manga | manhwa | manhua | …
     genres: list[str] = field(default_factory=list)
     release_year: int | None = None
+    title_aliases: list[str] = field(default_factory=list)
 
     @property
     def chapter_count(self) -> int:
@@ -591,12 +592,33 @@ def load_manga_library(
             elif folder:
                 claimed_folders.add(folder)
 
-        title_name = (
-            (cached.title if cached else None)
-            or entry.title
-            or (local_title.title if local_title else None)
-            or entry.id
+        from kostream.titles import (
+            all_searchable_titles,
+            merge_title_variants,
+            pick_display_title,
+            variants_from_mal_fields,
         )
+        from kostream.titles import resolve_title_language
+
+        mal_variants = None
+        if cached:
+            mal_variants = variants_from_mal_fields(
+                title=cached.title,
+                title_en=cached.title_en,
+                title_ja=cached.title_ja,
+                title_ger=cached.title_ger,
+                synonyms=cached.title_synonyms,
+            )
+        variants = merge_title_variants(
+            mal_variants,
+            variants_from_mal_fields(
+                title=entry.title
+                or (local_title.title if local_title else None)
+                or entry.id
+            ),
+        )
+        title_name = pick_display_title(variants, resolve_title_language())
+        title_aliases = all_searchable_titles(variants)
         status = (list_row or {}).get("list_status") if list_row else None
         if status is None:
             status = cached.list_status if cached else None
@@ -632,6 +654,7 @@ def load_manga_library(
             MangaTitle(
                 id=entry.id,
                 title=title_name,
+                title_aliases=title_aliases,
                 folder=folder or (local_title.folder if local_title else ""),
                 chapters=chapters,
                 cover_chapter_id=cover,

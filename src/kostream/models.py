@@ -47,6 +47,8 @@ class Show:
     broadcast_day: str | None = None  # monday..sunday (MAL / JST)
     broadcast_time: str | None = None  # HH:MM JST
     release_year: int | None = None  # MAL start_date.year
+    # All known title variants for search (display language lives in ``title``).
+    title_aliases: list[str] = field(default_factory=list)
 
     @property
     def episode_count(self) -> int:
@@ -87,6 +89,8 @@ def slugify(name: str) -> str:
 
 
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mkv"}
+# Sidecar subs next to episode videos (see ``subtitles.discover_vtt_sidecars``).
+SUBTITLE_EXTENSIONS = {".vtt"}
 STRM_EXTENSION = ".strm"
 
 

@@ -4,10 +4,6 @@
 <section class="catalog-page">
   <header class="catalog-header">
     <h1>{{ _('Catalog') }}</h1>
-    <p>
-      {{ _('Only enabled entries load on the home page — fast for local testing.') }}
-      {{ _('Config file:') }} <code>{{ catalog_path }}</code>
-    </p>
     <p class="catalog-meta">{{ catalog_count }} {{ _('enabled') }} · {{ catalog.shows|length }} {{ _('total') }}{% if mal_count %} · {{ mal_count }} {{ _('from MAL') }}{% endif %}</p>
     <div class="theme-scheme" role="group" aria-label="{{ _('Color scheme') }}">
       <span class="theme-scheme-label">{{ _('Color scheme') }}</span>
@@ -18,6 +14,18 @@
           class="theme-scheme-btn{% if theme == scheme %} is-active{% endif %}"
           {% if theme == scheme %}aria-current="true"{% endif %}
         >{{ _(theme_labels.get(scheme, scheme)) }}</a>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="theme-scheme" role="group" aria-label="{{ _('Title language') }}">
+      <span class="theme-scheme-label">{{ _('Title language') }}</span>
+      <div class="theme-scheme-options">
+        {% for lang in supported_title_langs %}
+        <a
+          href="{{ url_for('set_title_lang', lang=lang, next=url_for('catalog_page')) }}"
+          class="theme-scheme-btn{% if title_language == lang %} is-active{% endif %}"
+          {% if title_language == lang %}aria-current="true"{% endif %}
+        >{{ _(title_lang_labels.get(lang, lang)) }}</a>
         {% endfor %}
       </div>
     </div>
@@ -150,6 +158,7 @@
     {% if can_import_media %}
     <div class="mal-actions">
       <button type="button" class="btn-watch" id="catalog-import-media">{{ _('Import from media') }}</button>
+      <button type="button" class="btn-watch" id="catalog-upload-open">{{ _('Upload') }}</button>
       <span class="catalog-meta" id="catalog-import-preview" hidden></span>
     </div>
     {% else %}
@@ -166,6 +175,49 @@
     <ul id="anilist-results" class="catalog-results"></ul>
   </section>
 </section>
+
+{% if can_import_media %}
+<div class="sync-index-modal catalog-upload-modal" id="catalog-upload-modal" hidden aria-hidden="true">
+  <div class="sync-index-backdrop" id="catalog-upload-backdrop" tabindex="-1"></div>
+  <div class="sync-index-panel catalog-upload-panel" role="dialog" aria-labelledby="catalog-upload-title" aria-modal="true">
+    <header class="sync-index-header">
+      <h2 id="catalog-upload-title">{{ _('Upload missing episode') }}</h2>
+      <button type="button" class="sync-index-close" id="catalog-upload-close" aria-label="{{ _('Close') }}">×</button>
+    </header>
+    <p class="catalog-meta sync-index-help">
+      {{ _('Choose a catalog title with missing episodes, then upload the video (subtitle optional).') }}
+    </p>
+    <form id="catalog-upload-form" class="catalog-upload-form">
+      <label class="catalog-upload-field">
+        <span>{{ _('Anime') }}</span>
+        <select id="catalog-upload-show" name="show_id" required>
+          <option value="">{{ _('Loading…') }}</option>
+        </select>
+      </label>
+      <label class="catalog-upload-field">
+        <span>{{ _('Missing episode') }}</span>
+        <select id="catalog-upload-episode" name="episode_id" required disabled>
+          <option value="">{{ _('Select an anime first') }}</option>
+        </select>
+      </label>
+      <label class="catalog-upload-field">
+        <span>{{ _('Video file') }}</span>
+        <input type="file" id="catalog-upload-video" name="video" accept=".mp4,.webm,.mkv,video/*" required>
+      </label>
+      <label class="catalog-upload-field">
+        <span>{{ _('Subtitle file (optional)') }}</span>
+        <input type="file" id="catalog-upload-subtitle" name="subtitle" accept=".vtt,text/vtt">
+      </label>
+      <p class="catalog-error" id="catalog-upload-error" hidden></p>
+      <p class="catalog-success" id="catalog-upload-success" hidden></p>
+      <div class="catalog-upload-actions">
+        <button type="submit" class="btn-watch" id="catalog-upload-submit">{{ _('Upload episode') }}</button>
+        <button type="button" class="btn-detail" id="catalog-upload-cancel">{{ _('Cancel') }}</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
 
 <div class="sync-index-modal" id="sync-index-modal" hidden aria-hidden="true">
   <div class="sync-index-backdrop" id="sync-index-backdrop" tabindex="-1"></div>
@@ -716,9 +768,6 @@ anilistForm.addEventListener('submit', async (event) => {
       loadSyncIndex();
     });
   });
-  document.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Escape' && syncIndexModal && !syncIndexModal.hidden) closeSyncIndex();
-  });
 
   const catalogImportMedia = document.getElementById('catalog-import-media');
   const catalogImportPreview = document.getElementById('catalog-import-preview');
@@ -758,6 +807,233 @@ anilistForm.addEventListener('submit', async (event) => {
       } catch (_) {
         alert('Import failed');
         catalogImportMedia.disabled = false;
+      }
+    });
+  }
+
+  const uploadModal = document.getElementById('catalog-upload-modal');
+  const uploadOpen = document.getElementById('catalog-upload-open');
+  const uploadClose = document.getElementById('catalog-upload-close');
+  const uploadCancel = document.getElementById('catalog-upload-cancel');
+  const uploadBackdrop = document.getElementById('catalog-upload-backdrop');
+  const uploadForm = document.getElementById('catalog-upload-form');
+  const uploadShow = document.getElementById('catalog-upload-show');
+  const uploadEpisode = document.getElementById('catalog-upload-episode');
+  const uploadVideo = document.getElementById('catalog-upload-video');
+  const uploadSubtitle = document.getElementById('catalog-upload-subtitle');
+  const uploadSubmit = document.getElementById('catalog-upload-submit');
+  const uploadError = document.getElementById('catalog-upload-error');
+  const uploadSuccess = document.getElementById('catalog-upload-success');
+
+  const setUploadError = (msg) => {
+    if (!uploadError) return;
+    if (msg) {
+      uploadError.hidden = false;
+      uploadError.textContent = msg;
+    } else {
+      uploadError.hidden = true;
+      uploadError.textContent = '';
+    }
+  };
+  const setUploadSuccess = (msg) => {
+    if (!uploadSuccess) return;
+    if (msg) {
+      uploadSuccess.hidden = false;
+      uploadSuccess.textContent = msg;
+    } else {
+      uploadSuccess.hidden = true;
+      uploadSuccess.textContent = '';
+    }
+  };
+  const closeUploadModal = () => {
+    if (!uploadModal) return;
+    uploadModal.hidden = true;
+    uploadModal.setAttribute('aria-hidden', 'true');
+    document.body.classList.remove('sync-index-open');
+    setUploadError('');
+    setUploadSuccess('');
+  };
+
+  document.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'Escape') return;
+    if (uploadModal && !uploadModal.hidden) {
+      closeUploadModal();
+      return;
+    }
+    if (syncIndexModal && !syncIndexModal.hidden) closeSyncIndex();
+  });
+
+  if (uploadModal && uploadOpen && uploadForm && uploadShow && uploadEpisode) {
+    const fillShowOptions = (shows) => {
+      uploadShow.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = shows.length ? 'Select anime…' : 'No titles with missing episodes';
+      uploadShow.appendChild(placeholder);
+      shows.forEach((row) => {
+        const opt = document.createElement('option');
+        opt.value = String(row.id || '');
+        const missing = Number(row.missing_count) || 0;
+        const local = Number(row.local_count) || 0;
+        const expected = Number(row.expected_count) || 0;
+        opt.textContent = `${row.title || row.id} (${local}/${expected}, ${missing} missing)`;
+        uploadShow.appendChild(opt);
+      });
+      uploadShow.disabled = !shows.length;
+    };
+    const fillEpisodeOptions = (episodes) => {
+      uploadEpisode.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = episodes.length ? 'Select episode…' : 'No missing episodes';
+      uploadEpisode.appendChild(placeholder);
+      episodes.forEach((ep) => {
+        const opt = document.createElement('option');
+        opt.value = String(ep.episode_id || '');
+        const season = Number(ep.season) || 1;
+        const number = Number(ep.number) || 0;
+        const title = ep.title ? ` — ${ep.title}` : '';
+        opt.textContent = `S${String(season).padStart(2, '0')}E${String(number).padStart(2, '0')}${title}`;
+        uploadEpisode.appendChild(opt);
+      });
+      uploadEpisode.disabled = !episodes.length;
+    };
+    const loadIncompleteShows = async () => {
+      fillShowOptions([]);
+      fillEpisodeOptions([]);
+      uploadEpisode.disabled = true;
+      setUploadError('');
+      setUploadSuccess('');
+      try {
+        const resp = await fetch('{{ url_for("api_catalog_incomplete_shows") }}');
+        const data = await resp.json().catch(() => ({}));
+        if (resp.status === 403) {
+          setUploadError(data.error || 'Permission denied');
+          return;
+        }
+        if (!resp.ok || !data.ok) {
+          setUploadError(data.error || 'Could not load incomplete titles');
+          return;
+        }
+        fillShowOptions(data.shows || []);
+        if (!(data.shows || []).length) {
+          setUploadError('No catalog titles with missing episodes.');
+        }
+      } catch (_) {
+        setUploadError('Could not load incomplete titles');
+      }
+    };
+    const loadMissingEpisodes = async (showId) => {
+      fillEpisodeOptions([]);
+      if (!showId) {
+        uploadEpisode.disabled = true;
+        return;
+      }
+      try {
+        const resp = await fetch('/api/catalog/' + encodeURIComponent(showId) + '/missing-episodes');
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          setUploadError(data.error || 'Could not load missing episodes');
+          return;
+        }
+        setUploadError('');
+        fillEpisodeOptions(data.episodes || []);
+        if (!(data.episodes || []).length) {
+          setUploadError('This title has no missing episodes.');
+        }
+      } catch (_) {
+        setUploadError('Could not load missing episodes');
+      }
+    };
+    const openUploadModal = async () => {
+      uploadModal.hidden = false;
+      uploadModal.setAttribute('aria-hidden', 'false');
+      document.body.classList.add('sync-index-open');
+      if (uploadVideo) uploadVideo.value = '';
+      if (uploadSubtitle) uploadSubtitle.value = '';
+      await loadIncompleteShows();
+    };
+    uploadOpen.addEventListener('click', () => { openUploadModal(); });
+    uploadClose?.addEventListener('click', closeUploadModal);
+    uploadCancel?.addEventListener('click', closeUploadModal);
+    uploadBackdrop?.addEventListener('click', closeUploadModal);
+    uploadShow.addEventListener('change', () => {
+      setUploadSuccess('');
+      loadMissingEpisodes(uploadShow.value);
+    });
+    uploadForm.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      setUploadError('');
+      setUploadSuccess('');
+      const showId = uploadShow.value;
+      const episodeId = uploadEpisode.value;
+      if (!showId) {
+        setUploadError('Select an anime.');
+        return;
+      }
+      if (!episodeId) {
+        setUploadError('Select a missing episode.');
+        return;
+      }
+      if (!uploadVideo || !uploadVideo.files || !uploadVideo.files.length) {
+        setUploadError('Video file required.');
+        return;
+      }
+      const body = new FormData();
+      body.append('show_id', showId);
+      body.append('episode_id', episodeId);
+      body.append('video', uploadVideo.files[0]);
+      if (uploadSubtitle && uploadSubtitle.files && uploadSubtitle.files.length) {
+        body.append('subtitle', uploadSubtitle.files[0]);
+      }
+      if (uploadSubmit) uploadSubmit.disabled = true;
+      try {
+        const resp = await fetch('{{ url_for("api_catalog_upload_episode") }}', {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': csrfToken() },
+          body,
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (resp.status === 403) {
+          setUploadError(data.error || 'Permission denied');
+          return;
+        }
+        if (!resp.ok || !data.ok) {
+          setUploadError(data.error || 'Upload failed');
+          return;
+        }
+        const remaining = Array.isArray(data.missing_episodes) ? data.missing_episodes : [];
+        fillEpisodeOptions(remaining);
+        if (uploadVideo) uploadVideo.value = '';
+        if (uploadSubtitle) uploadSubtitle.value = '';
+        const name = data.filename || 'episode';
+        if (!remaining.length) {
+          setUploadSuccess('Uploaded ' + name + '. No missing episodes left for this title.');
+          const opt = Array.from(uploadShow.options).find((o) => o.value === showId);
+          if (opt) opt.remove();
+          uploadShow.value = '';
+          uploadEpisode.disabled = true;
+          if (!Array.from(uploadShow.options).some((o) => o.value)) {
+            fillShowOptions([]);
+          }
+        } else {
+          setUploadSuccess('Uploaded ' + name + '. ' + remaining.length + ' missing episode(s) left.');
+          const selected = Array.from(uploadShow.options).find((o) => o.value === showId);
+          if (selected) {
+            const local = Number(data.local_count);
+            const expected = Number(data.expected_count);
+            const base = selected.textContent.replace(/\s*\([^)]*\)\s*$/, '');
+            if (Number.isFinite(local) && Number.isFinite(expected)) {
+              selected.textContent = `${base} (${local}/${expected}, ${remaining.length} missing)`;
+            } else {
+              selected.textContent = `${base} (${remaining.length} missing)`;
+            }
+          }
+        }
+      } catch (_) {
+        setUploadError('Upload failed');
+      } finally {
+        if (uploadSubmit) uploadSubmit.disabled = false;
       }
     });
   }

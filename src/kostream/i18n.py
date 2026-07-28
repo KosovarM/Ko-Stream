@@ -22,16 +22,19 @@ SUPPORTED_LANGS = frozenset({"en"})
 THEME_COOKIE = "kostream_theme"
 THEME_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 year
 DEFAULT_THEME = "gold-dark"
-SUPPORTED_THEMES = frozenset({"gold-dark", "red-light", "blue-green"})
+SUPPORTED_THEMES = frozenset({"gold-dark", "pink-light", "blue-green"})
+# Legacy cookie value accepted and normalized to pink-light.
+THEME_ALIASES = {"red-light": "pink-light"}
 THEME_LABELS = {
     "gold-dark": "Gold / Dark",
-    "red-light": "Red / Light",
+    "pink-light": "Pink / Light",
     "blue-green": "Blue / Green",
 }
 
 
 def normalize_theme(value: str | None) -> str:
     v = (value or "").strip().casefold()
+    v = THEME_ALIASES.get(v, v)
     if v in SUPPORTED_THEMES:
         return v
     return DEFAULT_THEME
