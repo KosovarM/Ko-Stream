@@ -744,7 +744,10 @@ anilistForm.addEventListener('submit', async (event) => {
       if (!confirm('Import all uncataloged anime folders from your media library?\n\nTitles will be added to the catalog and linked to MAL where possible (Plan to Watch when connected).')) return;
       catalogImportMedia.disabled = true;
       try {
-        const resp = await fetch('{{ url_for("api_catalog_import_media") }}', { method: 'POST' });
+        const resp = await fetch('{{ url_for("api_catalog_import_media") }}', {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': csrfToken() },
+        });
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok || !data.ok) {
           alert(data.error || 'Import failed');
