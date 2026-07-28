@@ -1,0 +1,22 @@
+# Replace the site address with your public hostname (DynDNS / MyFRITZ! / own domain).
+# Caddy obtains a Let's Encrypt certificate when DNS points here and ports 80/443 are open.
+
+kostream.example.com {
+	encode gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+		-Server
+	}
+
+	# App listens only on loopback — never forward WAN → :5001
+	reverse_proxy 127.0.0.1:5001 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Forwarded-Host {host}
+		header_up X-Real-IP {remote_host}
+	}
+}
+
+# Optional: install caddy-ratelimit (xcaddy) and restrict /login — see docs/PUBLIC_HTTPS.md

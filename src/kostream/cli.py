@@ -106,6 +106,7 @@ def _print_listen_banner(host: str, port: int, *, mdns_name: str | None = None) 
     print("  - Allow TCP port %s in Windows Firewall if the phone cannot connect." % port)
     print("  - Names like KoStream.net need real DNS (Fritzbox/Pi-hole); they are not magic aliases.")
     print("  - Log in is required when accounts exist — bootstrap with: ko-stream accounts bootstrap")
+    print("  - NOT for the public internet: use gunicorn + Caddy (see docs/PUBLIC_HTTPS.md).")
     print()
 
 
@@ -113,7 +114,10 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Ko-Stream — local streaming UI")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    serve = sub.add_parser("serve", help="Start web server")
+    serve = sub.add_parser(
+        "serve",
+        help="Start Werkzeug web server (LAN/dev only — not for WAN)",
+    )
     serve.add_argument(
         "--host",
         default="127.0.0.1",
@@ -180,6 +184,12 @@ def main(argv: list[str] | None = None) -> int:
         port = args.port
         mdns_name = _sanitize_mdns_name(args.name) if (args.lan or not _is_loopback(host)) else None
         _print_listen_banner(host, port, mdns_name=mdns_name)
+        if not _is_loopback(host):
+            print(
+                "  Warning: Werkzeug is for LAN/dev only. For public HTTPS use "
+                "gunicorn behind Caddy (docs/PUBLIC_HTTPS.md).",
+                file=sys.stderr,
+            )
         if mdns_name:
             _start_mdns(mdns_name, port, _lan_ipv4_addresses())
         # threaded=True: phone + PC can stream / browse at the same time

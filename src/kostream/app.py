@@ -19,6 +19,7 @@ from flask import (
     session,
     url_for,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from kostream.anilist import (
     AniListError,
@@ -272,6 +273,16 @@ def _csrf_enabled() -> bool:
     return raw not in ("0", "false", "off", "no")
 
 
+def _env_flag(name: str, default: str = "0") -> bool:
+    raw = (os.environ.get(name) or default).strip().lower()
+    return raw in ("1", "true", "yes", "on")
+
+
+def _trust_proxy_enabled() -> bool:
+    """Trust ``X-Forwarded-*`` from Caddy (only set behind a reverse proxy)."""
+    return _env_flag("KOSTREAM_TRUST_PROXY")
+
+
 def _load_or_create_secret_key() -> str:
     """Flask session secret from env or a persisted local file."""
     env = (
@@ -365,12 +376,14 @@ def create_app(
     app.secret_key = _load_or_create_secret_key()
     init_i18n(app)
     # LAN devices often hit http://192.168.x.x — keep cookies first-party friendly.
+    # Behind public HTTPS (Caddy), set KOSTREAM_SESSION_SECURE=1.
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = (
-        (os.environ.get("KOSTREAM_SESSION_SECURE") or "").strip().lower()
-        in ("1", "true", "yes", "on")
-    )
+    app.config["SESSION_COOKIE_SECURE"] = _env_flag("KOSTREAM_SESSION_SECURE")
+    app.config["TRUST_PROXY"] = _trust_proxy_enabled()
+    if app.config["TRUST_PROXY"]:
+        # One hop: Caddy → gunicorn. Do not enable without a reverse proxy.
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_prefix=1)
     app.config["MEDIA_ROOT"] = media_root or MEDIA_ROOT
     app.config["CATALOG_PATH"] = catalog_path or SELECTED_FILE
     app.config["GRAB_DIR"] = grab_base if grab_base is not None else grab_dir()

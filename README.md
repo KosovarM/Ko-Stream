@@ -79,7 +79,7 @@ If it does not load, allow the port in Windows Firewall (Admin PowerShell):
 New-NetFirewallRule -DisplayName "Ko-Stream" -Direction Inbound -Protocol TCP -LocalPort 5001 -Action Allow -Profile Private
 ```
 
-**Security:** Login + roles are required. CSRF protects mutating POSTs. For home LAN only — do **not** port-forward to the internet yet. Set `KOSTREAM_SECRET_KEY` on the Pi (see `.env.example`). Disable CSRF for local scripts with `KOSTREAM_CSRF=0`.
+**Security:** Login + roles are required. CSRF protects mutating POSTs. For home LAN only, `ko-stream serve --lan` is fine. For access **outside** your Wi‑Fi (no extra VPN app): use **Caddy + gunicorn** — see [`docs/PUBLIC_HTTPS.md`](docs/PUBLIC_HTTPS.md). Never forward port `5001` to the WAN.
 
 **Pi / USB disk:** See [`docs/PI_LAN_PREP.md`](docs/PI_LAN_PREP.md). Backup accounts/progress with `python scripts/backup_data.py`.
 

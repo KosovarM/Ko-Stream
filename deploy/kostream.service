@@ -1,0 +1,27 @@
+[Unit]
+Description=Ko-Stream (gunicorn behind Caddy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kosovar
+Group=kosovar
+WorkingDirectory=/home/kosovar/Ko-Stream
+EnvironmentFile=-/etc/kostream.env
+# Prefer venv gunicorn after: pip install -e ".[prod]"
+ExecStart=/home/kosovar/Ko-Stream/.venv/bin/gunicorn \
+  --bind 127.0.0.1:5001 \
+  --workers 2 \
+  --threads 4 \
+  --timeout 120 \
+  kostream.wsgi:app
+Restart=on-failure
+RestartSec=5
+
+# Hardening (adjust if media mounts need broader access)
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
