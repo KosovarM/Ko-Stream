@@ -26,11 +26,15 @@ python -m venv .venv
 
 .\.venv\Scripts\Activate.ps1
 
+pip install -r requirements.lock
+
 pip install -e ".[dev]"
 
 ko-stream serve
 
 ```
+
+Pinned dependency versions live in `requirements.lock` (regenerate with `pip-compile pyproject.toml -o requirements.lock` or `uv pip compile pyproject.toml -o requirements.lock` after changing bounds in `pyproject.toml`).
 
 
 

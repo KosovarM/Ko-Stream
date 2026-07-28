@@ -64,7 +64,8 @@ For **stream only** episodes (`demo.mp4`) without downloading into `media/shows/
 
 ```powershell
 $env:KOSTREAM_GRAB = "1"
-$env:KOSTREAM_GRAB_CMD = "python path\to\your_resolver.py"
+# Absolute interpreter + absolute script path (no PATH / no shell)
+$env:KOSTREAM_GRAB_CMD = "C:\path\to\python.exe C:\path\to\your_resolver.py"
 ko-stream serve
 ```
 
@@ -107,7 +108,7 @@ Stream only media you own or may legally play. For a typical setup:
 | `JELLYFIN_URL` | Base URL, e.g. `http://localhost:8096` |
 | `JELLYFIN_API_KEY` | Jellyfin API key |
 | `KOSTREAM_GRAB` | `1` (default) enable Grab; `0` to disable |
-| `KOSTREAM_GRAB_CMD` | External resolver command (stdin JSON → stdout URL) |
+| `KOSTREAM_GRAB_CMD` | Absolute executable + args (argv list; never shell). Unset = off |
 | `KOSTREAM_GRAB_DEMO` | `1` enable public sample MP4 fallback |
 | `KOSTREAM_GRAB_CACHE_TTL` | Cache lifetime in seconds (default 7200) |
 | `KOSTREAM_GRAB_DIR` | Optional path to grab data folder |

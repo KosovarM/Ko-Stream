@@ -11,6 +11,8 @@ from typing import Any
 
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from kostream.jsonio import atomic_write_json
+
 USERS_FILE = Path(__file__).resolve().parents[2] / "data" / "users.json"
 
 VALID_ROLES = frozenset({"master", "manager", "user"})
@@ -97,9 +99,8 @@ def load_users(path: Path | None = None) -> list[User]:
 
 def save_users(users: list[User], path: Path | None = None) -> None:
     target = path or USERS_FILE
-    target.parent.mkdir(parents=True, exist_ok=True)
     payload = {"users": [u.to_dict() for u in users]}
-    target.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(target, payload)
 
 
 def find_user_by_username(users: list[User], username: str) -> User | None:

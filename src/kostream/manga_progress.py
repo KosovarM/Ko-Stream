@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
+from kostream.jsonio import atomic_write_json
 from kostream.manga import MangaChapter, MangaTitle
 
 MANGA_COMPLETED_FILE = Path(__file__).resolve().parents[2] / "data" / "manga_completed.json"
@@ -40,8 +41,7 @@ def load_manga_completed(path: Path | None = None) -> dict[str, int]:
 
 
 def save_manga_completed(path: Path, data: dict[str, int]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(path, data)
 
 
 def load_manga_page_progress(path: Path | None = None) -> dict[str, dict[str, Any]]:
@@ -78,8 +78,7 @@ def load_manga_page_progress(path: Path | None = None) -> dict[str, dict[str, An
 
 
 def save_manga_page_progress(path: Path, data: dict[str, dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(path, data)
 
 
 def get_chapter_page_index(

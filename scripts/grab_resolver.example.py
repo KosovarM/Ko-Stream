@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Example Grab resolver for Ko-Stream.
 
-Wire with:
-  $env:KOSTREAM_GRAB_CMD = "python scripts/grab_resolver.example.py"
+Wire with (absolute paths only):
+  $py = (Resolve-Path .\.venv\Scripts\python.exe).Path
+  $script = (Resolve-Path .\scripts\grab_resolver.example.py).Path
+  $env:KOSTREAM_GRAB_CMD = "$py $script"
 
 Reads JSON from stdin, prints a direct media URL on stdout.
 Replace the body with your own legal URL source — do not commit scrapers

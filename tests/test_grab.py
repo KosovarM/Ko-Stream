@@ -14,7 +14,10 @@ from kostream.app import create_app
 from kostream.catalog import CatalogEntry, CatalogState, save_catalog
 from kostream.grab import (
     DEMO_STREAM_URLS,
+    GrabResolveError,
+    _validate_https_url,
     get_override,
+    parse_grab_cmd,
     resolve_stream_url,
     run_external_resolver,
     set_override,
@@ -23,7 +26,7 @@ from kostream.grab import (
 from kostream.library import get_show
 from kostream.models import Episode, Show
 
-from conftest import bootstrap_test_users, login_client
+from conftest import add_test_user, bootstrap_test_users, login_client
 
 
 @pytest.fixture
@@ -247,6 +250,81 @@ def test_proxy_grab_route(
     assert resp.data == b"ok"
 
 
+def test_validate_https_url_blocks_private_and_loopback():
+    with pytest.raises(ValueError, match="not allowed"):
+        _validate_https_url("http://127.0.0.1/secret")
+    with pytest.raises(ValueError, match="not allowed"):
+        _validate_https_url("http://localhost/x")
+    with pytest.raises(ValueError, match="not allowed"):
+        _validate_https_url("http://10.0.0.5/admin")
+    with pytest.raises(ValueError, match="not allowed"):
+        _validate_https_url("http://192.168.1.1/router")
+    with pytest.raises(ValueError, match="not allowed"):
+        _validate_https_url("http://172.16.5.1/x")
+    with pytest.raises(ValueError, match="not allowed"):
+        _validate_https_url("http://[::1]/x")
+    assert _validate_https_url("https://example.com/ep.mp4").startswith("https://")
+
+
+def test_set_override_rejects_loopback(grab_base: Path):
+    with pytest.raises(ValueError, match="not allowed"):
+        set_override("show", "show-s01e01", "http://127.0.0.1/x.mp4", base=grab_base)
+
+
+def test_parse_grab_cmd_requires_absolute_existing(tmp_path: Path):
+    with pytest.raises(GrabResolveError, match="absolute"):
+        parse_grab_cmd("python resolver.py")
+    missing = tmp_path / "missing.exe"
+    with pytest.raises(GrabResolveError, match="not found"):
+        parse_grab_cmd(f'"{missing}"')
+    script = tmp_path / "resolver.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+    argv = parse_grab_cmd(f'"{sys.executable}" "{script}"')
+    assert Path(argv[0]).is_absolute()
+    assert argv[1] == str(script)
+
+
+def test_run_external_resolver_rejects_relative_cmd(demo_show: Show):
+    with pytest.raises(GrabResolveError, match="absolute"):
+        run_external_resolver("echo hi", demo_show, demo_show.episodes[0])
+
+
+def test_api_grab_override_forbidden_for_user_role(
+    tmp_path: Path, grab_base: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("KOSTREAM_GRAB", "1")
+    app = _app_with_demo(tmp_path, grab_base)
+    add_test_user(app.config["USERS_PATH"], "viewer", "viewerpass", role="user")
+    client = app.test_client()
+    login_client(client, username="viewer", password="viewerpass")
+    show = get_show("demo-show", app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
+    assert show is not None
+    ep = show.episodes[0]
+    resp = client.post(
+        "/api/grab/override",
+        json={"show_id": show.id, "episode_id": ep.id, "url": "https://example.com/ep.mp4"},
+    )
+    assert resp.status_code == 403
+    assert get_override(show.id, ep.id, base=grab_base) is None
+
+
+def test_api_grab_override_rejects_private_url(
+    tmp_path: Path, grab_base: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("KOSTREAM_GRAB", "1")
+    app = _app_with_demo(tmp_path, grab_base)
+    client = _logged_in_client(app)
+    show = get_show("demo-show", app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
+    assert show is not None
+    ep = show.episodes[0]
+    resp = client.post(
+        "/api/grab/override",
+        json={"show_id": show.id, "episode_id": ep.id, "url": "http://127.0.0.1/x.mp4"},
+    )
+    assert resp.status_code == 400
+    assert "not allowed" in (resp.get_json() or {}).get("error", "")
+
+
 def test_api_grab_override(
     tmp_path: Path, grab_base: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -289,7 +367,7 @@ def test_api_grab_resolve_and_bulk(
 
     resp = client.post(
         "/api/grab/overrides/bulk",
-        json={"show_id": show.id, "urls": {ep.id: "https://bulk.example/a.mp4"}},
+        json={"show_id": show.id, "urls": {ep.id: "https://example.com/bulk.mp4"}},
     )
     assert resp.status_code == 200
     assert resp.get_json()["count"] == 1

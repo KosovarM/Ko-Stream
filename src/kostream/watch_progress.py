@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from kostream.jsonio import atomic_write_json
 from kostream.models import Episode, Show
 
 COMPLETION_RATIO = 0.9
@@ -173,8 +174,7 @@ def load_completed(path: Path | None = None) -> dict[str, int]:
 
 
 def save_completed(path: Path, data: dict[str, int]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    atomic_write_json(path, data, trailing_newline=False)
 
 
 def mark_episode_watched(show: Show, episode: Episode, path: Path | None = None) -> int:

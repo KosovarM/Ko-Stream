@@ -2,16 +2,19 @@
 
 Resolve order: manual override → cache → external command → optional demo samples.
 
-Set ``KOSTREAM_GRAB_CMD`` to an executable that receives JSON on stdin and prints
-a direct media URL (or ``{"url":"..."}``) on stdout. Ko-Stream does not ship
-site scrapers; you bring your own resolver.
+Set ``KOSTREAM_GRAB_CMD`` to an **absolute** executable path (optional args) that
+receives JSON on stdin and prints a direct media URL (or ``{"url":"..."}``) on
+stdout. Ko-Stream does not ship site scrapers; you bring your own resolver.
+The command is run as an argv list (never ``shell=True``).
 """
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import shlex
+import socket
 import subprocess
 import time
 from dataclasses import dataclass
@@ -19,6 +22,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+from kostream.jsonio import atomic_write_json
 from kostream.models import Episode, Show
 
 DEFAULT_GRAB_DIR = Path(__file__).resolve().parents[2] / "data" / "grab"
@@ -30,6 +34,16 @@ DEMO_STREAM_URLS = (
     "https://storage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
     "https://storage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
     "https://storage.googleapis.com/gtv-videos-bucket/sample/Sintel.mp4",
+)
+
+_BLOCKED_HOSTNAMES = frozenset(
+    {
+        "localhost",
+        "localhost.localdomain",
+        "ip6-localhost",
+        "ip6-loopback",
+        "metadata.google.internal",
+    }
 )
 
 
@@ -56,6 +70,7 @@ def grab_demo_enabled() -> bool:
 
 
 def grab_cmd() -> str | None:
+    """Return configured grab command string, or None when unset/disabled."""
     raw = os.environ.get("KOSTREAM_GRAB_CMD", "").strip()
     return raw or None
 
@@ -128,6 +143,34 @@ def resolve_stream_url(
     return None
 
 
+def parse_grab_cmd(cmd: str) -> list[str]:
+    """Parse ``KOSTREAM_GRAB_CMD`` into an argv list with a safe absolute exe.
+
+    Never uses a shell. The first token must be an absolute filesystem path to
+    an existing executable (or ``.py`` / ``.exe`` / ``.bat`` / ``.cmd`` script).
+    """
+    raw = (cmd or "").strip()
+    if not raw:
+        raise GrabResolveError("KOSTREAM_GRAB_CMD is empty")
+    # posix=True keeps quoted Windows paths working (``"C:\\Prog\\py.exe"``).
+    argv = shlex.split(raw, posix=True)
+    argv = [a.strip('"') for a in argv if a.strip('"')]
+    if not argv:
+        raise GrabResolveError("KOSTREAM_GRAB_CMD is empty")
+    exe = Path(argv[0])
+    if not exe.is_absolute():
+        raise GrabResolveError(
+            "KOSTREAM_GRAB_CMD must start with an absolute executable path "
+            "(relative names and PATH lookups are disabled)"
+        )
+    if not exe.exists():
+        raise GrabResolveError(f"Resolver not found: {exe}")
+    if not exe.is_file():
+        raise GrabResolveError(f"Resolver is not a file: {exe}")
+    argv[0] = str(exe)
+    return argv
+
+
 def run_external_resolver(cmd: str, show: Show, episode: Episode) -> str:
     """Run ``KOSTREAM_GRAB_CMD``; stdin JSON in, URL or JSON out."""
     payload = {
@@ -139,11 +182,7 @@ def run_external_resolver(cmd: str, show: Show, episode: Episode) -> str:
         "number": episode.number,
         "episode_title": episode.title,
     }
-    argv = shlex.split(cmd, posix=True)
-    if not argv:
-        raise GrabResolveError("KOSTREAM_GRAB_CMD is empty")
-    # Windows CreateProcess rejects quoted argv[0] leftovers from some splits.
-    argv = [a.strip('"') for a in argv]
+    argv = parse_grab_cmd(cmd)
 
     try:
         completed = subprocess.run(
@@ -153,6 +192,7 @@ def run_external_resolver(cmd: str, show: Show, episode: Episode) -> str:
             text=True,
             timeout=DEFAULT_RESOLVER_TIMEOUT,
             check=False,
+            shell=False,
         )
     except FileNotFoundError as exc:
         raise GrabResolveError(f"Resolver not found: {argv[0]}") from exc
@@ -249,11 +289,65 @@ def _cache_key(show_id: str, episode_id: str) -> str:
     return f"{show_id}/{episode_id}"
 
 
+def _ip_is_blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    if ip.is_private or ip.is_loopback or ip.is_link_local:
+        return True
+    if ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+        return True
+    # Carrier-grade NAT / documentation / benchmarking ranges.
+    if isinstance(ip, ipaddress.IPv4Address):
+        for net in (
+            "100.64.0.0/10",
+            "192.0.0.0/24",
+            "192.0.2.0/24",
+            "198.18.0.0/15",
+            "198.51.100.0/24",
+            "203.0.113.0/24",
+            "240.0.0.0/4",
+        ):
+            if ip in ipaddress.ip_network(net):
+                return True
+    return False
+
+
+def _is_blocked_host(hostname: str) -> bool:
+    """True when hostname is loopback/private/link-local (or resolves to one)."""
+    host = (hostname or "").strip().strip("[]").casefold()
+    if not host or host in _BLOCKED_HOSTNAMES:
+        return True
+    if host.endswith(".localhost") or host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+        return _ip_is_blocked(ip)
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        # Unresolved names are allowed at validation time; fetch will fail later.
+        # Literal private IPs and localhost aliases are already rejected above.
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        addr = info[4][0]
+        try:
+            if _ip_is_blocked(ipaddress.ip_address(addr)):
+                return True
+        except ValueError:
+            return True
+    return False
+
+
 def _validate_https_url(url: str) -> str:
     cleaned = (url or "").strip()
     parsed = urlparse(cleaned)
     if parsed.scheme not in ("https", "http") or not parsed.netloc:
         raise ValueError("URL must be an absolute http(s) address")
+    host = parsed.hostname
+    if not host or _is_blocked_host(host):
+        raise ValueError("URL host is not allowed (private/loopback addresses blocked)")
     return cleaned
 
 
@@ -312,5 +406,4 @@ def _load_json(path: Path, *, default: Any) -> Any:
 
 
 def _save_json(path: Path, data: Any) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(path, data)

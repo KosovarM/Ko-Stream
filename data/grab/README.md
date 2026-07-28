@@ -15,7 +15,8 @@ Ko-Stream does **not** ship anime site scrapers. Point Grab at your own script/C
 
 ```powershell
 $env:KOSTREAM_GRAB = "1"
-$env:KOSTREAM_GRAB_CMD = "python C:\Users\Kosov\.cursor\Repositories\CodeProject2\scripts\grab_resolver.example.py"
+# Absolute path to the interpreter + absolute path to the script (no PATH lookups, no shell).
+$env:KOSTREAM_GRAB_CMD = "C:\Users\Kosov\.cursor\Repositories\CodeProject2\.venv\Scripts\python.exe C:\Users\Kosov\.cursor\Repositories\CodeProject2\scripts\grab_resolver.example.py"
 ko-stream serve
 ```
 
@@ -61,7 +62,7 @@ POST /api/grab/overrides/bulk
 | Variable | Meaning |
 |----------|---------|
 | `KOSTREAM_GRAB` | `1` (default) on / `0` off |
-| `KOSTREAM_GRAB_CMD` | External resolver command |
+| `KOSTREAM_GRAB_CMD` | Absolute executable + args (argv list; never shell). Unset = disabled |
 | `KOSTREAM_GRAB_DEMO` | `1` = fall back to public sample MP4s |
 | `KOSTREAM_GRAB_CACHE_TTL` | Cache seconds (default 7200) |
 | `KOSTREAM_GRAB_DIR` | Override data folder |

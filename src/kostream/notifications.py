@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kostream.jsonio import atomic_write_json
 from kostream.user_paths import USER_DATA_DIR, user_data_paths
 from kostream.users import USERS_FILE, load_users
 
@@ -46,11 +47,7 @@ def load_notifications(path: Path) -> list[dict[str, Any]]:
 
 
 def save_notifications(items: list[dict[str, Any]], path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"notifications": items}, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(path, {"notifications": items}, ensure_ascii=False)
 
 
 def unread_count(items: list[dict[str, Any]]) -> int:

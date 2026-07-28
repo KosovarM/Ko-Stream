@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from kostream.jsonio import atomic_write_json
 from kostream.manga_progress import load_manga_completed
 from kostream.user_paths import user_data_paths
 from kostream.watch_progress import load_completed
@@ -105,17 +106,13 @@ def save_recommendations(
     path: Path | None = None,
 ) -> None:
     file_path = path or RECOMMENDATIONS_FILE
-    file_path.parent.mkdir(parents=True, exist_ok=True)
     cleaned: dict[str, dict[str, Any]] = {}
     for user_id, slots in data.items():
         uid = str(user_id or "").strip()
         if not uid:
             continue
         cleaned[uid] = _normalize_user_slots(slots)
-    file_path.write_text(
-        json.dumps(cleaned, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(file_path, cleaned, ensure_ascii=False)
 
 
 def get_user_slots(user_id: str, path: Path | None = None) -> dict[str, Any]:

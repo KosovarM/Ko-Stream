@@ -395,7 +395,11 @@ def create_app(
     app.config["CSRF_ENABLED"] = _csrf_enabled()
 
     def _safe_next_url(candidate: str | None) -> str:
-        """Allow only same-host relative redirects after locale switch."""
+        """Allow only same-site relative paths (login, locale, theme redirects).
+
+        Rejects scheme/netloc URLs (``http://…``, ``//evil.com``, etc.).
+        Same-host absolute URLs are reduced to path+query only.
+        """
         fallback = url_for("home")
         if not candidate:
             return fallback
@@ -521,7 +525,7 @@ def create_app(
             session.clear()
             session["user_id"] = user.id
             session["csrf_token"] = secrets.token_hex(16)
-            return redirect(request.args.get("next") or url_for("home"))
+            return redirect(_safe_next_url(request.args.get("next")))
         return _login_response(users_bootstrapped=bootstrapped)
 
     @app.route("/logout", methods=["POST"])
@@ -2247,6 +2251,9 @@ def create_app(
 
     @app.route("/api/grab/override", methods=["POST"])
     def api_grab_override():
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         if not grab_enabled():
             return {"ok": False, "error": "Grab is disabled (KOSTREAM_GRAB=0)"}, 400
         payload = request.get_json(silent=True) or {}
@@ -2270,6 +2277,9 @@ def create_app(
 
     @app.route("/api/grab/overrides/bulk", methods=["POST"])
     def api_grab_overrides_bulk():
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         if not grab_enabled():
             return {"ok": False, "error": "Grab is disabled (KOSTREAM_GRAB=0)"}, 400
         payload = request.get_json(silent=True) or {}

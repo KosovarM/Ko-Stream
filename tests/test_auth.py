@@ -42,6 +42,42 @@ def test_login_ok(tmp_path: Path):
         assert sess.get("user_id") == "u_testuser"
 
 
+def test_login_honors_relative_next(tmp_path: Path):
+    app, _users = _app(tmp_path)
+    client = app.test_client()
+    resp = client.post(
+        "/login?next=/catalog",
+        data={"username": "testuser", "password": "testpass"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    assert resp.location.endswith("/catalog")
+
+
+@pytest.mark.parametrize(
+    "evil_next",
+    [
+        "https://evil.example/phish",
+        "http://evil.example/",
+        "//evil.example/phish",
+        "\\\\evil.example",
+        "https://evil.example",
+    ],
+)
+def test_login_rejects_external_next(tmp_path: Path, evil_next: str):
+    app, _users = _app(tmp_path)
+    client = app.test_client()
+    resp = client.post(
+        f"/login?next={evil_next}",
+        data={"username": "testuser", "password": "testpass"},
+        follow_redirects=False,
+    )
+    assert resp.status_code == 302
+    loc = resp.location or ""
+    assert "evil.example" not in loc
+    assert loc.endswith("/")
+
+
 def test_login_fail(tmp_path: Path):
     app, _users = _app(tmp_path)
     client = app.test_client()

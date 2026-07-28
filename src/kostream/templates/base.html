@@ -54,22 +54,6 @@
         <span class="search-icon" aria-hidden="true">⌕</span>
         <input type="search" name="q" placeholder="{{ _('Search anime...') }}" value="{{ request.args.get('q', '') if request.args.get('scope') == 'all' else '' }}" id="header-search-input">
       </form>
-      <div class="lang-switch" role="group" aria-label="{{ _('Language') }}">
-        <a
-          href="{{ url_for('set_locale', lang='de', next=request.full_path.rstrip('?')) }}"
-          class="lang-switch-btn{% if lang == 'de' %} is-active{% endif %}"
-          hreflang="de"
-          lang="de"
-          {% if lang == 'de' %}aria-current="true"{% endif %}
-        >DE</a>
-        <a
-          href="{{ url_for('set_locale', lang='en', next=request.full_path.rstrip('?')) }}"
-          class="lang-switch-btn{% if lang == 'en' %} is-active{% endif %}"
-          hreflang="en"
-          lang="en"
-          {% if lang == 'en' %}aria-current="true"{% endif %}
-        >EN</a>
-      </div>
       {% if current_user %}
       <div class="header-account" id="header-account">
         <div

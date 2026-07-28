@@ -1,4 +1,4 @@
-"""Locale cookie and German/English UI translations."""
+"""Locale cookie and English-only UI helpers."""
 
 from __future__ import annotations
 
@@ -36,26 +36,24 @@ def _test_app(tmp_path: Path):
 
 def test_normalize_lang():
     assert normalize_lang(None) == DEFAULT_LANG
-    assert normalize_lang("DE") == "de"
     assert normalize_lang("en") == "en"
+    assert normalize_lang("DE") == DEFAULT_LANG
     assert normalize_lang("fr") == DEFAULT_LANG
     assert DEFAULT_LANG == "en"
     assert LANG_COOKIE == "kostream_lang"
     assert LANG_COOKIE_MAX_AGE >= 365 * 24 * 60 * 60
 
 
-def test_translate_with_request_locale(tmp_path: Path):
+def test_translate_is_identity(tmp_path: Path):
     app = _test_app(tmp_path)
     with app.test_request_context("/"):
-        set_request_locale("de")
-        assert get_locale() == "de"
-        assert _("Home") == "Start"
-        assert _("Catalog") == "Katalog"
-        assert _("Stream only") == "Nur Stream"
-        assert _("Log in") == "Anmelden"
         set_request_locale("en")
+        assert get_locale() == "en"
         assert _("Home") == "Home"
         assert _("Catalog") == "Catalog"
+        set_request_locale("de")
+        assert get_locale() == "en"
+        assert _("Home") == "Home"
 
 
 def test_set_locale_sets_cookie_and_redirects(tmp_path: Path):
@@ -63,23 +61,16 @@ def test_set_locale_sets_cookie_and_redirects(tmp_path: Path):
     client = app.test_client()
     login_client(client)
 
-    resp = client.get("/locale?lang=de&next=/search", follow_redirects=False)
+    resp = client.get("/locale?lang=en&next=/search", follow_redirects=False)
     assert resp.status_code in (302, 303)
     assert resp.headers["Location"].endswith("/search")
     cookies = resp.headers.getlist("Set-Cookie")
-    assert any(c.startswith("kostream_lang=de") for c in cookies)
+    assert any(c.startswith("kostream_lang=en") for c in cookies)
     assert any("Path=/" in c for c in cookies if c.startswith("kostream_lang="))
     assert any("SameSite=Lax" in c for c in cookies if c.startswith("kostream_lang="))
 
-    resp_en = client.get("/locale?lang=en&next=/", follow_redirects=False)
-    assert resp_en.status_code in (302, 303)
-    assert any(
-        c.startswith("kostream_lang=en")
-        for c in resp_en.headers.getlist("Set-Cookie")
-    )
 
-
-def test_set_locale_rejects_external_next(tmp_path: Path):
+def test_set_locale_rejects_de_and_external_next(tmp_path: Path):
     app = _test_app(tmp_path)
     client = app.test_client()
     login_client(client)
@@ -89,27 +80,8 @@ def test_set_locale_rejects_external_next(tmp_path: Path):
     )
     assert resp.status_code in (302, 303)
     assert "evil.example" not in (resp.headers.get("Location") or "")
-
-
-def test_german_nav_and_browse_strings(tmp_path: Path):
-    app = _test_app(tmp_path)
-    client = app.test_client()
-    login_client(client)
-    client.set_cookie(LANG_COOKIE, "de")
-
-    home = client.get("/")
-    assert home.status_code == 200
-    assert b'lang="de"' in home.data
-    assert b">Start<" in home.data
-    assert "Katalog".encode() in home.data
-    assert b"lang-switch" in home.data
-    assert "Weiterschauen".encode() in home.data or "Höchste MAL-Bewertung".encode() in home.data
-
-    search = client.get("/search")
-    assert search.status_code == 200
-    assert "Nur Stream".encode() in search.data
-    assert "Verfügbar".encode() in search.data
-    assert b">Suche<" in search.data
+    cookies = resp.headers.getlist("Set-Cookie")
+    assert any(c.startswith("kostream_lang=en") for c in cookies)
 
 
 def test_set_theme_sets_cookie_and_redirects(tmp_path: Path):
@@ -131,9 +103,9 @@ def test_set_theme_sets_cookie_and_redirects(tmp_path: Path):
     page = client.get("/catalog")
     assert page.status_code == 200
     assert b'data-theme="red-light"' in page.data
-    assert b"Skip to content" in page.data or "Zum Inhalt".encode() in page.data
+    assert b"Skip to content" in page.data
     assert b'id="main"' in page.data
-    assert b"Color scheme" in page.data or "Farbschema".encode() in page.data
+    assert b"Color scheme" in page.data
 
 
 def test_set_theme_rejects_external_next(tmp_path: Path):
@@ -160,6 +132,8 @@ def test_skip_link_and_catalog_label(tmp_path: Path):
     assert home.status_code == 200
     assert b'href="#main"' in home.data
     assert b'id="main"' in home.data
+    assert b">Home<" in home.data
+    assert b"lang-switch" not in home.data
     assert b">Catalog<" in home.data
     assert b">Library<" not in home.data
 
@@ -171,38 +145,13 @@ def test_skip_link_and_catalog_label(tmp_path: Path):
     assert b"Blue / Green" in catalog.data
 
 
-def test_german_login_page(tmp_path: Path):
-    app = _test_app(tmp_path)
-    client = app.test_client()
-    client.set_cookie(LANG_COOKIE, "de")
-    resp = client.get("/login")
-    assert resp.status_code == 200
-    assert "Anmelden".encode() in resp.data
-    assert "Benutzername".encode() in resp.data
-    assert "Passwort".encode() in resp.data
-    assert "private lokale Bibliothek".encode() in resp.data
-
-
-def test_german_login_error(tmp_path: Path):
-    app = _test_app(tmp_path)
-    client = app.test_client()
-    client.set_cookie(LANG_COOKIE, "de")
-    resp = client.post(
-        "/login",
-        data={"username": "nope", "password": "wrong"},
-        follow_redirects=True,
-    )
-    assert resp.status_code == 200
-    assert "Ungültiger Benutzername oder Passwort.".encode() in resp.data
-
-
 def test_locale_available_without_login(tmp_path: Path):
     app = _test_app(tmp_path)
     client = app.test_client()
-    resp = client.get("/locale?lang=de&next=/login", follow_redirects=False)
+    resp = client.get("/locale?lang=en&next=/login", follow_redirects=False)
     assert resp.status_code in (302, 303)
     assert any(
-        c.startswith("kostream_lang=de")
+        c.startswith("kostream_lang=en")
         for c in resp.headers.getlist("Set-Cookie")
     )
 
@@ -216,3 +165,17 @@ def test_default_locale_is_english(tmp_path: Path):
     assert b'lang="en"' in resp.data
     assert b">Home<" in resp.data
     assert b">Start<" not in resp.data
+
+
+def test_login_rejects_external_next(tmp_path: Path):
+    app = _test_app(tmp_path)
+    client = app.test_client()
+    resp = client.post(
+        "/login?next=https://evil.example/phish",
+        data={"username": "testuser", "password": "testpass"},
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303)
+    loc = resp.headers.get("Location") or ""
+    assert "evil.example" not in loc
+    assert loc.endswith("/") or loc.rstrip("/").endswith("5001") or "/login" not in loc

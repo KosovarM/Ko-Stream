@@ -356,6 +356,7 @@ def test_ensure_episode_titles_falls_back_to_mal_site(tmp_path, monkeypatch):
     from urllib.error import HTTPError
     from io import BytesIO
 
+    monkeypatch.setenv("KOSTREAM_MAL_HTML_SCRAPE", "1")
     monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
     (tmp_path / "31240.json").write_text(
         '{"mal_id":31240,"title":"Re:Zero","synopsis":"","poster_url":null,"genres":[],'
@@ -379,6 +380,40 @@ def test_ensure_episode_titles_falls_back_to_mal_site(tmp_path, monkeypatch):
     cached = mal_mod.load_cached_anime(31240)
     assert cached is not None
     assert cached.episode_titles[1].startswith("The End of the Beginning")
+
+
+def test_ensure_episode_titles_skips_html_scrape_when_disabled(tmp_path, monkeypatch):
+    from kostream import mal as mal_mod
+    from urllib.error import HTTPError
+    from io import BytesIO
+
+    monkeypatch.setenv("KOSTREAM_MAL_HTML_SCRAPE", "0")
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    (tmp_path / "1.json").write_text(
+        '{"mal_id":1,"title":"X","synopsis":"","poster_url":null,"genres":[],'
+        '"num_episodes":2,"list_status":"watching","num_episodes_watched":0,'
+        '"anime_status":"finished_airing","score":0,"mean_score":null,"episode_titles":{}}',
+        encoding="utf-8",
+    )
+
+    def boom(req, timeout=25):
+        raise HTTPError(req.full_url, 504, "Gateway Time-out", hdrs=None, fp=BytesIO())
+
+    called = {"n": 0}
+
+    def scrape(_mid):
+        called["n"] += 1
+        return {1: "Nope"}, True
+
+    monkeypatch.setattr(mal_mod, "urlopen", boom)
+    monkeypatch.setattr(mal_mod.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(mal_mod, "fetch_episode_titles_from_mal_site", scrape)
+
+    assert mal_mod.ensure_episode_titles(1) is False
+    assert called["n"] == 0
+    cached = mal_mod.load_cached_anime(1)
+    assert cached is not None
+    assert cached.episode_titles == {}
 
 
 def test_mal_site_parser_unescapes_entities():

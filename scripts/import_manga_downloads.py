@@ -17,20 +17,24 @@ MANGA_CATALOG_PATH = (
 
 # download folder -> (library folder, catalog id or None)
 MANGA_MAP: dict[str, tuple[str, str | None]] = {
+    "black_clover": ("Black Clover", "mal-manga-86337"),
     "Black_Clover": ("Black Clover", "mal-manga-86337"),
     "Chainsaw_Man": ("Chainsaw Man", "mal-manga-116778"),
     "DEATH_NOTE__Tanpenshuu": ("Death Note Tanpenshuu", "mal-manga-132335"),
     "Dice": ("Dice", None),
+    "fate_type_redline": ("Fate type Redline", "mal-manga-123444"),
     "Fate_Extra_CCC__Fox_Tail": ("Fate Extra CCC Fox Tail", "mal-manga-61147"),
     "Fire_Punch": ("Fire Punch", "mal-manga-98270"),
     "Mieruko_chan": ("Mieruko-chan", "mal-manga-116790"),
     "Overgeared": ("Overgeared", "mal-manga-147727"),
+    "ragna_crimson": ("Ragna Crimson", "mal-manga-106733"),
     "overgeared": ("Overgeared", "mal-manga-147727"),
     "Re_Zero_kara_Hajimeru_Isekai_Seikatsu___Daisshou___Outo_no_Ichinichi_Hen": (
         "Re Zero Daisshou Outo no Ichinichi Hen",
         None,
     ),
     "Sakamoto_Days": ("Sakamoto Days", "mal-manga-131334"),
+    "shangri_la_frontier": ("Shangri-La Frontier", None),
     "Tomoshibi_no_Otr": ("Tomoshibi no Otr", None),
 }
 

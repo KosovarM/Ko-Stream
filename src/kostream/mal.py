@@ -5,6 +5,8 @@ from __future__ import annotations
 import base64
 import html as html_lib
 import json
+import logging
+import os
 import re
 import secrets
 import threading
@@ -19,7 +21,10 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import Request, urlopen
 
 from kostream.catalog import CatalogEntry, CatalogState, load_catalog, save_catalog, upsert_entry
+from kostream.jsonio import atomic_write_json
 from kostream.models import RelatedAnime
+
+log = logging.getLogger(__name__)
 
 MAL_AUTH_URL = "https://myanimelist.net/v1/oauth2/authorize"
 MAL_TOKEN_URL = "https://myanimelist.net/v1/oauth2/token"
@@ -271,8 +276,7 @@ def _load_list_state(path: Path) -> dict[str, dict[str, Any]]:
 
 
 def _save_list_state(path: Path, state: dict[str, dict[str, Any]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(path, state, ensure_ascii=False)
 
 
 def load_anime_list_state(user_id: str) -> dict[str, dict[str, Any]]:
@@ -445,14 +449,13 @@ def load_tokens(user_id: str) -> MalTokens | None:
 
 def save_tokens(user_id: str, tokens: MalTokens) -> None:
     path = token_path(user_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "access_token": tokens.access_token,
         "refresh_token": tokens.refresh_token,
         "expires_at": tokens.expires_at,
         "username": tokens.username,
     }
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    atomic_write_json(path, payload, trailing_newline=False)
 
 
 def disconnect(user_id: str) -> None:
@@ -477,17 +480,16 @@ def prepare_oauth(cfg: MalConfig, user_id: str) -> dict[str, str]:
     code_verifier = _new_code_verifier()
 
     pending = pending_oauth_path(uid)
-    pending.parent.mkdir(parents=True, exist_ok=True)
-    pending.write_text(
-        json.dumps(
-            {
-                "user_id": uid,
-                "state": state,
-                "code_verifier": code_verifier,
-                "created_at": time.time(),
-            }
-        ),
-        encoding="utf-8",
+    atomic_write_json(
+        pending,
+        {
+            "user_id": uid,
+            "state": state,
+            "code_verifier": code_verifier,
+            "created_at": time.time(),
+        },
+        indent=None,
+        trailing_newline=False,
     )
 
     query = urlencode(
@@ -712,10 +714,10 @@ def record_last_sync(synced_count: int, user_id: str) -> str:
     """Persist last successful animelist sync timestamp for this user. Returns ISO string."""
     stamp = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     path = last_sync_path(user_id)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"synced_at": stamp, "count": synced_count}, indent=2),
-        encoding="utf-8",
+    atomic_write_json(
+        path,
+        {"synced_at": stamp, "count": synced_count},
+        trailing_newline=False,
     )
     return stamp
 
@@ -952,26 +954,60 @@ def ensure_episode_titles_async(mal_id: int) -> bool:
 
 
 def ensure_episode_titles(mal_id: int, *, force: bool = False) -> bool:
-    """Fetch MAL episode titles into cache (Jikan, then MAL site HTML). Returns True if titles written."""
+    """Fetch MAL episode titles into cache (Jikan, optional MAL HTML). Returns True if titles written.
+
+    Prefer Jikan. HTML scrape is opt-in via ``KOSTREAM_MAL_HTML_SCRAPE=1`` and soft-fails
+    (logs + keeps existing cache / incomplete flag) rather than inventing empty complete data.
+    """
     if not force and not episode_titles_need_fetch(mal_id):
         return False
     titles: dict[int, str] = {}
     complete = True
+    jikan_failed = False
     try:
         titles, complete = fetch_episode_titles(mal_id)
-    except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError):
+    except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError) as exc:
         titles, complete = {}, False
-    if not titles:
+        jikan_failed = True
+        log.warning("Jikan episode titles failed for mal_id=%s: %s", mal_id, exc)
+
+    if not titles and mal_html_scrape_enabled():
         try:
             titles, complete = fetch_episode_titles_from_mal_site(mal_id)
-        except (TimeoutError, OSError, URLError, HTTPError, ValueError):
+            if titles:
+                log.info(
+                    "MAL HTML scrape filled %d episode title(s) for mal_id=%s",
+                    len(titles),
+                    mal_id,
+                )
+        except (TimeoutError, OSError, URLError, HTTPError, ValueError) as exc:
+            log.warning(
+                "MAL HTML episode-title scrape failed for mal_id=%s (keeping cache): %s",
+                mal_id,
+                exc,
+            )
             return False
+    elif not titles and jikan_failed:
+        log.info(
+            "Episode titles incomplete for mal_id=%s (Jikan failed; HTML scrape disabled)",
+            mal_id,
+        )
+        return False
+
     if not titles and not force:
-        # Mark empty fetch so we don't hammer providers every page load
-        _store_episode_titles(mal_id, {}, complete=True)
+        # Soft-fail: do not mark complete=True with an empty wipe — leave incomplete for retry.
+        if jikan_failed:
+            return False
+        _store_episode_titles(mal_id, {}, complete=False)
         return False
     _store_episode_titles(mal_id, titles, complete=complete)
     return bool(titles)
+
+
+def mal_html_scrape_enabled() -> bool:
+    """Opt-in MAL HTML episode-title scrape when Jikan has nothing. Default off."""
+    raw = os.environ.get("KOSTREAM_MAL_HTML_SCRAPE", "0").strip().lower()
+    return raw in ("1", "true", "yes", "on")
 
 
 def _jikan_retry_after_seconds(exc: BaseException, attempt: int) -> float:
@@ -1115,7 +1151,7 @@ def _store_episode_titles(
     else:
         data["episode_titles_incomplete"] = True
         # Leave fetched_at unset/uncleared so need_fetch stays true via incomplete flag.
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(path, data, ensure_ascii=False, trailing_newline=False)
 
 
 def ensure_anime_details_async(cfg: MalConfig, mal_id: int, user_id: str) -> bool:
@@ -1252,7 +1288,7 @@ def merge_anime_details_into_cache(access_token: str, mal_id: int, title_fallbac
             {"mal_id": rel.mal_id, "title": rel.title, "relation_type": rel.relation_type}
             for rel in related
         ]
-        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        atomic_write_json(path, data, ensure_ascii=False, trailing_newline=False)
     return entry
 
 
@@ -1471,10 +1507,7 @@ def write_cached_anime(entry: MalAnimeEntry, *, preserve_relations: bool = True)
                 payload["episode_titles_incomplete"] = True
         except (OSError, json.JSONDecodeError, ValueError):
             pass
-    existing_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    atomic_write_json(existing_path, payload, ensure_ascii=False, trailing_newline=False)
 
 
 def fetch_animelist(access_token: str) -> list[MalAnimeEntry]:
@@ -1580,7 +1613,7 @@ def write_cached_manga(entry: MalMangaEntry) -> None:
         "media_type": entry.media_type,
         "release_year": release_year,
     }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    atomic_write_json(path, payload, ensure_ascii=False, trailing_newline=False)
 
 
 def _parse_mangalist_row(row: dict[str, Any]) -> MalMangaEntry | None:

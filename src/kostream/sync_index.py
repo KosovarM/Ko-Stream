@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+from kostream.jsonio import atomic_write_json
 from kostream.models import Show
 
 SYNC_INDEX_DIR = Path(__file__).resolve().parents[2] / "data" / "sync_index"
@@ -61,9 +62,8 @@ def _load_index(path: Path | None) -> dict[str, dict[str, Any]]:
 
 def _save_index(path: Path | None, entries: dict[str, dict[str, Any]]) -> None:
     file_path = path or ANIME_INDEX_FILE
-    file_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"entries": entries}
-    file_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(file_path, payload)
 
 
 def load_anime_index(path: Path | None = None) -> dict[str, dict[str, Any]]:

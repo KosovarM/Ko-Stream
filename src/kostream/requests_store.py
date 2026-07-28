@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from kostream.browse import KIND_ANIMES, KIND_MOVIES, KIND_SPECIALS, classify_show_kind
+from kostream.jsonio import atomic_write_json
 from kostream.manga import MangaTitle
 from kostream.manga_progress import total_chapters_target
 from kostream.models import Show, is_local_file_episode
@@ -274,12 +275,8 @@ def load_requests(path: Path | None = None) -> list[dict[str, Any]]:
 
 def save_requests(items: list[dict[str, Any]], path: Path | None = None) -> None:
     file_path = path or REQUESTS_FILE
-    file_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"requests": items}
-    file_path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(file_path, payload, ensure_ascii=False)
 
 
 def upsert_request(

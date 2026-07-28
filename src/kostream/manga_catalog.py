@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from kostream.jsonio import atomic_write_json
 from kostream.models import slugify
 
 MANGA_CATALOG_DIR = Path(__file__).resolve().parents[2] / "data" / "manga"
@@ -86,12 +87,8 @@ def load_manga_catalog(path: Path | None = None) -> MangaCatalogState:
 
 def save_manga_catalog(state: MangaCatalogState, path: Path | None = None) -> None:
     file_path = path or MANGA_SELECTED_FILE
-    file_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"titles": [entry.to_dict() for entry in state.titles]}
-    file_path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-        encoding="utf-8",
-    )
+    atomic_write_json(file_path, payload, ensure_ascii=False)
 
 
 def upsert_manga_entry(state: MangaCatalogState, entry: MangaCatalogEntry) -> MangaCatalogState:

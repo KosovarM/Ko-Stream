@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+from kostream.jsonio import atomic_write_json
 from kostream.models import slugify
 
 CATALOG_DIR = Path(__file__).resolve().parents[2] / "data" / "catalog"
@@ -85,9 +86,8 @@ def load_catalog(path: Path | None = None) -> CatalogState:
 
 def save_catalog(state: CatalogState, path: Path | None = None) -> None:
     file_path = path or SELECTED_FILE
-    file_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"shows": [entry.to_dict() for entry in state.shows]}
-    file_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    atomic_write_json(file_path, payload, ensure_ascii=False)
 
 
 def list_local_folders(media_root: Path) -> list[str]:

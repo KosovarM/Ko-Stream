@@ -7,6 +7,7 @@ from pathlib import Path
 
 from kostream.anilist import fetch_anime
 from kostream.catalog import CatalogEntry, load_catalog
+from kostream.jsonio import atomic_write_json
 from kostream.models import (
     Episode,
     Show,
@@ -551,8 +552,7 @@ def load_progress(path: Path) -> dict:
 
 
 def save_progress(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(path, data)
 
 
 def _merge_shows(local: list[Show], remote: list[Show]) -> list[Show]:
