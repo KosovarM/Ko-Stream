@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="{{ lang|default('en') }}">
+<html lang="{{ lang|default('en') }}" data-theme="{{ theme|default('gold-dark') }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body class="{% block body_class %}{% endblock %}">
+  <a class="skip-link" href="#main">{{ _('Skip to content') }}</a>
   <header class="site-header">
     <div class="header-inner">
       <button type="button" class="menu-toggle" id="menu-toggle" aria-label="{{ _('Menu') }}">☰</button>
@@ -120,7 +121,7 @@
             {% if current_user.role == 'master' %}
             <a href="{{ url_for('admin_users') }}" class="header-user-menu-link{% if request.endpoint and request.endpoint.startswith('admin_') %} is-active{% endif %}" role="menuitem">{{ _('Admin') }}</a>
             {% endif %}
-            <a href="{{ url_for('catalog_page') }}" class="header-user-menu-link{% if request.endpoint == 'catalog_page' %} is-active{% endif %}" role="menuitem">{{ _('Library') }}</a>
+            <a href="{{ url_for('catalog_page') }}" class="header-user-menu-link{% if request.endpoint == 'catalog_page' %} is-active{% endif %}" role="menuitem">{{ _('Catalog') }}</a>
             <form method="post" action="{{ url_for('logout') }}" class="header-logout-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button type="submit" class="header-user-menu-link header-user-menu-logout" role="menuitem">{{ _('Log out') }}</button>
@@ -129,12 +130,12 @@
         </div>
       </div>
       {% else %}
-      <a href="{{ url_for('catalog_page') }}" class="btn-header-login">{{ _('Library') }}</a>
+      <a href="{{ url_for('catalog_page') }}" class="btn-header-login">{{ _('Catalog') }}</a>
       {% endif %}
     </div>
   </header>
 
-  <main class="site-main">
+  <main class="site-main" id="main">
     {% block content %}{% endblock %}
   </main>
 
@@ -398,6 +399,14 @@
         if (open && animesDropdown?.classList.contains('is-current')) {
           setAnimesOpen(true);
         }
+      });
+
+      // Close mobile nav when a nav / dropdown link is tapped.
+      nav?.querySelectorAll('a.nav-link, a.nav-dropdown-link').forEach((link) => {
+        link.addEventListener('click', () => {
+          setNavOpen(false);
+          setAnimesOpen(false);
+        });
       });
 
       searchToggle?.addEventListener('click', () => {

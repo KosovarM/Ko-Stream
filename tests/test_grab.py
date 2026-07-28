@@ -189,7 +189,7 @@ def test_watch_page_uses_grab_when_demo_enabled(
     resp = client.get(f"/watch/{show.id}/{ep.id}")
     assert resp.status_code == 200
     assert b"/stream/grab/" in resp.data
-    assert b"On-demand stream (grab" in resp.data
+    assert b"On-demand stream" in resp.data
     assert b'id="player"' in resp.data
 
 

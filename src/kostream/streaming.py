@@ -65,4 +65,5 @@ def _guess_mimetype(path: Path) -> str:
         ".mp4": "video/mp4",
         ".webm": "video/webm",
         ".mkv": "video/x-matroska",
+        ".vtt": "text/vtt",
     }.get(ext, "application/octet-stream")

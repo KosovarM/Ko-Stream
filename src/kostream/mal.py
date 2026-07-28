@@ -1327,6 +1327,44 @@ def update_anime_list_status(
     )
 
 
+def update_anime_list_score(
+    cfg: MalConfig,
+    mal_id: int,
+    score: int,
+    *,
+    user_id: str,
+) -> dict[str, Any]:
+    """Set MAL anime score (0 = unset, 1–10) via PATCH/PUT; update per-user overlay."""
+    score = int(score)
+    if score < 0 or score > 10:
+        raise MalError(f"Invalid score: {score}")
+    access_token = get_valid_access_token(cfg, user_id)
+    row = get_anime_list_row(user_id, mal_id) or {}
+    form: dict[str, str] = {"score": str(score)}
+    try:
+        _api_form_raw(access_token, f"/anime/{mal_id}/my_list_status", form, method="PATCH")
+    except MalError as exc:
+        if "404" not in str(exc):
+            raise
+        put_form: dict[str, str] = {
+            "status": str(row.get("list_status") or "plan_to_watch"),
+            "score": str(score),
+        }
+        if "num_episodes_watched" in row:
+            put_form["num_watched_episodes"] = str(int(row.get("num_episodes_watched") or 0))
+        _api_form_raw(access_token, f"/anime/{mal_id}/my_list_status", put_form, method="PUT")
+
+    return upsert_anime_list_row(
+        user_id,
+        mal_id,
+        list_status=str(row["list_status"]) if row.get("list_status") else None,
+        num_episodes_watched=int(row["num_episodes_watched"])
+        if "num_episodes_watched" in row
+        else None,
+        score=score,
+    )
+
+
 def update_chapters_read(
     cfg: MalConfig,
     mal_id: int,

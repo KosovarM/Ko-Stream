@@ -50,12 +50,12 @@ def test_translate_with_request_locale(tmp_path: Path):
         set_request_locale("de")
         assert get_locale() == "de"
         assert _("Home") == "Start"
-        assert _("Library") == "Bibliothek"
+        assert _("Catalog") == "Katalog"
         assert _("Stream only") == "Nur Stream"
         assert _("Log in") == "Anmelden"
         set_request_locale("en")
         assert _("Home") == "Home"
-        assert _("Library") == "Library"
+        assert _("Catalog") == "Catalog"
 
 
 def test_set_locale_sets_cookie_and_redirects(tmp_path: Path):
@@ -101,7 +101,7 @@ def test_german_nav_and_browse_strings(tmp_path: Path):
     assert home.status_code == 200
     assert b'lang="de"' in home.data
     assert b">Start<" in home.data
-    assert "Bibliothek".encode() in home.data
+    assert "Katalog".encode() in home.data
     assert b"lang-switch" in home.data
     assert "Weiterschauen".encode() in home.data or "Höchste MAL-Bewertung".encode() in home.data
 
@@ -110,6 +110,65 @@ def test_german_nav_and_browse_strings(tmp_path: Path):
     assert "Nur Stream".encode() in search.data
     assert "Verfügbar".encode() in search.data
     assert b">Suche<" in search.data
+
+
+def test_set_theme_sets_cookie_and_redirects(tmp_path: Path):
+    from kostream.i18n import THEME_COOKIE
+
+    app = _test_app(tmp_path)
+    client = app.test_client()
+    login_client(client)
+
+    resp = client.get("/theme?scheme=red-light&next=/catalog", follow_redirects=False)
+    assert resp.status_code in (302, 303)
+    assert resp.headers["Location"].endswith("/catalog")
+    cookies = resp.headers.getlist("Set-Cookie")
+    assert any(c.startswith("kostream_theme=red-light") for c in cookies)
+    assert any("Path=/" in c for c in cookies if c.startswith("kostream_theme="))
+    assert any("SameSite=Lax" in c for c in cookies if c.startswith("kostream_theme="))
+
+    client.set_cookie(THEME_COOKIE, "red-light")
+    page = client.get("/catalog")
+    assert page.status_code == 200
+    assert b'data-theme="red-light"' in page.data
+    assert b"Skip to content" in page.data or "Zum Inhalt".encode() in page.data
+    assert b'id="main"' in page.data
+    assert b"Color scheme" in page.data or "Farbschema".encode() in page.data
+
+
+def test_set_theme_rejects_external_next(tmp_path: Path):
+    app = _test_app(tmp_path)
+    client = app.test_client()
+    login_client(client)
+    resp = client.get(
+        "/theme?scheme=blue-green&next=https://evil.example/phish",
+        follow_redirects=False,
+    )
+    assert resp.status_code in (302, 303)
+    assert "evil.example" not in (resp.headers.get("Location") or "")
+    assert any(
+        c.startswith("kostream_theme=blue-green")
+        for c in resp.headers.getlist("Set-Cookie")
+    )
+
+
+def test_skip_link_and_catalog_label(tmp_path: Path):
+    app = _test_app(tmp_path)
+    client = app.test_client()
+    login_client(client)
+    home = client.get("/")
+    assert home.status_code == 200
+    assert b'href="#main"' in home.data
+    assert b'id="main"' in home.data
+    assert b">Catalog<" in home.data
+    assert b">Library<" not in home.data
+
+    catalog = client.get("/catalog")
+    assert catalog.status_code == 200
+    assert b">Catalog<" in catalog.data
+    assert b"Gold / Dark" in catalog.data
+    assert b"Red / Light" in catalog.data
+    assert b"Blue / Green" in catalog.data
 
 
 def test_german_login_page(tmp_path: Path):

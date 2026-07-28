@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}Admin — Users — {{ site_name }}{% endblock %}
+{% block title %}{{ _('Admin') }} — {{ _('Users') }} — {{ site_name }}{% endblock %}
 {% block content %}
 <section class="catalog-page admin-users-page">
   <header class="catalog-header">
-    <h1>Users</h1>
-    <p class="catalog-meta">Create accounts, restrict access, and reset passwords. Only one master is allowed.</p>
+    <h1>{{ _('Users') }}</h1>
+    <p class="catalog-meta">{{ _('Create accounts, restrict access, and reset passwords. Only one master is allowed.') }}</p>
   </header>
 
   {% if message %}
@@ -15,41 +15,41 @@
   {% endif %}
 
   <section class="catalog-section admin-users-create-section">
-    <h2>Create user</h2>
+    <h2>{{ _('Create user') }}</h2>
     <form method="post" action="{{ url_for('admin_users') }}" class="admin-users-create-form">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label class="admin-users-field">
-        <span class="admin-users-label">Username</span>
+        <span class="admin-users-label">{{ _('Username') }}</span>
         <input type="text" name="username" required autocomplete="off">
       </label>
       <label class="admin-users-field">
-        <span class="admin-users-label">Password</span>
+        <span class="admin-users-label">{{ _('Password') }}</span>
         <input type="password" name="password" required autocomplete="new-password">
       </label>
       <label class="admin-users-field admin-users-field--role">
-        <span class="admin-users-label">Role</span>
+        <span class="admin-users-label">{{ _('Role') }}</span>
         <select name="role">
           <option value="user" selected>user</option>
           <option value="manager">manager</option>
         </select>
       </label>
       <div class="admin-users-create-submit">
-        <button type="submit" class="btn-watch">Create</button>
+        <button type="submit" class="btn-watch">{{ _('Create') }}</button>
       </div>
     </form>
   </section>
 
   <section class="catalog-section">
-    <h2>Accounts</h2>
+    <h2>{{ _('Accounts') }}</h2>
     <div class="admin-users-table-wrap">
       <table class="admin-users-table">
         <thead>
           <tr>
-            <th>Username</th>
-            <th>Role</th>
-            <th>Restricted</th>
+            <th>{{ _('Username') }}</th>
+            <th>{{ _('Role') }}</th>
+            <th>{{ _('Restricted') }}</th>
             <th>MAL</th>
-            <th>Actions</th>
+            <th>{{ _('Actions') }}</th>
           </tr>
         </thead>
         <tbody>
@@ -58,25 +58,25 @@
           <tr>
             <td>{{ u.username }}{% if u.display_name and u.display_name != u.username %} <span class="catalog-meta">({{ u.display_name }})</span>{% endif %}</td>
             <td>{{ u.role }}</td>
-            <td>{% if u.restricted %}Yes{% else %}No{% endif %}</td>
-            <td>{% if row.mal_connected %}Connected{% else %}—{% endif %}</td>
+            <td>{% if u.restricted %}{{ _('Yes') }}{% else %}{{ _('No') }}{% endif %}</td>
+            <td>{% if row.mal_connected %}{{ _('Connected') }}{% else %}—{% endif %}</td>
             <td class="admin-users-actions">
-              <form method="post" action="{{ url_for('admin_users_reset_password', user_id=u.id) }}" class="admin-users-inline-form admin-users-reset-form">
+              <form method="post" action="{{ url_for('admin_users_reset_password', user_id=u.id) }}" class="admin-users-inline-form admin-users-reset-form" data-confirm="Reset password for “{{ u.username }}”?\n\nThey will need the new password to sign in.">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="password" name="password" placeholder="New password" required autocomplete="new-password">
-                <button type="submit" class="btn-detail">Reset password</button>
+                <input type="password" name="password" placeholder="{{ _('New password') }}" required autocomplete="new-password">
+                <button type="submit" class="btn-detail">{{ _('Reset password') }}</button>
               </form>
               <span class="admin-users-actions-spacer" aria-hidden="true"></span>
               {% if u.role != 'master' %}
                 {% if u.restricted %}
-                <form method="post" action="{{ url_for('admin_users_unrestrict', user_id=u.id) }}" class="admin-users-inline-form admin-users-restrict-form">
+                <form method="post" action="{{ url_for('admin_users_unrestrict', user_id=u.id) }}" class="admin-users-inline-form admin-users-restrict-form" data-confirm="Unrestrict “{{ u.username }}”?\n\nThey will be able to sign in again.">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  <button type="submit" class="btn-detail">Unrestrict</button>
+                  <button type="submit" class="btn-detail">{{ _('Unrestrict') }}</button>
                 </form>
                 {% else %}
-                <form method="post" action="{{ url_for('admin_users_restrict', user_id=u.id) }}" class="admin-users-inline-form admin-users-restrict-form">
+                <form method="post" action="{{ url_for('admin_users_restrict', user_id=u.id) }}" class="admin-users-inline-form admin-users-restrict-form" data-confirm="Restrict “{{ u.username }}”?\n\nThey will not be able to sign in until unrestricted.">
                   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                  <button type="submit" class="btn-detail">Restrict</button>
+                  <button type="submit" class="btn-detail">{{ _('Restrict') }}</button>
                 </form>
                 {% endif %}
               {% endif %}
@@ -88,4 +88,17 @@
     </div>
   </section>
 </section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.querySelectorAll('form[data-confirm]').forEach((form) => {
+    form.addEventListener('submit', (event) => {
+      const msg = form.getAttribute('data-confirm');
+      if (msg && !confirm(msg)) {
+        event.preventDefault();
+      }
+    });
+  });
+</script>
 {% endblock %}

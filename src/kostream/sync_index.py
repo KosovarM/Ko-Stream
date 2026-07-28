@@ -115,17 +115,34 @@ def set_skip(
     *,
     index_path: Path | None = None,
 ) -> None:
+    set_skip_bulk([mal_id], section, skip, index_path=index_path)
+
+
+def set_skip_bulk(
+    mal_ids: list[int],
+    section: IndexSection,
+    skip: bool,
+    *,
+    index_path: Path | None = None,
+) -> int:
+    """Update skip flags for many mal_ids in one read/write. Returns count updated."""
     if section in ("anime_sync", "episode_titles"):
         entries = load_anime_index(index_path)
         save = save_anime_index
     else:
         entries = load_manga_index(index_path)
         save = save_manga_index
-    key = str(int(mal_id))
-    rec = entries.setdefault(key, {})
-    rec[_SKIP_FIELD[section]] = bool(skip)
-    rec["updated_at"] = _now_iso()
-    save(entries, index_path)
+    field = _SKIP_FIELD[section]
+    now = _now_iso()
+    skip_val = bool(skip)
+    for mal_id in mal_ids:
+        key = str(int(mal_id))
+        rec = entries.setdefault(key, {})
+        rec[field] = skip_val
+        rec["updated_at"] = now
+    if mal_ids:
+        save(entries, index_path)
+    return len(mal_ids)
 
 
 def anime_sync_status(show: Show, mal_id: int) -> tuple[bool, str]:

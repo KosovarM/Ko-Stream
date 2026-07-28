@@ -48,3 +48,27 @@ def test_resolve_poster_stays_under_root(tmp_path: Path):
     found = _resolve_local_poster(root, "demo")
     assert found is not None
     assert found.resolve() == poster.resolve()
+
+
+def test_resolve_accepts_nested_relative(tmp_path: Path):
+    root = tmp_path / "media"
+    show = root / "Demo Show"
+    nested = show / "Season 01"
+    nested.mkdir(parents=True)
+    ep = nested / "S01E01.mp4"
+    ep.write_bytes(b"video")
+    found = _resolve_local_path(root, "demo-show", "Season 01/S01E01.mp4")
+    assert found is not None
+    assert found.resolve() == ep.resolve()
+
+
+def test_resolve_serves_sibling_vtt(tmp_path: Path):
+    root = tmp_path / "media"
+    show = root / "Demo Show"
+    show.mkdir(parents=True)
+    (show / "S01E01.mp4").write_bytes(b"video")
+    vtt = show / "S01E01.en.vtt"
+    vtt.write_text("WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHi\n", encoding="utf-8")
+    found = _resolve_local_path(root, "demo-show", "S01E01.en.vtt")
+    assert found is not None
+    assert found.resolve() == vtt.resolve()

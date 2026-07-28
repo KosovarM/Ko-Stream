@@ -137,9 +137,10 @@
   <div class="browse-empty">
     <p class="empty">{{ _('No titles match your filters.') }}</p>
     {% if query or selected_genre or selected_studio or selected_avail != 'all' %}
-    <a href="{{ url_for(browse_endpoint, avail='all', scope=scope_arg) }}" class="btn-browse-secondary">{{ _('Show all titles') }}</a>
+    <a href="{{ url_for(browse_endpoint, avail='all', scope=scope_arg) }}" class="btn-browse-secondary">{{ _('Clear filters') }}</a>
     {% else %}
-    <p class="browse-empty-hint">{{ _('Add shows in Library or connect MyAnimeList to populate your library.') }}</p>
+    <p class="browse-empty-hint">{{ _('Add shows in Catalog or connect MyAnimeList to populate your library.') }}</p>
+    <a href="{{ url_for('catalog_page') }}" class="btn-browse-secondary">{{ _('Go to Catalog') }}</a>
     {% endif %}
   </div>
   {% endif %}

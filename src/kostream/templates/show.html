@@ -21,38 +21,55 @@
         <span class="tag tag-icon">▶ {{ show.type_label }}</span>
         <span class="tag">{{ show.episode_count }} EP</span>
         {% if show.is_metadata_only and grab_enabled %}
-        <span class="tag tag-meta">Test stream</span>
+        <span class="tag tag-meta">{{ _('Test stream') }}</span>
         {% elif show.is_metadata_only %}
-        <span class="tag tag-meta">Metadata only</span>
+        <span class="tag tag-meta">{{ _('Metadata only') }}</span>
         {% endif %}
         {% if show.mean_score %}
         <span class="tag tag-score">★ {{ '%.2f'|format(show.mean_score) }} MAL</span>
         {% endif %}
         {% if show.release_year %}<span class="tag tag-year">{{ show.release_year }}</span>{% endif %}
-        {% if show.user_score %}
-        <span class="tag tag-my-score">Your score: {{ show.user_score }}/10</span>
-        {% endif %}
-        {% if show.episodes_watched %}
-        <span class="tag">{{ show.episodes_watched }} watched</span>
-        {% endif %}
         {% if show.anime_status == 'currently_airing' %}
-        <span class="tag tag-airing">Airing</span>
+        <span class="tag tag-airing">{{ _('Airing') }}</span>
         {% endif %}
       </div>
+      {% set watched = show.episodes_watched or 0 %}
+      {% set total_eps = show.episode_count or 0 %}
+      {% if total_eps > 0 %}
+      {% set pct = ((watched * 100) / total_eps)|round|int %}
+      {% if pct > 100 %}{% set pct = 100 %}{% endif %}
+      <div class="show-progress" aria-label="{{ _('Progress') }}: {{ pct }}%">
+        <div class="show-progress-track">
+          <div class="show-progress-bar" style="width: {{ pct }}%"></div>
+        </div>
+        <span class="show-progress-label">{{ watched }}/{{ total_eps }} · {{ pct }}% {{ _('watched') }}</span>
+      </div>
+      {% elif show.episodes_watched %}
+      <div class="meta-tags">
+        <span class="tag">{{ show.episodes_watched }} {{ _('watched') }}</span>
+      </div>
+      {% endif %}
       {% if show.genres %}
       <div class="meta-tags meta-tags-genres">
         {% for g in show.genres[:4] %}<span class="tag genre">{{ g }}</span>{% endfor %}
       </div>
       {% endif %}
-      <p class="detail-desc">{{ show.description }}</p>
+      {% if show.description %}
+      <div class="synopsis-block" data-synopsis>
+        <div class="synopsis-panel">
+          <p class="detail-desc synopsis-text">{{ show.description }}</p>
+          <button type="button" class="synopsis-toggle" hidden data-more="{{ _('Show more') }}" data-less="{{ _('Show less') }}">{{ _('Show more') }}</button>
+        </div>
+      </div>
+      {% endif %}
       {% if show.is_metadata_only and grab_enabled %}
-      <p class="meta-only-hint">No available files — use Grab for streams.</p>
+      <p class="meta-only-hint">{{ _('No available files — use Grab for streams.') }}</p>
       {% elif show.is_metadata_only %}
-      <p class="meta-only-hint">No available video files yet.</p>
+      <p class="meta-only-hint">{{ _('No available video files yet.') }}</p>
       {% endif %}
       {% if next_ep and (not show.is_metadata_only or grab_enabled) %}
       <a class="btn-watch" href="{{ url_for('watch', show_id=show.id, episode_id=next_ep.id) }}">
-        ▶ {% if show.episodes_watched %}Continue{% else %}Watch Now{% endif %} · EP {{ next_ep.number }}
+        ▶ {% if show.episodes_watched %}{{ _('Continue') }}{% else %}{{ _('Watch Now') }}{% endif %} · EP {{ next_ep.number }}
       </a>
       {% elif next_ep and show.is_metadata_only %}
       <a class="btn-detail" href="{{ url_for('watch', show_id=show.id, episode_id=next_ep.id) }}">
@@ -91,7 +108,7 @@
         data-recommended="{% if user_recommended_this %}1{% else %}0{% endif %}"
         data-blocked="{% if recommend_blocked_all_completed %}1{% else %}0{% endif %}"
         {% if recommend_blocked_all_completed and not user_recommended_this %}disabled aria-disabled="true"{% endif %}
-      >{% if user_recommended_this %}Remove recommendation{% else %}↻ Recommend{% endif %}</button>
+      >      {% if user_recommended_this %}{{ _('Remove recommendation') }}{% else %}↻ {{ _('Recommend') }}{% endif %}</button>
       {% if recommend_blocked_all_completed and not user_recommended_this %}
       <span class="recommend-blocked-hint" id="recommend-blocked-hint">{{ recommend_blocked_reason }}</span>
       {% else %}
@@ -99,7 +116,7 @@
       {% endif %}
       {% if show.mal_id %}
       <div class="mal-list-status">
-        <label for="mal-list-status-select" class="mal-list-status-label">MAL list status</label>
+        <label for="mal-list-status-select" class="mal-list-status-label">{{ _('MAL list status') }}</label>
         {% if mal_connected %}
         <select
           id="mal-list-status-select"
@@ -112,13 +129,55 @@
           {% endif %}
           <option value="plan_to_watch"{% if show.list_status == 'plan_to_watch' %} selected{% endif %}>Planned to Watch</option>
           <option value="watching"{% if show.list_status == 'watching' %} selected{% endif %}>Watching</option>
-          <option value="completed"{% if show.list_status == 'completed' %} selected{% endif %}>Completed</option>
+          <option value="completed"{% if show.list_status == 'completed' %} selected{% endif %}>{{ _('Completed') }}</option>
           <option value="dropped"{% if show.list_status == 'dropped' %} selected{% endif %}>Dropped</option>
           <option value="on_hold"{% if show.list_status == 'on_hold' %} selected{% endif %}>On-Hold</option>
         </select>
         <span id="mal-list-status-msg" class="mal-list-status-msg" hidden></span>
         {% else %}
-        <p class="mal-list-status-hint">Connect MAL to set list status.</p>
+        <p class="mal-list-status-hint">{{ _('Connect MAL to set list status.') }}</p>
+        {% endif %}
+      </div>
+      <div class="mal-user-score" {% if mal_connected %}id="mal-user-score"{% endif %}>
+        <span class="mal-list-status-label" id="mal-user-score-label">{{ _('Your rating') }}</span>
+        {% if mal_connected %}
+        {% set current_score = show.user_score or 0 %}
+        <div
+          class="mal-score-stars"
+          id="mal-score-stars"
+          role="radiogroup"
+          aria-labelledby="mal-user-score-label"
+          data-show-id="{{ show.id }}"
+          data-score="{{ current_score }}"
+        >
+          {% for n in range(1, 11) %}
+          <button
+            type="button"
+            class="mal-score-star{% if current_score >= n %} is-active{% endif %}"
+            role="radio"
+            aria-checked="{{ 'true' if current_score == n else 'false' }}"
+            data-score="{{ n }}"
+            aria-label="{{ n }}/10"
+            title="{{ n }}/10"
+          >★</button>
+          {% endfor %}
+          <button
+            type="button"
+            class="mal-score-clear"
+            id="mal-score-clear"
+            {% if not current_score %}hidden{% endif %}
+            title="{{ _('Clear rating') }}"
+          >{{ _('Clear') }}</button>
+        </div>
+        <span class="mal-score-value" id="mal-score-value"{% if not current_score %} hidden{% endif %}>
+          <span id="mal-score-number">{{ current_score }}</span>/10
+        </span>
+        <span id="mal-score-msg" class="mal-list-status-msg" hidden></span>
+        {% else %}
+        {% if show.user_score %}
+        <p class="mal-list-status-hint">{{ _('Your score:') }} {{ show.user_score }}/10</p>
+        {% endif %}
+        <p class="mal-list-status-hint">{{ _('Connect MAL to rate this title.') }}</p>
         {% endif %}
       </div>
       {% endif %}
@@ -141,12 +200,12 @@
 <section class="section detail-episodes">
   <p class="local-media-msg" id="local-media-msg" hidden></p>
   <div class="detail-episodes-head">
-    <h2 class="section-title">Episodes</h2>
+    <h2 class="section-title">{{ _('Episodes') }}</h2>
     {% set show_done = show.list_status == 'completed' or (show.episode_count and show.episodes_watched >= show.episode_count) or (not next_ep and show.episodes) %}
     {% if not show_done %}
-    <button type="button" class="btn-detail" id="btn-complete-all">Already completed</button>
+    <button type="button" class="btn-detail" id="btn-complete-all">{{ _('Already completed') }}</button>
     {% else %}
-    <span class="tag tag-completed-show">Completed</span>
+    <span class="tag tag-completed-show">{{ _('Completed') }}</span>
     {% endif %}
   </div>
 
@@ -188,11 +247,11 @@
         <span class="ep-badge ep-stream-badge">{{ _('Stream only')|lower }}</span>
         {% endif %}
         {% if done %}
-        <span class="ep-badge ep-completed-badge">✓ Completed</span>
+        <span class="ep-badge ep-completed-badge">✓ {{ _('Completed') }}</span>
+        {% elif episode_in_progress(show, ep, progress, completed) %}
+        <span class="ep-badge ep-progress-badge" title="{{ _('Continue watching') }}">{{ format_episode_progress(progress.get(ep.id)) }}</span>
         {% elif is_next %}
-        <span class="ep-badge ep-next-badge">▶ Next</span>
-        {% elif progress.get(ep.id) %}
-        <span class="ep-progress">Resume</span>
+        <span class="ep-badge ep-next-badge">▶ {{ _('Next') }}</span>
         {% endif %}
       </a>
       {% if not done %}
@@ -201,7 +260,7 @@
         class="ep-mark-btn"
         data-show-id="{{ show.id }}"
         data-episode-id="{{ ep.id }}"
-        title="Mark as watched{% if mal_connected %} and sync to MAL{% endif %}"
+        title="{% if mal_connected %}{{ _('Mark as watched and sync to MAL') }}{% else %}{{ _('Mark as watched') }}{% endif %}"
       >✓</button>
       {% endif %}
     </div>
@@ -234,6 +293,28 @@
 
 {% block scripts %}
 <script>
+  (function () {
+    document.querySelectorAll('[data-synopsis]').forEach((block) => {
+      const text = block.querySelector('.synopsis-text');
+      const btn = block.querySelector('.synopsis-toggle');
+      if (!text || !btn) return;
+      const needsToggle = text.scrollHeight > text.clientHeight + 2;
+      if (!needsToggle) return;
+      btn.hidden = false;
+      btn.addEventListener('click', () => {
+        const willOpen = !block.classList.contains('is-expanded');
+        if (willOpen) {
+          block.style.minHeight = `${block.offsetHeight}px`;
+        }
+        const open = block.classList.toggle('is-expanded');
+        if (!open) {
+          block.style.minHeight = '';
+        }
+        btn.textContent = open ? (btn.dataset.less || 'Show less') : (btn.dataset.more || 'Show more');
+      });
+    });
+  })();
+
   const showId = {{ show.id | tojson }};
   const localMsg = document.getElementById('local-media-msg');
 
@@ -333,6 +414,101 @@
         malStatusSelect.disabled = false;
       }
     });
+  }
+
+  const scoreRoot = document.getElementById('mal-score-stars');
+  const scoreMsg = document.getElementById('mal-score-msg');
+  const scoreValue = document.getElementById('mal-score-value');
+  const scoreNumber = document.getElementById('mal-score-number');
+  const scoreClear = document.getElementById('mal-score-clear');
+  if (scoreRoot) {
+    let lastScore = Number(scoreRoot.dataset.score || 0) || 0;
+    let saving = false;
+
+    function paintScore(score) {
+      scoreRoot.dataset.score = String(score);
+      scoreRoot.querySelectorAll('.mal-score-star').forEach((btn) => {
+        const n = Number(btn.dataset.score);
+        const on = score >= n;
+        btn.classList.toggle('is-active', on);
+        btn.setAttribute('aria-checked', score === n ? 'true' : 'false');
+      });
+      if (scoreValue) scoreValue.hidden = score <= 0;
+      if (scoreNumber) scoreNumber.textContent = String(score);
+      if (scoreClear) scoreClear.hidden = score <= 0;
+    }
+
+    async function saveScore(score) {
+      if (saving) return;
+      saving = true;
+      scoreRoot.classList.add('is-saving');
+      if (scoreMsg) {
+        scoreMsg.hidden = true;
+        scoreMsg.textContent = '';
+        scoreMsg.classList.remove('is-error');
+      }
+      const prev = lastScore;
+      paintScore(score);
+      try {
+        const resp = await fetch('{{ url_for("api_show_mal_score") }}', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            show_id: scoreRoot.dataset.showId || showId,
+            score,
+          }),
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          paintScore(prev);
+          if (scoreMsg) {
+            scoreMsg.textContent = data.error || 'Could not update MAL score.';
+            scoreMsg.classList.add('is-error');
+            scoreMsg.hidden = false;
+          }
+          return;
+        }
+        lastScore = Number(data.score) || 0;
+        paintScore(lastScore);
+        if (scoreMsg) {
+          scoreMsg.textContent = 'Saved.';
+          scoreMsg.classList.remove('is-error');
+          scoreMsg.hidden = false;
+        }
+      } catch (_) {
+        paintScore(prev);
+        if (scoreMsg) {
+          scoreMsg.textContent = 'Could not update MAL score.';
+          scoreMsg.classList.add('is-error');
+          scoreMsg.hidden = false;
+        }
+      } finally {
+        saving = false;
+        scoreRoot.classList.remove('is-saving');
+      }
+    }
+
+    scoreRoot.querySelectorAll('.mal-score-star').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const n = Number(btn.dataset.score);
+        if (!n) return;
+        // Clicking the current score clears it (MAL score 0).
+        saveScore(n === lastScore ? 0 : n);
+      });
+      btn.addEventListener('mouseenter', () => {
+        if (saving) return;
+        const hover = Number(btn.dataset.score) || 0;
+        scoreRoot.querySelectorAll('.mal-score-star').forEach((star) => {
+          star.classList.toggle('is-preview', hover >= Number(star.dataset.score));
+        });
+      });
+    });
+    scoreRoot.addEventListener('mouseleave', () => {
+      scoreRoot.querySelectorAll('.mal-score-star').forEach((star) => {
+        star.classList.remove('is-preview');
+      });
+    });
+    scoreClear?.addEventListener('click', () => saveScore(0));
   }
   {% endif %}
 

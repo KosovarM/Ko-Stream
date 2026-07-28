@@ -15,6 +15,7 @@ from kostream.sync_index import (
     refresh_anime_index,
     save_anime_index,
     set_skip,
+    set_skip_bulk,
     should_skip,
     skipped_mal_ids,
 )
@@ -79,6 +80,20 @@ def test_set_skip_and_skipped_mal_ids(tmp_path):
     assert should_skip(42, "anime_sync", index_path=index_path)
     assert 42 in skipped_mal_ids("anime_sync", index_path=index_path)
     assert 43 in skipped_mal_ids("episode_titles", index_path=index_path)
+
+
+def test_set_skip_bulk_updates_all_entries(tmp_path):
+    index_path = tmp_path / "animes.json"
+    set_skip_bulk([10, 11, 12], "anime_sync", True, index_path=index_path)
+    entries = load_anime_index(index_path)
+    assert entries["10"]["skip_anime_sync"] is True
+    assert entries["11"]["skip_anime_sync"] is True
+    assert entries["12"]["skip_anime_sync"] is True
+    set_skip_bulk([10, 12], "anime_sync", False, index_path=index_path)
+    entries = load_anime_index(index_path)
+    assert entries["10"]["skip_anime_sync"] is False
+    assert entries["11"]["skip_anime_sync"] is True
+    assert entries["12"]["skip_anime_sync"] is False
 
 
 def test_anime_sync_status_complete(tmp_path, monkeypatch):
@@ -234,3 +249,53 @@ def test_api_sync_index_list_and_update(tmp_path):
     assert resp2.status_code == 200
     assert resp2.get_json()["skip"] is True
     assert load_anime_index(anime_index)["5"]["skip_anime_sync"] is True
+
+
+def test_api_sync_index_bulk_update(tmp_path):
+    from kostream.app import create_app
+
+    from conftest import bootstrap_test_users, login_client
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(id="mal-1", enabled=True, source="mal", mal_id=1, title="One"),
+                CatalogEntry(id="mal-2", enabled=True, source="mal", mal_id=2, title="Two"),
+                CatalogEntry(id="mal-3", enabled=True, source="mal", mal_id=3, title="Three"),
+            ]
+        ),
+        catalog_path,
+    )
+    anime_index = tmp_path / "animes.json"
+    save_anime_index({}, anime_index)
+
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    app = create_app(
+        catalog_path=catalog_path,
+        media_root=tmp_path / "anime",
+        manga_root=tmp_path / "manga",
+        manga_catalog_path=tmp_path / "manga.json",
+        requests_path=tmp_path / "requests.json",
+        users_path=users,
+        user_data_base=user_data,
+    )
+    app.config["ANIME_SYNC_INDEX_PATH"] = anime_index
+    app.config["MANGA_SYNC_INDEX_PATH"] = tmp_path / "mangas.json"
+    client = app.test_client()
+    login_client(client)
+
+    resp = client.post(
+        "/api/sync-index",
+        json={"section": "anime_sync", "mal_ids": [1, 2, 3], "skip": True},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["updated"] == 3
+    entries = load_anime_index(anime_index)
+    assert entries["1"]["skip_anime_sync"] is True
+    assert entries["2"]["skip_anime_sync"] is True
+    assert entries["3"]["skip_anime_sync"] is True

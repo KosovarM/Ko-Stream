@@ -11,6 +11,7 @@ from kostream.mal import (
     MalTokens,
     get_anime_list_row,
     save_tokens,
+    update_anime_list_score,
     update_anime_list_status,
 )
 from kostream.users import find_user_by_username, load_users
@@ -178,10 +179,111 @@ def test_api_show_mal_status_rejects_invalid_status(tmp_path, monkeypatch):
     assert resp.get_json()["ok"] is False
 
 
+def test_update_anime_list_score_patches_and_upserts(tmp_path, monkeypatch):
+    from kostream import mal as mal_mod
+
+    monkeypatch.setattr(mal_mod, "MAL_DATA_DIR", tmp_path / "mal")
+    save_tokens(
+        "u_test",
+        MalTokens("tok", "ref", expires_at=9_999_999_999, username="TestMAL"),
+    )
+    sent: list[tuple[str, dict[str, str], str]] = []
+
+    def fake_api(token, path, form, method="POST"):
+        sent.append((path, dict(form), method))
+        return None
+
+    monkeypatch.setattr(mal_mod, "get_valid_access_token", lambda cfg, user_id: "tok")
+    monkeypatch.setattr(mal_mod, "_api_form_raw", fake_api)
+
+    cfg = MagicMock()
+    row = update_anime_list_score(cfg, 21, 8, user_id="u_test")
+    assert row["score"] == 8
+    assert get_anime_list_row("u_test", 21)["score"] == 8
+    assert sent == [("/anime/21/my_list_status", {"score": "8"}, "PATCH")]
+
+
+def test_update_anime_list_score_rejects_out_of_range(monkeypatch, tmp_path):
+    from kostream import mal as mal_mod
+
+    monkeypatch.setattr(mal_mod, "MAL_DATA_DIR", tmp_path / "mal")
+    monkeypatch.setattr(mal_mod, "get_valid_access_token", lambda cfg, user_id: "tok")
+    called = []
+    monkeypatch.setattr(
+        mal_mod, "_api_form_raw", lambda *a, **k: called.append(True)
+    )
+    cfg = MagicMock()
+    try:
+        update_anime_list_score(cfg, 21, 11, user_id="u_test")
+        assert False, "expected MalError"
+    except mal_mod.MalError as exc:
+        assert "Invalid" in str(exc)
+    assert not called
+
+
+def test_api_show_mal_score_updates_overlay(tmp_path, monkeypatch):
+    app, users, mal_mod = _app_with_mal_show(tmp_path, monkeypatch)
+    uid = _connect_mal(users)
+    sent: list[dict[str, str]] = []
+
+    monkeypatch.setattr(mal_mod, "get_valid_access_token", lambda cfg, user_id: "tok")
+
+    def fake_api(token, path, form, method="POST"):
+        sent.append(dict(form))
+        return None
+
+    monkeypatch.setattr(mal_mod, "_api_form_raw", fake_api)
+
+    client = app.test_client()
+    login_client(client)
+    resp = client.post(
+        "/api/show/mal-score",
+        json={"show_id": "demo-show", "score": 9},
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["score"] == 9
+    assert data["mal_id"] == 21
+    assert sent == [{"score": "9"}]
+    assert get_anime_list_row(uid, 21)["score"] == 9
+
+
+def test_api_show_mal_score_clear_and_validation(tmp_path, monkeypatch):
+    app, users, mal_mod = _app_with_mal_show(tmp_path, monkeypatch)
+    uid = _connect_mal(users)
+    monkeypatch.setattr(mal_mod, "get_valid_access_token", lambda cfg, user_id: "tok")
+    monkeypatch.setattr(mal_mod, "_api_form_raw", lambda *a, **k: None)
+
+    client = app.test_client()
+    login_client(client)
+    ok = client.post("/api/show/mal-score", json={"show_id": "demo-show", "score": 0})
+    assert ok.status_code == 200
+    assert ok.get_json()["score"] == 0
+    assert get_anime_list_row(uid, 21)["score"] == 0
+
+    bad = client.post("/api/show/mal-score", json={"show_id": "demo-show", "score": 12})
+    assert bad.status_code == 400
+    assert bad.get_json()["ok"] is False
+
+
+def test_api_show_mal_score_requires_mal_connection(tmp_path, monkeypatch):
+    app, _users, _mal_mod = _app_with_mal_show(tmp_path, monkeypatch)
+    client = app.test_client()
+    login_client(client)
+    resp = client.post(
+        "/api/show/mal-score",
+        json={"show_id": "demo-show", "score": 7},
+    )
+    assert resp.status_code == 400
+    assert resp.get_json()["ok"] is False
+    assert "MAL" in resp.get_json()["error"]
+
+
 def test_show_page_includes_status_control_when_connected(tmp_path, monkeypatch):
     app, users, mal_mod = _app_with_mal_show(tmp_path, monkeypatch)
     uid = _connect_mal(users)
-    mal_mod.upsert_anime_list_row(uid, 21, list_status="plan_to_watch")
+    mal_mod.upsert_anime_list_row(uid, 21, list_status="plan_to_watch", score=7)
 
     client = app.test_client()
     login_client(client)
@@ -192,6 +294,10 @@ def test_show_page_includes_status_control_when_connected(tmp_path, monkeypatch)
     assert "MAL list status" in html
     assert "Planned to Watch" in html
     assert 'value="plan_to_watch"' in html
+    assert 'id="mal-score-stars"' in html
+    assert "Your rating" in html
+    assert 'data-score="7"' in html
+    assert "/api/show/mal-score" in html
 
 
 def test_show_page_hides_control_without_mal_id(tmp_path, monkeypatch):
@@ -203,6 +309,7 @@ def test_show_page_hides_control_without_mal_id(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert b'id="mal-list-status-select"' not in resp.data
     assert b"MAL list status" not in resp.data
+    assert b'id="mal-score-stars"' not in resp.data
 
 
 def test_show_page_hint_when_mal_not_connected(tmp_path, monkeypatch):
@@ -213,3 +320,4 @@ def test_show_page_hint_when_mal_not_connected(tmp_path, monkeypatch):
     assert resp.status_code == 200
     assert b'id="mal-list-status-select"' not in resp.data
     assert b"Connect MAL" in resp.data
+    assert b"Connect MAL to rate this title." in resp.data

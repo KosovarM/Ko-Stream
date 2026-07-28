@@ -191,7 +191,7 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
     ),
     "KonoSuba__God_s_Blessing_on_This_Wonderful_World__3_OVA_sub": (
         "KonoSuba Season 3 OVA",
-        "mal-55701",
+        "mal-59833",
     ),
     "Chainsaw_Man_sub": ("Chainsaw Man", "mal-44511"),
     "Code_Geass__Lelouch_of_the_Rebellion_sub": (
@@ -259,9 +259,193 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
     "Kiki_s_Delivery_Service_sub": ("Kikis Delivery Service", "mal-512"),
     "Howl_s_Moving_Castle_sub": ("Howls Moving Castle", "mal-431"),
     "Castle_in_the_Sky_sub": ("Castle in the Sky", "mal-513"),
+    # --- 2026-07-28 missing inbox mappings ---
+    "Ao_no_Exorcist__Ura_Ex_sub": ("Blue Exorcist Ura Ex", None),
+    "Blood_Lad_sub": ("Blood Lad", None),
+    "Blue_Exorcist_sub": ("Blue Exorcist", None),
+    "Blue_Exorcist_The_Movie_sub": ("Blue Exorcist The Movie", None),
+    "Blue_Exorcist__Beyond_the_Snow_Saga_sub": (
+        "Blue Exorcist Beyond the Snow Saga",
+        None,
+    ),
+    "Blue_Exorcist__Kyoto_Saga_sub": ("Blue Exorcist Kyoto Saga", None),
+    "Blue_Exorcist__Shimane_Illuminati_Saga_sub": (
+        "Blue Exorcist Shimane Illuminati Saga",
+        None,
+    ),
+    "Blue_Exorcist__The_Blue_Night_Saga_sub": (
+        "Blue Exorcist The Blue Night Saga",
+        None,
+    ),
+    "Chainsaw_Man_the_Movie__Reze_Arc_sub": (
+        "Chainsaw Man The Movie Reze Arc",
+        None,
+    ),
+    "Demon_Slayer_Movie__Mugen_Train_sub": (
+        "Demon Slayer Mugen Train Movie",
+        "mal-40456",
+    ),
+    "Demon_Slayer__Entertainment_District_Arc_sub": (
+        "Demon Slayer Entertainment District Arc",
+        "mal-47778",
+    ),
+    "Demon_Slayer__Kimetsu_no_Yaiba_Hashira_Training_Arc_sub": (
+        "Demon Slayer Hashira Training Arc",
+        "mal-55701",
+    ),
+    "Demon_Slayer__Kimetsu_no_Yaiba_Infinity_Castle_sub": (
+        "Demon Slayer Infinity Castle",
+        "mal-59192",
+    ),
+    "Demon_Slayer__Kimetsu_no_Yaiba_Swordsmith_Village_Arc_sub": (
+        "Demon Slayer Swordsmith Village Arc",
+        "mal-51019",
+    ),
+    "Demon_Slayer__Kimetsu_no_Yaiba___To_the_Swordsmith_Village_sub": (
+        "Demon Slayer To the Swordsmith Village",
+        None,
+    ),
+    "Demon_Slayer__Kimetsu_no_Yaiba_sub": (
+        "Demon Slayer Kimetsu no Yaiba",
+        "mal-38000",
+    ),
+    "Dragon_Ball_Super__Broly_sub": ("Dragon Ball Super Broly", None),
+    "Dragon_Ball_Super__Super_Hero_sub": ("Dragon Ball Super Super Hero", None),
+    "Fate_Apocrypha_sub": ("Fate Apocrypha", None),
+    "Fate_Extra__Last_Encore___Illustrias_Tendousetsu_sub": (
+        "Fate Extra Last Encore Illustrias Tendousetsu",
+        None,
+    ),
+    "Fate_Extra__Last_Encore_sub": ("Fate Extra Last Encore", None),
+    "Fate_Grand_Carnival_sub": ("Fate Grand Carnival", None),
+    "Fate_kaleid_liner_Prisma_Illya__Vow_in_the_Snow_sub": (
+        "Fate kaleid liner Prisma Illya Vow in the Snow",
+        None,
+    ),
+    "Fate_strange_Fake_sub": ("Fate strange Fake", None),
+    "JoJo_s_Bizarre_Adventure_sub": ("JoJos Bizarre Adventure", "mal-14719"),
+    "JoJo_s_Bizarre_Adventure_Part_2__Stardust_Crusaders_sub": (
+        "JoJos Bizarre Adventure Stardust Crusaders",
+        "mal-20899",
+    ),
+    "JoJo_s_Bizarre_Adventure_Part_3__Stardust_Crusaders_2nd_Season__Uncensored__sub": (
+        "JoJos Bizarre Adventure Stardust Crusaders 2nd Season",
+        "mal-26055",
+    ),
+    "JoJo_s_Bizarre_Adventure_Part_4__Diamond_is_Unbreakable__Uncensored__sub": (
+        "JoJos Bizarre Adventure Diamond is Unbreakable",
+        "mal-31933",
+    ),
+    "JoJo_s_Bizarre_Adventure_Part_5__Golden_Wind__Uncensored__sub": (
+        "JoJos Bizarre Adventure Golden Wind",
+        "mal-37991",
+    ),
+    "JoJo_s_Bizarre_Adventure_Part_6__Stone_Ocean_sub": (
+        "JoJos Bizarre Adventure Stone Ocean",
+        "mal-48661",
+    ),
+    "JoJo_s_Bizarre_Adventure_Part_6__Stone_Ocean_Part_2_sub": (
+        "JoJos Bizarre Adventure Stone Ocean Part 2",
+        "mal-51367",
+    ),
+    "JoJo_s_Bizarre_Adventure__Stone_Ocean_Part_3_sub": (
+        "JoJos Bizarre Adventure Stone Ocean Part 3",
+        "mal-53273",
+    ),
+    "Jujutsu_Kaisen_0_Movie_sub": ("Jujutsu Kaisen 0 Movie", None),
+    "Jujutsu_Kaisen_2nd_Season_sub": ("Jujutsu Kaisen 2nd Season", None),
+    "Jujutsu_Kaisen_3rd_Season__The_Culling_Game_Part_1_sub": (
+        "Jujutsu Kaisen 3rd Season The Culling Game Part 1",
+        None,
+    ),
+    "Jujutsu_Kaisen__TV__sub": ("Jujutsu Kaisen", None),
+    "Kabaneri_of_the_Iron_Fortress_sub": (
+        "Kabaneri of the Iron Fortress",
+        "mal-28623",
+    ),
+    "Kabaneri_of_the_Iron_Fortress__The_Battle_of_Unato_sub": (
+        "Kabaneri of the Iron Fortress The Battle of Unato",
+        "mal-34544",
+    ),
+    "Koutetsujou_no_Kabaneri_Movie_1__Tsudou_Hikari_sub": (
+        "Kabaneri Movie 1 Tsudou Hikari",
+        "mal-33519",
+    ),
+    "Magi__Adventure_of_Sinbad_sub": ("Magi Adventure of Sinbad", None),
+    "Magi__Sinbad_no_Bouken_sub": ("Magi Sinbad no Bouken", None),
+    "Magi__The_Kingdom_of_Magic_sub": ("Magi The Kingdom of Magic", None),
+    "Mashle__Magic_and_Muscles_sub": ("Mashle Magic and Muscles", None),
+    "My_Hero_Academia_sub": ("My Hero Academia", None),
+    "My_Hero_Academia_2_sub": ("My Hero Academia Season 2", None),
+    "My_Hero_Academia_3_sub": ("My Hero Academia Season 3", None),
+    "My_Hero_Academia_5th_Season_sub": ("My Hero Academia Season 5", None),
+    "My_Hero_Academia_Season_6_sub": ("My Hero Academia Season 6", None),
+    "My_Hero_Academia_Season_7_sub": ("My Hero Academia Season 7", None),
+    "One_Piece_Film__Red_sub": ("One Piece Film Red", None),
+    "One_Piece__The_Movie_13___Film__Gold_sub": ("One Piece Film Gold", None),
+    "One_Piece__The_Movie_14___Stampede_sub": ("One Piece Stampede", None),
+    "Overlord_sub": ("Overlord", "mal-29803"),
+    "Overlord_II_sub": ("Overlord II", "mal-35073"),
+    "Overlord_III_sub": ("Overlord III", "mal-37675"),
+    "Overlord_Movie_1__The_Undead_King_sub": (
+        "Overlord Movie 1 The Undead King",
+        "mal-34161",
+    ),
+    "Overlord_Movie_2__The_Dark_Hero_sub": (
+        "Overlord Movie 2 The Dark Hero",
+        "mal-34428",
+    ),
+    "Pokemon_The_Movie_07__Destiny_Deoxys_sub": ("Pokemon Destiny Deoxys", None),
+    "Pokemon_The_Movie_10__The_Rise_Of_Darkrai_sub": (
+        "Pokemon The Rise of Darkrai",
+        None,
+    ),
+    "Pokemon_The_Movie_12__Arceus_and_the_Jewel_of_Life_sub": (
+        "Pokemon Arceus and the Jewel of Life",
+        None,
+    ),
+    "Pokemon_The_Movie_13__Zoroark__Master_of_Illusions_sub": (
+        "Pokemon Zoroark Master of Illusions",
+        None,
+    ),
+    "Pokemon_the_Movie_14__Black___Victini_and_Reshiram_sub": (
+        "Pokemon Black Victini and Reshiram",
+        None,
+    ),
+    "Pokemon_the_Movie_14__White___Victini_and_Zekrom_sub": (
+        "Pokemon White Victini and Zekrom",
+        None,
+    ),
+    "Pokemon_the_Movie_15__Kyurem_VS__The_Sword_of_Justice_sub": (
+        "Pokemon Kyurem vs The Sword of Justice",
+        None,
+    ),
+    "Pokemon_the_Movie_18__Hoopa_and_the_Clash_of_Ages_sub": (
+        "Pokemon Hoopa and the Clash of Ages",
+        None,
+    ),
+    "Shangri_La_Frontier_sub": ("Shangri-La Frontier", None),
+    "Shangri_La_Frontier_Season_2_sub": ("Shangri-La Frontier Season 2", None),
+    "Shangri_La_Frontier_Special_sub": ("Shangri-La Frontier Special", None),
+    "Steel_Ball_Run__JoJo_s_Bizarre_Adventure_sub": (
+        "Steel Ball Run JoJos Bizarre Adventure",
+        "mal-61469",
+    ),
+    "The_Demon_Slayer__Kimetsu_no_Yaiba_Mugen_Train_Arc_TV_sub": (
+        "Demon Slayer Mugen Train Arc TV",
+        "mal-49926",
+    ),
+    "Tokyo_Ghoul_sub": ("Tokyo Ghoul", None),
+    "Your_Name_sub": ("Your Name", None),
 }
 
 EP_PATTERN = re.compile(r"^(\d+)Ep\.(\w+)$", re.IGNORECASE)
+# Inbox sidecars: ``1Ep.en.vtt``, ``12Ep.vtt``, ``3Ep.de.forced.vtt``
+VTT_PATTERN = re.compile(
+    r"^(\d+)Ep(?:\.([A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*))?\.vtt$",
+    re.IGNORECASE,
+)
+VIDEO_EXTS = {".mp4", ".mkv", ".webm"}
 SKIP_EXT = {".part", ".crdownload"}
 
 
@@ -278,8 +462,25 @@ def parse_episode(filename: str) -> tuple[int, str] | None:
     return int(m.group(1)), f".{m.group(2).lower()}"
 
 
+def parse_vtt_sidecar(filename: str) -> tuple[int, str] | None:
+    """Return ``(episode_number, dest_suffix)`` e.g. ``(1, '.en.vtt')``."""
+    m = VTT_PATTERN.match(filename)
+    if not m:
+        return None
+    ep = int(m.group(1))
+    rest = (m.group(2) or "").strip(".")
+    if rest:
+        return ep, f".{rest.lower()}.vtt"
+    return ep, ".vtt"
+
+
 def target_name(ep: int, ext: str) -> str:
     return f"S01E{ep:02d}{ext}"
+
+
+def _video_exists_for_episode(dest_dir: Path, ep: int) -> bool:
+    stem = f"S01E{ep:02d}"
+    return any((dest_dir / f"{stem}{ext}").is_file() for ext in VIDEO_EXTS)
 
 
 def load_catalog() -> dict:
@@ -391,6 +592,126 @@ def _delete_source(src_file: Path, deleted: list[str], conflicts: list[str]) -> 
         conflicts.append(f"delete failed {src_file}: {err}")
 
 
+def _copy_verified(
+    src_file: Path,
+    dest_file: Path,
+    *,
+    folder_name: str,
+    imported: list[str],
+    skipped: list[str],
+    deleted: list[str],
+    conflicts: list[str],
+    delete_after_copy: bool,
+) -> None:
+    src_size = src_file.stat().st_size
+    if dest_file.exists():
+        if dest_file.stat().st_size == src_size:
+            skipped.append(f"{dest_file.name} ({folder_name})")
+            if delete_after_copy:
+                _delete_source(src_file, deleted, conflicts)
+            return
+        conflicts.append(
+            f"{dest_file.name} in {folder_name}: size mismatch "
+            f"(local {dest_file.stat().st_size} vs {src_size})"
+        )
+        return
+    copied = False
+    last_err: OSError | None = None
+    for attempt in range(5):
+        try:
+            shutil.copy2(src_file, dest_file)
+            copied = True
+            break
+        except OSError as err:
+            last_err = err
+            if attempt < 4:
+                time.sleep(1.5 * (attempt + 1))
+    if not copied:
+        conflicts.append(
+            f"{src_file.name} -> {folder_name}/{dest_file.name}: "
+            f"copy failed ({last_err})"
+        )
+        return
+    try:
+        dest_size = dest_file.stat().st_size
+    except OSError as err:
+        conflicts.append(f"{folder_name}/{dest_file.name}: verify failed ({err})")
+        return
+    if dest_size != src_size:
+        conflicts.append(
+            f"{folder_name}/{dest_file.name}: size verify failed "
+            f"(dest {dest_size} vs src {src_size})"
+        )
+        return
+    imported.append(f"{folder_name}/{dest_file.name}")
+    print(f" + {folder_name}/{dest_file.name}", flush=True)
+    if delete_after_copy:
+        _delete_source(src_file, deleted, conflicts)
+
+
+def import_subtitles(*, delete_after_copy: bool = False) -> dict:
+    """Copy inbox WebVTT sidecars next to matching library episodes.
+
+    Inbox: ``…/<Show>_sub/subs/12Ep.en.vtt`` →
+    ``anime/<Show>/S01E12.en.vtt`` (only when the episode video exists).
+    """
+    imported: list[str] = []
+    skipped: list[str] = []
+    deleted: list[str] = []
+    conflicts: list[str] = []
+    unmapped: list[str] = []
+    no_video: list[str] = []
+
+    MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
+
+    for src_dir in sorted(DOWNLOADS.iterdir()):
+        if not src_dir.is_dir():
+            continue
+        name = src_dir.name
+        if name not in FOLDER_MAP:
+            if any(src_dir.rglob("*.vtt")):
+                unmapped.append(name)
+            continue
+        folder_name, _catalog_id, ep_offset = _map_entry(FOLDER_MAP[name])
+        dest_dir = MEDIA_ROOT / folder_name
+        if not dest_dir.is_dir():
+            conflicts.append(f"{name}: library folder missing ({folder_name})")
+            continue
+
+        for src_file in sorted(src_dir.rglob("*.vtt")):
+            if not src_file.is_file() or src_file.stat().st_size == 0:
+                continue
+            parsed = parse_vtt_sidecar(src_file.name)
+            if not parsed:
+                conflicts.append(f"{src_file}: unknown VTT name")
+                continue
+            ep_num, suffix = parsed
+            ep = ep_num + ep_offset
+            if not _video_exists_for_episode(dest_dir, ep):
+                no_video.append(f"{folder_name}/S01E{ep:02d}{suffix}")
+                continue
+            dest_file = dest_dir / target_name(ep, suffix)
+            _copy_verified(
+                src_file,
+                dest_file,
+                folder_name=folder_name,
+                imported=imported,
+                skipped=skipped,
+                deleted=deleted,
+                conflicts=conflicts,
+                delete_after_copy=delete_after_copy,
+            )
+
+    return {
+        "imported": imported,
+        "skipped": skipped,
+        "deleted": deleted,
+        "conflicts": conflicts,
+        "unmapped": unmapped,
+        "no_video": no_video,
+    }
+
+
 def import_all(*, delete_after_copy: bool = False) -> dict:
     imported: list[str] = []
     skipped: list[str] = []
@@ -420,61 +741,33 @@ def import_all(*, delete_after_copy: bool = False) -> dict:
                 continue
             if src_file.suffix.lower() in SKIP_EXT or src_file.stat().st_size == 0:
                 continue
+            if src_file.suffix.lower() == ".vtt":
+                continue  # handled by import_subtitles (also under subs/)
             parsed = parse_episode(src_file.name)
             if not parsed:
                 conflicts.append(f"{src_file}: unknown episode name")
                 continue
             ep, ext = parsed
+            if ext.lower() not in VIDEO_EXTS:
+                conflicts.append(f"{src_file}: skipped non-video {ext}")
+                continue
             dest_file = dest_dir / target_name(ep + ep_offset, ext)
-            src_size = src_file.stat().st_size
-            if dest_file.exists():
-                if dest_file.stat().st_size == src_size:
-                    skipped.append(str(dest_file.name) + f" ({folder_name})")
-                    # Duplicate in inbox — remove source when requested
-                    if delete_after_copy:
-                        _delete_source(src_file, deleted, conflicts)
-                    continue
-                conflicts.append(
-                    f"{dest_file.name} in {folder_name}: size mismatch "
-                    f"(local {dest_file.stat().st_size} vs {src_size})"
-                )
-                continue
-            copied = False
-            last_err: OSError | None = None
-            for attempt in range(5):
-                try:
-                    shutil.copy2(src_file, dest_file)
-                    copied = True
-                    break
-                except OSError as err:
-                    last_err = err
-                    # WinError 32 / sharing violation — brief retry
-                    if attempt < 4:
-                        time.sleep(1.5 * (attempt + 1))
-            if not copied:
-                conflicts.append(
-                    f"{src_file.name} -> {folder_name}/{dest_file.name}: "
-                    f"copy failed ({last_err})"
-                )
-                continue
-            # Verify size before treating as success / deleting source
-            try:
-                dest_size = dest_file.stat().st_size
-            except OSError as err:
-                conflicts.append(
-                    f"{folder_name}/{dest_file.name}: verify failed ({err})"
-                )
-                continue
-            if dest_size != src_size:
-                conflicts.append(
-                    f"{folder_name}/{dest_file.name}: size verify failed "
-                    f"(dest {dest_size} vs src {src_size})"
-                )
-                continue
-            imported.append(f"{folder_name}/{dest_file.name}")
-            print(f" + {folder_name}/{dest_file.name}", flush=True)
-            if delete_after_copy:
-                _delete_source(src_file, deleted, conflicts)
+            _copy_verified(
+                src_file,
+                dest_file,
+                folder_name=folder_name,
+                imported=imported,
+                skipped=skipped,
+                deleted=deleted,
+                conflicts=conflicts,
+                delete_after_copy=delete_after_copy,
+            )
+
+    subs = import_subtitles(delete_after_copy=delete_after_copy)
+    imported.extend(subs["imported"])
+    skipped.extend(subs["skipped"])
+    deleted.extend(subs["deleted"])
+    conflicts.extend(subs["conflicts"])
 
     return {
         "imported": imported,
@@ -483,6 +776,7 @@ def import_all(*, delete_after_copy: bool = False) -> dict:
         "conflicts": conflicts,
         "unmapped": unmapped,
         "catalog_updates": catalog_updates,
+        "subs_no_video": subs.get("no_video", []),
     }
 
 
@@ -505,6 +799,24 @@ if __name__ == "__main__":
         raise SystemExit(0)
 
     delete_after = "--delete-after-copy" in args
+    if args & {"--subs-only", "subs"}:
+        result = import_subtitles(delete_after_copy=delete_after)
+        print("SUBS IMPORTED:", len(result["imported"]))
+        print("SUBS SKIPPED:", len(result["skipped"]))
+        print("SUBS DELETED:", len(result["deleted"]))
+        print("SUBS CONFLICTS:", len(result["conflicts"]))
+        print("SUBS NO VIDEO:", len(result["no_video"]))
+        print("UNMAPPED:", result["unmapped"])
+        for line in result["imported"][:30]:
+            print(" +", line)
+        if len(result["imported"]) > 30:
+            print(f" ... and {len(result['imported']) - 30} more")
+        for c in result["conflicts"][:15]:
+            print(" !", c)
+        for line in result["no_video"][:10]:
+            print(" ? no video for", line)
+        raise SystemExit(0)
+
     result = import_all(delete_after_copy=delete_after)
     print("IMPORTED:", len(result["imported"]))
     print("SKIPPED:", len(result["skipped"]))
@@ -512,6 +824,7 @@ if __name__ == "__main__":
     print("CONFLICTS:", len(result["conflicts"]))
     print("UNMAPPED:", result["unmapped"])
     print("CATALOG:", len(result["catalog_updates"]))
+    print("SUBS NO VIDEO:", len(result.get("subs_no_video", [])))
     for line in result["imported"][:20]:
         print(" +", line)
     if len(result["imported"]) > 20:

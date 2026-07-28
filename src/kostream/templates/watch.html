@@ -2,33 +2,72 @@
 {% block title %}{{ episode.title }} — {{ show.title }}{% endblock %}
 {% block content %}
 <section class="player-section">
-  <a class="player-back" href="{{ url_for('show_detail', show_id=show.id) }}">‹ Episodes overview</a>
+  <a class="player-back" href="{{ url_for('show_detail', show_id=show.id) }}">‹ {{ _('Episodes overview') }}</a>
   <div class="player-stage">
-    <div class="player-wrap">
+    <div
+      class="player-wrap{% if not is_demo %} has-native-chrome{% endif %}"
+      id="player-shell"
+      {% if not is_demo %}data-idle-ms="3000"{% endif %}
+    >
       {% if is_demo %}
       <div class="player-demo">
-        <p>Stream only — no available file for this episode.</p>
+        <p>{{ _('Stream only — no available file for this episode.') }}</p>
         {% if grab_has_resolver %}
-        <p>Press <strong>Resolve stream</strong> to fetch a URL via your Grab resolver.</p>
+        <p>{{ _('Press Resolve stream to fetch a URL via your Grab resolver.') }}</p>
         {% elif grab_demo_enabled %}
-        <p>Demo samples are enabled, but no URL resolved yet.</p>
+        <p>{{ _('Demo samples are enabled, but no URL resolved yet.') }}</p>
         {% else %}
-        <p>Paste a direct HTTPS URL below, or set <code>KOSTREAM_GRAB_CMD</code> to your resolver.</p>
+        <p>{{ _('Paste a direct HTTPS URL below, or set KOSTREAM_GRAB_CMD to your resolver.') }}</p>
         {% endif %}
-        <p class="player-hint">Available files go in <code>media/shows/…/S01E0N.mp4</code> when you prefer downloads.</p>
+        <p class="player-hint">{{ _('Available files go in media/shows/…/S01E0N.mp4 when you prefer downloads.') }}</p>
       </div>
       {% else %}
-      <video id="player" controls autoplay playsinline {% if video_url %}src="{{ video_url }}"{% endif %}></video>
+      {# Native browser controls: reliable play/pause/seek/CC. We only toggle `controls` for auto-hide. #}
+      <video
+        id="player"
+        controls
+        autoplay
+        playsinline
+        disablepictureinpicture
+        disableremoteplayback
+        controlslist="nodownload nofullscreen noplaybackrate"
+        {% if video_url %}src="{{ video_url }}"{% endif %}
+      >
+        {% for track in subtitle_tracks or [] %}
+        <track
+          kind="subtitles"
+          src="{{ track.url }}"
+          srclang="{{ track.lang }}"
+          label="{{ track.label }}"
+          {% if loop.first %}default{% endif %}
+        >
+        {% endfor %}
+      </video>
+      <button
+        type="button"
+        class="player-fs-btn"
+        id="player-fs-btn"
+        aria-label="{{ _('Fullscreen') }}"
+        aria-pressed="false"
+        title="{{ _('Fullscreen') }}"
+      >
+        <svg class="player-fs-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+          <path class="player-fs-path" fill="currentColor" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+        </svg>
+      </button>
       {% endif %}
     </div>
     {% if not is_demo and (is_grab or is_external) %}
     <p class="player-hint player-hint--below">
       {% if is_grab %}
-      On-demand stream{% if grab_source %} · {{ grab_source }}{% endif %} — no available copy stored.
+      {{ _('On-demand stream') }}{% if grab_source %} · {{ grab_source }}{% endif %} — {{ _('no available copy stored.') }}
       {% else %}
-      On-demand stream — no available copy stored by Ko-Stream.
+      {{ _('On-demand stream — no available copy stored by Ko-Stream.') }}
       {% endif %}
     </p>
+    {% endif %}
+    {% if not is_demo and (subtitle_tracks or [])|length > 0 %}
+    <p class="player-hint player-hint--below">{{ _('Subtitles: use the CC control in the player bar.') }}</p>
     {% endif %}
   </div>
 
@@ -41,14 +80,14 @@
     <div class="player-toolbar">
       <div class="player-nav">
         {% if prev_episode %}
-        <a class="btn-detail player-nav-btn" href="{{ url_for('watch', show_id=show.id, episode_id=prev_episode.id) }}">← Prev</a>
+        <a class="btn-detail player-nav-btn" href="{{ url_for('watch', show_id=show.id, episode_id=prev_episode.id) }}">{{ _('← Prev') }}</a>
         {% else %}
-        <span class="player-nav-btn is-disabled" aria-hidden="true">← Prev</span>
+        <span class="player-nav-btn is-disabled" aria-hidden="true">{{ _('← Prev') }}</span>
         {% endif %}
         {% if next_episode %}
-        <a class="btn-detail player-nav-btn" href="{{ url_for('watch', show_id=show.id, episode_id=next_episode.id) }}">Next →</a>
+        <a class="btn-detail player-nav-btn" href="{{ url_for('watch', show_id=show.id, episode_id=next_episode.id) }}">{{ _('Next →') }}</a>
         {% else %}
-        <span class="player-nav-btn is-disabled" aria-hidden="true">Next →</span>
+        <span class="player-nav-btn is-disabled" aria-hidden="true">{{ _('Next →') }}</span>
         {% endif %}
       </div>
       <button
@@ -57,7 +96,7 @@
         id="mark-complete"
         {% if episode_completed_flag %}disabled{% endif %}
       >
-        {% if episode_completed_flag %}✓ Completed{% else %}✓ Complete{% if mal_connected %} on MAL{% endif %}{% endif %}
+        {% if episode_completed_flag %}✓ {{ _('Completed') }}{% elif mal_connected %}✓ {{ _('Complete on MAL') }}{% else %}✓ {{ _('Complete') }}{% endif %}
       </button>
     </div>
   </div>
@@ -66,18 +105,18 @@
   <div class="grab-actions">
     {% if grab_has_resolver or grab_demo_enabled %}
     <button type="button" class="btn-watch grab-resolve-btn" id="grab-resolve">
-      {% if is_demo %}Resolve stream{% else %}Refresh stream URL{% endif %}
+      {% if is_demo %}{{ _('Resolve stream') }}{% else %}{{ _('Refresh stream URL') }}{% endif %}
     </button>
     {% endif %}
     <form class="grab-override" id="grab-override-form">
-      <label for="grab-url">Direct stream URL (HTTPS .mp4 / .m3u8)</label>
+      <label for="grab-url">{{ _('Direct stream URL (HTTPS .mp4 / .m3u8)') }}</label>
       <div class="grab-override-row">
         <input type="url" id="grab-url" name="url" placeholder="https://example.com/episode.m3u8" required>
-        <button type="submit" class="btn-detail grab-action-btn" name="action" value="play">Save &amp; play</button>
+        <button type="submit" class="btn-detail grab-action-btn" name="action" value="play">{{ _('Save & play') }}</button>
       </div>
       <div class="grab-override-tools">
         <button type="submit" class="btn-watch grab-action-btn" name="action" value="fetch" id="grab-fetch-local">
-          Download to library
+          {{ _('Download to library') }}
         </button>
       </div>
       <p class="grab-override-msg" id="grab-override-msg" hidden></p>
@@ -175,11 +214,106 @@
 
   {% if not is_demo %}
   const video = document.getElementById('player');
+  const shell = document.getElementById('player-shell');
+  const fsBtn = document.getElementById('player-fs-btn');
+  const fsPath = fsBtn?.querySelector('.player-fs-path');
+  const FS_ENTER_PATH = 'M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z';
+  const FS_EXIT_PATH = 'M5 16h3v3h2v-5H5v2zm3-8H5v2h5V5H8v3zm6 11h2v-3h3v-2h-5v5zm2-11V5h-2v5h5V8h-3z';
+  const IDLE_MS = Number(shell?.dataset.idleMs || 3000);
   let autoCompleted = false;
   const resumeSeconds = {{ (resume_seconds or 0) | tojson }};
   const episodeAlreadyComplete = {{ (episode_completed_flag or false) | tojson }};
+  const nextEpisodeCompleted = {{ (next_episode_completed_flag or false) | tojson }};
+  const showListCompleted = {{ (show_list_completed or false) | tojson }};
+  const nextWatchUrl = {% if next_episode %}{{ url_for('watch', show_id=show.id, episode_id=next_episode.id) | tojson }}{% else %}null{% endif %};
   let lastSavedBucket = -1;
   let resumeApplied = false;
+  let hideTimer = null;
+
+  function fullscreenElement() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function isPlayerFullscreen() {
+    const fs = fullscreenElement();
+    if (fs) {
+      return fs === shell || (typeof fs.contains === 'function' && fs.contains(video));
+    }
+    // iOS Safari: video-only pseudo-fullscreen.
+    return !!(video && video.webkitDisplayingFullscreen);
+  }
+
+  function updateFsButton() {
+    if (!fsBtn) return;
+    const fs = isPlayerFullscreen();
+    fsBtn.setAttribute('aria-pressed', fs ? 'true' : 'false');
+    fsBtn.title = fs ? 'Exit fullscreen' : 'Fullscreen';
+    if (fsPath) fsPath.setAttribute('d', fs ? FS_EXIT_PATH : FS_ENTER_PATH);
+  }
+
+  function suppressNativeFullscreen() {
+    if (!video?.controlsList) return;
+    video.controlsList.add('nofullscreen');
+    video.controlsList.add('nodownload');
+    video.controlsList.add('noplaybackrate');
+  }
+
+  function showControls() {
+    if (!video) return;
+    video.controls = true;
+    video.setAttribute('controls', '');
+    shell?.classList.remove('is-idle');
+    resetHideTimer();
+    updateFsButton();
+  }
+
+  function hideControls() {
+    if (!video || video.paused) return;
+    video.controls = false;
+    video.removeAttribute('controls');
+    shell?.classList.add('is-idle');
+  }
+
+  function resetHideTimer() {
+    clearTimeout(hideTimer);
+    if (video && !video.paused) {
+      hideTimer = setTimeout(hideControls, IDLE_MS);
+    }
+  }
+
+  function onPointerActivity(event) {
+    const target = event.target;
+    if (
+      isPlayerFullscreen()
+      || target === video
+      || target === shell
+      || (shell && typeof shell.contains === 'function' && shell.contains(target))
+    ) {
+      showControls();
+    }
+  }
+
+  async function toggleShellFullscreen() {
+    if (!shell || !video) return;
+    try {
+      if (isPlayerFullscreen()) {
+        if (document.exitFullscreen) await document.exitFullscreen();
+        else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+        else if (video.webkitExitFullscreen) video.webkitExitFullscreen();
+      } else if (shell.requestFullscreen) {
+        await shell.requestFullscreen();
+      } else if (shell.webkitRequestFullscreen) {
+        shell.webkitRequestFullscreen();
+      } else if (video.webkitEnterFullscreen) {
+        // iOS Safari: no element-level Fullscreen API — use video pseudo-fullscreen.
+        video.webkitEnterFullscreen();
+      } else if (video.requestFullscreen) {
+        await video.requestFullscreen();
+      }
+    } catch (_) {}
+    showControls();
+    updateFsButton();
+  }
 
   function applyResume() {
     if (resumeApplied || episodeAlreadyComplete || !resumeSeconds || resumeSeconds <= 0) return;
@@ -222,20 +356,108 @@
     }).catch(() => {});
   }
 
-  video.addEventListener('loadedmetadata', applyResume);
-  video.addEventListener('canplay', applyResume);
-  video.addEventListener('timeupdate', () => {
-    saveWatchProgress(false);
-    maybeAutoCompleteFromProgress();
-  });
-  video.addEventListener('pause', () => saveWatchProgress(true));
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') saveWatchProgress(true);
-  });
-  window.addEventListener('pagehide', () => saveWatchProgress(true));
-  video.addEventListener('ended', () => {
-    markComplete();
-  });
+  if (video && shell) {
+    // Document-level so idle hide/reveal also works in shell fullscreen.
+    document.addEventListener('mousemove', onPointerActivity);
+    document.addEventListener('pointerdown', onPointerActivity);
+    document.addEventListener('touchstart', onPointerActivity, { passive: true });
+    document.addEventListener('fullscreenchange', () => {
+      showControls();
+      updateFsButton();
+    });
+    document.addEventListener('webkitfullscreenchange', () => {
+      showControls();
+      updateFsButton();
+    });
+    video.addEventListener('webkitbeginfullscreen', () => {
+      showControls();
+      updateFsButton();
+    });
+    video.addEventListener('webkitendfullscreen', () => {
+      showControls();
+      updateFsButton();
+    });
+    fsBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleShellFullscreen();
+    });
+    fsBtn?.addEventListener('pointerdown', (e) => e.stopPropagation());
+    video.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      toggleShellFullscreen();
+    });
+    video.addEventListener('play', () => showControls());
+    video.addEventListener('pause', () => {
+      clearTimeout(hideTimer);
+      video.controls = true;
+      video.setAttribute('controls', '');
+      shell.classList.remove('is-idle');
+    });
+    // Keyboard: keep chrome up; arrows seek ±10s; F toggles shell fullscreen.
+    document.addEventListener('keydown', (e) => {
+      const tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        video.currentTime = Math.min(video.duration || Infinity, video.currentTime + 10);
+        showControls();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        video.currentTime = Math.max(0, video.currentTime - 10);
+        showControls();
+      } else if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        toggleShellFullscreen();
+      } else if (e.key === ' ' || e.code === 'Space') {
+        // Let native control handle Space when focused on video; otherwise toggle.
+        if (document.activeElement !== video) {
+          e.preventDefault();
+          if (video.paused) video.play().catch(() => {});
+          else video.pause();
+        }
+        showControls();
+      }
+    });
+
+    video.addEventListener('loadedmetadata', applyResume);
+    video.addEventListener('loadedmetadata', suppressNativeFullscreen);
+    video.addEventListener('canplay', applyResume);
+    video.addEventListener('timeupdate', () => {
+      saveWatchProgress(false);
+      maybeAutoCompleteFromProgress();
+    });
+    video.addEventListener('pause', () => saveWatchProgress(true));
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') saveWatchProgress(true);
+    });
+    window.addEventListener('pagehide', () => saveWatchProgress(true));
+    video.addEventListener('ended', async () => {
+      const rewatch =
+        episodeAlreadyComplete || showListCompleted || nextEpisodeCompleted;
+      if (!episodeAlreadyComplete && !autoCompleted) {
+        autoCompleted = true;
+        const btn = document.getElementById('mark-complete');
+        if (btn) {
+          btn.disabled = true;
+          btn.textContent = '✓ Completed';
+        }
+        await markComplete({ stay: true });
+      }
+      // First-time watch with an unwatched next episode → continue binge.
+      if (!rewatch && nextWatchUrl) {
+        window.location.href = nextWatchUrl;
+        return;
+      }
+      // Rewatch / last episode / next already done → stay on page, paused.
+      try { video.pause(); } catch (_) {}
+      showControls();
+    });
+
+    showControls();
+    suppressNativeFullscreen();
+    updateFsButton();
+  }
   {% endif %}
 </script>
 {% endblock %}

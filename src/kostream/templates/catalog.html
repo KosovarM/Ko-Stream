@@ -1,16 +1,28 @@
 {% extends "base.html" %}
-{% block title %}{{ _('Library') }} — {{ site_name }}{% endblock %}
+{% block title %}{{ _('Catalog') }} — {{ site_name }}{% endblock %}
 {% block content %}
 <section class="catalog-page">
   <header class="catalog-header">
-    <h1>{{ _('Library') }}</h1>
+    <h1>{{ _('Catalog') }}</h1>
     <p>
       {{ _('Only enabled entries load on the home page — fast for local testing.') }}
       {{ _('Config file:') }} <code>{{ catalog_path }}</code>
     </p>
     <p class="catalog-meta">{{ catalog_count }} {{ _('enabled') }} · {{ catalog.shows|length }} {{ _('total') }}{% if mal_count %} · {{ mal_count }} {{ _('from MAL') }}{% endif %}</p>
+    <div class="theme-scheme" role="group" aria-label="{{ _('Color scheme') }}">
+      <span class="theme-scheme-label">{{ _('Color scheme') }}</span>
+      <div class="theme-scheme-options">
+        {% for scheme in supported_themes %}
+        <a
+          href="{{ url_for('set_theme', scheme=scheme, next=url_for('catalog_page')) }}"
+          class="theme-scheme-btn{% if theme == scheme %} is-active{% endif %}"
+          {% if theme == scheme %}aria-current="true"{% endif %}
+        >{{ _(theme_labels.get(scheme, scheme)) }}</a>
+        {% endfor %}
+      </div>
+    </div>
     {% if library_stats %}
-    <ul class="library-stats" aria-label="{{ _('Library totals') }}">
+    <ul class="library-stats" aria-label="{{ _('Catalog totals') }}">
       <li>
         <span class="library-stats-label">{{ _('Anime') }}</span>
         <span class="library-stats-value">{{ library_stats.anime_titles }} {{ _('titles') if library_stats.anime_titles != 1 else _('title') }} · {{ library_stats.anime_episodes }} episode{{ 's' if library_stats.anime_episodes != 1 else '' }}</span>
@@ -131,6 +143,21 @@
   </section>
 
   <section class="catalog-section">
+    <h2>{{ _('Import from media library') }}</h2>
+    <p class="catalog-meta">
+      {{ _('Scan your anime media folder for titles with video files that are not in the catalog yet. Matches MAL where possible and sets Plan to Watch when connected.') }}
+    </p>
+    {% if is_master %}
+    <div class="mal-actions">
+      <button type="button" class="btn-watch" id="catalog-import-media">{{ _('Import from media') }}</button>
+      <span class="catalog-meta" id="catalog-import-preview" hidden></span>
+    </div>
+    {% else %}
+    <p class="catalog-meta">{{ _('Master account required to import from media.') }}</p>
+    {% endif %}
+  </section>
+
+  <section class="catalog-section">
     <h2>{{ _('Search AniList (metadata & posters)') }}</h2>
     <form id="anilist-search" class="catalog-search">
       <input type="search" name="q" placeholder="{{ _('e.g. Frieren, One Piece') }}" minlength="2" required>
@@ -179,6 +206,7 @@
     btn.addEventListener('click', async () => {
       const id = btn.dataset.requestId;
       if (!id) return;
+      if (!confirm('Dismiss this request?\n\nIt will be removed from the wishlist.')) return;
       btn.disabled = true;
       try {
         const resp = await fetch('/api/requests/' + encodeURIComponent(id), {
@@ -223,22 +251,30 @@
 
   const anilistForm = document.getElementById('anilist-search');
   if (anilistForm) {
-  anilistForm.addEventListener('submit', async (event) => {
-    event.preventDefault();
-    const q = new FormData(event.target).get('q');
-    const list = document.getElementById('anilist-results');
-    list.innerHTML = '<li>Searching…</li>';
-    const resp = await fetch(`{{ url_for('api_anilist_search') }}?q=${encodeURIComponent(q)}`);
-    const data = await resp.json();
-    list.innerHTML = '';
-    if (data.error) {
-      const err = document.createElement('li');
-      err.className = 'empty catalog-error';
-      err.textContent = String(data.error);
-      list.appendChild(err);
-      return;
-    }
-    (data.results || []).forEach((item) => {
+anilistForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const q = new FormData(event.target).get('q');
+  const list = document.getElementById('anilist-results');
+  list.innerHTML = Array.from({ length: 6 }, () => (
+    '<li class="skeleton-card catalog-skeleton" aria-hidden="true">' +
+      '<span class="skeleton-poster"></span>' +
+      '<span class="skeleton-lines">' +
+        '<span class="skeleton-line skeleton-line--title"></span>' +
+        '<span class="skeleton-line"></span>' +
+      '</span>' +
+    '</li>'
+  )).join('');
+  const resp = await fetch(`{{ url_for('api_anilist_search') }}?q=${encodeURIComponent(q)}`);
+  const data = await resp.json();
+  list.innerHTML = '';
+  if (data.error) {
+    const err = document.createElement('li');
+    err.className = 'empty catalog-error';
+    err.textContent = String(data.error);
+    list.appendChild(err);
+    return;
+  }
+  (data.results || []).forEach((item) => {
       const li = document.createElement('li');
       li.className = 'catalog-result';
 
@@ -290,15 +326,16 @@
             btn.disabled = false;
             return;
           }
-          if (data.redirect) {
+          if (data.existing && data.redirect) {
             location.href = data.redirect;
             return;
           }
-          if (data.id) {
+          if (data.existing && data.id) {
             location.href = '/show/' + encodeURIComponent(data.id);
             return;
           }
-          location.reload();
+          btn.textContent = 'Added';
+          btn.disabled = true;
         } catch (_) {
           alert('Could not add entry');
           btn.disabled = false;
@@ -535,6 +572,30 @@
     }
   };
 
+  const persistSyncIndexSkipBulk = async (malIds, skip) => {
+    try {
+      const upd = await fetch('/api/sync-index', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken(),
+        },
+        body: JSON.stringify({
+          section: syncIndexSection,
+          mal_ids: malIds,
+          skip,
+        }),
+      });
+      const payload = await upd.json().catch(() => ({}));
+      if (!upd.ok || !payload.ok) {
+        return { ok: false, error: payload.error || 'Could not update sync index' };
+      }
+      return { ok: true };
+    } catch (_) {
+      return { ok: false, error: 'Could not update sync index' };
+    }
+  };
+
   const loadSyncIndex = async () => {
     if (!syncIndexList) return;
     if (syncIndexToggleAll) {
@@ -606,19 +667,22 @@
     const boxes = syncIndexCheckboxes();
     if (!boxes.length) return;
     const next = !boxes.every((cb) => cb.checked);
-    syncIndexToggleAll.disabled = true;
     const targets = boxes.filter((cb) => cb.checked !== next);
-    const results = await Promise.all(
-      targets.map(async (cb) => {
-        const prev = cb.checked;
-        cb.checked = next;
-        const result = await persistSyncIndexSkip(cb, Number(cb.dataset.malId), next);
-        if (!result.ok) cb.checked = prev;
-        return result;
-      })
-    );
-    const failed = results.find((r) => !r.ok);
-    if (failed) alert(failed.error || 'Could not update sync index');
+    if (!targets.length) {
+      updateSyncIndexToggleAll();
+      return;
+    }
+    syncIndexToggleAll.disabled = true;
+    boxes.forEach((cb) => { cb.disabled = true; });
+    const malIds = targets.map((cb) => Number(cb.dataset.malId));
+    const prevStates = targets.map((cb) => cb.checked);
+    targets.forEach((cb) => { cb.checked = next; });
+    const result = await persistSyncIndexSkipBulk(malIds, next);
+    if (!result.ok) {
+      targets.forEach((cb, i) => { cb.checked = prevStates[i]; });
+      alert(result.error);
+    }
+    boxes.forEach((cb) => { cb.disabled = false; });
     updateSyncIndexToggleAll();
   });
 
@@ -655,5 +719,44 @@
   document.addEventListener('keydown', (ev) => {
     if (ev.key === 'Escape' && syncIndexModal && !syncIndexModal.hidden) closeSyncIndex();
   });
+
+  const catalogImportMedia = document.getElementById('catalog-import-media');
+  const catalogImportPreview = document.getElementById('catalog-import-preview');
+  if (catalogImportMedia) {
+    const refreshImportPreview = async () => {
+      if (!catalogImportPreview) return;
+      try {
+        const resp = await fetch('{{ url_for("api_catalog_import_media_preview") }}');
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) return;
+        const n = Number(data.count) || 0;
+        if (n > 0) {
+          catalogImportPreview.hidden = false;
+          catalogImportPreview.textContent = n + ' folder' + (n === 1 ? '' : 's') + ' ready to import';
+        } else {
+          catalogImportPreview.hidden = false;
+          catalogImportPreview.textContent = 'All media folders are already in the catalog';
+        }
+      } catch (_) {}
+    };
+    refreshImportPreview();
+    catalogImportMedia.addEventListener('click', async () => {
+      if (!confirm('Import all uncataloged anime folders from your media library?\n\nTitles will be added to the catalog and linked to MAL where possible (Plan to Watch when connected).')) return;
+      catalogImportMedia.disabled = true;
+      try {
+        const resp = await fetch('{{ url_for("api_catalog_import_media") }}', { method: 'POST' });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          alert(data.error || 'Import failed');
+          catalogImportMedia.disabled = false;
+          return;
+        }
+        location.href = '{{ url_for("catalog_page") }}?mal_message=' + encodeURIComponent(data.message || 'Import finished.');
+      } catch (_) {
+        alert('Import failed');
+        catalogImportMedia.disabled = false;
+      }
+    });
+  }
 </script>
 {% endblock %}

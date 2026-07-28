@@ -18,6 +18,16 @@ LANG_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 year
 DEFAULT_LANG = "en"
 SUPPORTED_LANGS = frozenset({"en", "de"})
 
+THEME_COOKIE = "kostream_theme"
+THEME_COOKIE_MAX_AGE = 365 * 24 * 60 * 60  # 1 year
+DEFAULT_THEME = "gold-dark"
+SUPPORTED_THEMES = frozenset({"gold-dark", "red-light", "blue-green"})
+THEME_LABELS = {
+    "gold-dark": "Gold / Dark",
+    "red-light": "Red / Light",
+    "blue-green": "Blue / Green",
+}
+
 # English msgid → German. English UI uses the msgid as-is.
 _DE: dict[str, str] = {
     # Nav / chrome
@@ -29,7 +39,7 @@ _DE: dict[str, str] = {
     "Specials": "Specials",
     "Manga": "Manga",
     "Manhwa": "Manhwa",
-    "Library": "Bibliothek",
+    "Catalog": "Katalog",
     "Admin": "Admin",
     "Log out": "Abmelden",
     "Log in": "Anmelden",
@@ -38,6 +48,11 @@ _DE: dict[str, str] = {
     "Close search": "Suche schließen",
     "Search anime...": "Anime suchen…",
     "Language": "Sprache",
+    "Skip to content": "Zum Inhalt springen",
+    "Color scheme": "Farbschema",
+    "Gold / Dark": "Gold / Dunkel",
+    "Red / Light": "Rot / Hell",
+    "Blue / Green": "Blau / Grün",
     "Notifications": "Benachrichtigungen",
     "New request": "Neue Anfrage",
     "Request available": "Anfrage verfügbar",
@@ -103,10 +118,19 @@ _DE: dict[str, str] = {
     "titles": "Titel",
     "No titles match your filters.": "Keine Titel passen zu deinen Filtern.",
     "Show all titles": "Alle Titel anzeigen",
-    "Add shows in Library or connect MyAnimeList to populate your library.": (
-        "Füge Titel in der Bibliothek hinzu oder verbinde MyAnimeList."
+    "Clear filters": "Filter zurücksetzen",
+    "Add shows in Catalog or connect MyAnimeList to populate your library.": (
+        "Füge Titel im Katalog hinzu oder verbinde MyAnimeList."
     ),
     "Filter by title or description…": "Nach Titel oder Beschreibung filtern…",
+    "All titles": "Alle Titel",
+    "Show more": "Mehr anzeigen",
+    "Show less": "Weniger anzeigen",
+    "watched": "gesehen",
+    "Progress": "Fortschritt",
+    "Sync MAL": "MAL synchronisieren",
+    "Go to Catalog": "Zum Katalog",
+    "Back to Catalog": "Zurück zum Katalog",
     # Catalog / library chrome
     "Requests": "Anfragen",
     "Wishlist for titles with missing available episodes or chapters.": (
@@ -134,7 +158,7 @@ _DE: dict[str, str] = {
     "total": "gesamt",
     "from MAL": "von MAL",
     "Anime": "Anime",
-    "Library totals": "Bibliotheksübersicht",
+    "Catalog totals": "Katalogübersicht",
     "MyAnimeList": "MyAnimeList",
     "Connect MyAnimeList": "MyAnimeList verbinden",
     "Disconnect": "Trennen",
@@ -142,6 +166,15 @@ _DE: dict[str, str] = {
     "Sync mangas": "Mangas synchronisieren",
     "Manage Sync": "Sync verwalten",
     "Search AniList (metadata & posters)": "AniList durchsuchen (Metadaten & Poster)",
+    "Import from media library": "Aus Medienbibliothek importieren",
+    "Import from media": "Aus Medien importieren",
+    "Scan your anime media folder for titles with video files that are not in the catalog yet. Matches MAL where possible and sets Plan to Watch when connected.": (
+        "Scanne deinen Anime-Medienordner nach Titeln mit Videodateien, die noch nicht im Katalog sind. "
+        "Verknüpft MAL wo möglich und setzt Plan to Watch bei verbundenem Konto."
+    ),
+    "Master account required to import from media.": (
+        "Master-Konto erforderlich, um aus Medien zu importieren."
+    ),
     "e.g. Frieren, One Piece": "z. B. Frieren, One Piece",
     # Show / manga actions
     "Open on MAL ↗": "Auf MAL öffnen ↗",
@@ -152,14 +185,136 @@ _DE: dict[str, str] = {
     "Reading": "Am Lesen",
     "Completed": "Abgeschlossen",
     "New": "Neu",
-    "All titles": "Alle Titel",
     "Available chapters": "Verfügbare Kapitel",
     "Filter by genre": "Nach Genre filtern",
+    "No manga yet. Sync MyAnimeList from Catalog, and/or add folders under media/manga.": (
+        "Noch kein Manga. Synchronisiere MyAnimeList im Katalog und/oder lege Ordner unter media/manga an."
+    ),
+    "No manhwa yet. Sync MyAnimeList from Catalog, and/or add folders under media/manga.": (
+        "Noch kein Manhwa. Synchronisiere MyAnimeList im Katalog und/oder lege Ordner unter media/manga an."
+    ),
+    "No titles match these filters.": "Keine Titel passen zu diesen Filtern.",
+    # Schedule
+    "Schedule type": "Zeitplan-Typ",
+    "Currently airing titles from your library — episode drop day & time in your local timezone (MAL times are JST).": (
+        "Aktuell laufende Titel aus deiner Bibliothek — Erscheinungstag & -zeit in deiner lokalen Zeitzone "
+        "(MAL-Zeiten sind JST)."
+    ),
+    "No currently airing shows in the library yet. Sync MAL or enable airing titles in Catalog.": (
+        "Noch keine aktuell laufenden Serien in der Bibliothek. Synchronisiere MAL oder aktiviere "
+        "laufende Titel im Katalog."
+    ),
+    "No currently publishing manga in your library yet. Sync MAL or enable publishing titles in Catalog.": (
+        "Noch kein aktuell erscheinender Manga in der Bibliothek. Synchronisiere MAL oder aktiviere "
+        "erscheinende Titel im Katalog."
+    ),
+    "No currently publishing manhwa in your library yet. Sync MAL or enable publishing titles in Catalog.": (
+        "Noch kein aktuell erscheinender Manhwa in der Bibliothek. Synchronisiere MAL oder aktiviere "
+        "erscheinende Titel im Katalog."
+    ),
+    "Currently releasing": "Aktuell erscheinend",
+    "Today": "Heute",
+    "No drops": "Keine Releases",
+    "TBA": "TBA",
+    # Admin users
+    "Users": "Benutzer",
+    "Create accounts, restrict access, and reset passwords. Only one master is allowed.": (
+        "Konten anlegen, Zugriff sperren und Passwörter zurücksetzen. Nur ein Master ist erlaubt."
+    ),
+    "Create user": "Benutzer anlegen",
+    "Create": "Anlegen",
+    "Accounts": "Konten",
+    "Role": "Rolle",
+    "Restricted": "Gesperrt",
+    "Yes": "Ja",
+    "No": "Nein",
+    "Actions": "Aktionen",
+    "New password": "Neues Passwort",
+    "Reset password": "Passwort zurücksetzen",
+    "Restrict": "Sperren",
+    "Unrestrict": "Entsperren",
+    "Connected": "Verbunden",
+    # Watch / player chrome
+    "Episodes overview": "Episodenübersicht",
+    "Seek": "Spulen",
+    "Play": "Abspielen",
+    "Pause": "Pause",
+    "Mute": "Stumm",
+    "Unmute": "Ton an",
+    "Subtitles": "Untertitel",
+    "Subtitles: use the CC control in the player bar.": "Untertitel: CC-Taste in der Player-Leiste nutzen.",
+    "Off": "Aus",
+    "Fullscreen": "Vollbild",
+    "Stream only — no available file for this episode.": "Nur Stream — keine Datei für diese Episode verfügbar.",
+    "Resolve stream": "Stream auflösen",
+    "Refresh stream URL": "Stream-URL aktualisieren",
+    "Demo samples are enabled, but no URL resolved yet.": "Demo-Samples sind aktiv, aber noch keine URL aufgelöst.",
+    "On-demand stream": "On-Demand-Stream",
+    "no available copy stored.": "keine lokale Kopie gespeichert.",
+    "On-demand stream — no available copy stored by Ko-Stream.": "On-Demand-Stream — keine lokale Kopie von Ko-Stream gespeichert.",
+    "Prev": "Zurück",
+    "Next →": "Weiter →",
+    "← Prev": "← Zurück",
+    "Complete": "Abschließen",
+    "Complete on MAL": "Auf MAL abschließen",
+    "Download to library": "In Bibliothek laden",
+    "Save & play": "Speichern & abspielen",
+    "Direct stream URL (HTTPS .mp4 / .m3u8)": "Direkte Stream-URL (HTTPS .mp4 / .m3u8)",
+    "Press Resolve stream to fetch a URL via your Grab resolver.": (
+        "Drücke „Stream auflösen“, um eine URL über deinen Grab-Resolver zu holen."
+    ),
+    "Paste a direct HTTPS URL below, or set KOSTREAM_GRAB_CMD to your resolver.": (
+        "Füge unten eine direkte HTTPS-URL ein, oder setze KOSTREAM_GRAB_CMD auf deinen Resolver."
+    ),
+    "Available files go in media/shows/…/S01E0N.mp4 when you prefer downloads.": (
+        "Verfügbare Dateien gehören nach media/shows/…/S01E0N.mp4, wenn du Downloads bevorzugst."
+    ),
+    # Show overview
+    "Episodes": "Episoden",
+    "Already completed": "Bereits abgeschlossen",
+    "Watch Now": "Jetzt ansehen",
+    "Continue watching": "Weiterschauen",
+    "Mark as watched": "Als gesehen markieren",
+    "Mark as watched and sync to MAL": "Als gesehen markieren und mit MAL synchronisieren",
+    "Your score:": "Deine Bewertung:",
+    "Your rating": "Deine Bewertung",
+    "Clear": "Löschen",
+    "Clear rating": "Bewertung löschen",
+    "Connect MAL to rate this title.": "MAL verbinden, um zu bewerten.",
+    "Airing": "Läuft",
+    "Test stream": "Test-Stream",
+    "No available files — use Grab for streams.": "Keine verfügbaren Dateien — nutze Grab für Streams.",
+    "No available video files yet.": "Noch keine verfügbaren Videodateien.",
+    "MAL list status": "MAL-Listenstatus",
+    "Connect MAL to set list status.": "Verbinde MAL, um den Listenstatus zu setzen.",
+    "Recommend": "Empfehlen",
+    "Remove recommendation": "Empfehlung entfernen",
 }
 
 TRANSLATIONS: dict[str, dict[str, str]] = {
     "de": _DE,
 }
+
+
+def normalize_theme(value: str | None) -> str:
+    v = (value or "").strip().casefold()
+    if v in SUPPORTED_THEMES:
+        return v
+    return DEFAULT_THEME
+
+
+def get_theme() -> str:
+    if has_request_context() and hasattr(g, "theme"):
+        return str(g.theme)
+    return DEFAULT_THEME
+
+
+def set_request_theme(cookie_value: str | None) -> str:
+    """Resolve theme from cookie and store on ``g.theme``."""
+    theme = normalize_theme(cookie_value)
+    if has_request_context():
+        g.theme = theme
+    return theme
 
 
 def normalize_lang(value: str | None) -> str:
@@ -194,3 +349,5 @@ def _(message: str) -> str:
 def init_app(app: Flask) -> None:
     """Register ``_`` for all templates (Jinja globals + request locale helper)."""
     app.jinja_env.globals["_"] = _
+    app.jinja_env.globals["THEME_LABELS"] = THEME_LABELS
+    app.jinja_env.globals["SUPPORTED_THEMES"] = sorted(SUPPORTED_THEMES)

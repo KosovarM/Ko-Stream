@@ -8,71 +8,101 @@
 {% set genres = genres|default([]) %}
 <section class="page-search manga-page">
   <header class="browse-header">
-    <h1>{{ library_label }}</h1>
+    <div class="browse-header-row">
+      <h1 class="section-title">{{ _(library_label) }}</h1>
+      {% if library_total|default(0) > 0 or titles or active_tab %}
+      <div class="manga-tabs browse-status-tabs" role="tablist" aria-label="{{ _('Status') }}">
+        <a
+          href="{{ url_for(browse_endpoint|default('manga_page'), tab='reading', avail=selected_avail, genre=selected_genre or none) }}"
+          class="manga-tab{% if active_tab == 'reading' %} is-active{% endif %}"
+          role="tab"
+          aria-selected="{{ 'true' if active_tab == 'reading' else 'false' }}"
+        >{{ _('Reading') }}</a>
+        <a
+          href="{{ url_for(browse_endpoint|default('manga_page'), tab='completed', avail=selected_avail, genre=selected_genre or none) }}"
+          class="manga-tab{% if active_tab == 'completed' %} is-active{% endif %}"
+          role="tab"
+          aria-selected="{{ 'true' if active_tab == 'completed' else 'false' }}"
+        >{{ _('Completed') }}</a>
+        <a
+          href="{{ url_for(browse_endpoint|default('manga_page'), tab='new', avail=selected_avail, genre=selected_genre or none) }}"
+          class="manga-tab{% if active_tab == 'new' %} is-active{% endif %}"
+          role="tab"
+          aria-selected="{{ 'true' if active_tab == 'new' else 'false' }}"
+        >{{ _('New') }}</a>
+      </div>
+      {% endif %}
+    </div>
     <p class="browse-meta">
       {% if mal_manga_count %}
       MyAnimeList · {{ mal_manga_count }} synced
       · available files from <code>media/manga</code>
       {% else %}
       Local library from <code>media/manga</code>
-      · run <strong>Sync mangas</strong> on Catalog to pull your MAL mangalist
+      · run <strong>{{ _('Sync mangas') }}</strong> on {{ _('Catalog') }} to pull your MAL mangalist
       {% endif %}
-      · {{ titles|length }} title{{ 's' if titles|length != 1 else '' }}
+      · {{ library_total|default(titles|length) }} {{ _('titles') if (library_total|default(titles|length)) != 1 else _('title') }}
+      {% if filters_active %} · {{ _('filtered') }}{% endif %}
     </p>
   </header>
 
-  {% if titles %}
-  <div class="manga-filters">
-    <div class="manga-filter-group">
-      <span class="manga-filter-label" id="manga-status-label">{{ _('Status') }}</span>
-      <div class="manga-tabs" role="tablist" aria-labelledby="manga-status-label">
-        <button type="button" class="manga-tab{% if active_tab == 'reading' %} is-active{% endif %}" data-manga-tab="reading" role="tab" aria-selected="{{ 'true' if active_tab == 'reading' else 'false' }}">{{ _('Reading') }}</button>
-        <button type="button" class="manga-tab{% if active_tab == 'completed' %} is-active{% endif %}" data-manga-tab="completed" role="tab" aria-selected="{{ 'true' if active_tab == 'completed' else 'false' }}">{{ _('Completed') }}</button>
-        <button type="button" class="manga-tab{% if active_tab == 'new' %} is-active{% endif %}" data-manga-tab="new" role="tab" aria-selected="{{ 'true' if active_tab == 'new' else 'false' }}">{{ _('New') }}</button>
-      </div>
-    </div>
-    <div class="manga-filter-row">
-      <div class="manga-filter-group">
-        <span class="manga-filter-label" id="manga-avail-label">{{ _('Availability') }}</span>
-        <div class="manga-tabs manga-avail-tabs" role="tablist" aria-labelledby="manga-avail-label">
-          <button type="button" class="manga-tab{% if selected_avail != 'local' %} is-active{% endif %}" data-manga-avail="all" role="tab" aria-selected="{{ 'false' if selected_avail == 'local' else 'true' }}">{{ _('All titles') }}</button>
-          <button type="button" class="manga-tab{% if selected_avail == 'local' %} is-active{% endif %}" data-manga-avail="local" role="tab" aria-selected="{{ 'true' if selected_avail == 'local' else 'false' }}">{{ _('Available chapters') }}</button>
-        </div>
-      </div>
-      {% if genres %}
-      <label class="manga-genre-filter" for="manga-genre">
-        <span class="manga-filter-label">{{ _('Genre') }}</span>
-        <select id="manga-genre" class="manga-genre-select" data-manga-genre aria-label="{{ _('Filter by genre') }}">
-          <option value="" {% if not selected_genre %}selected{% endif %}>{{ _('All genres') }}</option>
-          {% for g in genres %}
-          <option value="{{ g }}" {% if g == selected_genre %}selected{% endif %}>{{ g }}</option>
-          {% endfor %}
-        </select>
-      </label>
+  {% if library_total|default(0) > 0 or titles %}
+  <form class="browse-filters browse-filters--manga" action="{{ url_for(browse_endpoint|default('manga_page')) }}" method="get">
+    <input type="hidden" name="tab" value="{{ active_tab|default('reading') }}">
+    <label class="browse-field">
+      <span class="browse-label">{{ _('Availability') }}</span>
+      <select name="avail">
+        <option value="all" {% if selected_avail != 'local' %}selected{% endif %}>{{ _('All titles') }}</option>
+        <option value="local" {% if selected_avail == 'local' %}selected{% endif %}>{{ _('Available chapters') }}</option>
+      </select>
+    </label>
+    <label class="browse-field browse-field-genre">
+      <span class="browse-label">{{ _('Genre') }}</span>
+      <select name="genre" aria-label="{{ _('Filter by genre') }}">
+        <option value="" {% if not selected_genre %}selected{% endif %}>{{ _('All genres') }}</option>
+        {% for g in genres %}
+        <option value="{{ g }}" {% if g == selected_genre %}selected{% endif %}>{{ g }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <div class="browse-actions">
+      <button type="submit" class="btn-browse">{{ _('Apply') }}</button>
+      {% if filters_active %}
+      <a href="{{ url_for(browse_endpoint|default('manga_page'), tab=active_tab|default('reading'), avail='all') }}" class="btn-browse-secondary">{{ _('Clear') }}</a>
       {% endif %}
     </div>
-  </div>
+  </form>
   {% endif %}
 
-  {% if not titles %}
-  <p class="schedule-empty">
-    No {{ library_label|lower }} yet. Sync MyAnimeList from Catalog, and/or add folders of images or
-    <code>.cbz</code> under <code>media/manga/Your Title/…</code>.
-    {% if library_kind == 'manhwa' %}
-    Manhwa are split by MAL <code>media_type</code> — re-sync if titles are missing here.
-    {% endif %}
-  </p>
+  {% if (library_total|default(0) == 0) and not titles %}
+  <div class="browse-empty">
+    <p class="empty">
+      {% if library_kind == 'manhwa' %}
+      {{ _('No manhwa yet. Sync MyAnimeList from Catalog, and/or add folders under media/manga.') }}
+      {% else %}
+      {{ _('No manga yet. Sync MyAnimeList from Catalog, and/or add folders under media/manga.') }}
+      {% endif %}
+    </p>
+    <a href="{{ url_for('catalog_page') }}" class="btn-browse-secondary">{{ _('Go to Catalog') }}</a>
+  </div>
+  {% elif not titles %}
+  <div class="browse-empty">
+    <p class="empty">{{ _('No titles match these filters.') }}</p>
+    <a href="{{ url_for(browse_endpoint|default('manga_page'), tab='reading', avail='all') }}" class="btn-browse-secondary">{{ _('Clear filters') }}</a>
+  </div>
   {% else %}
   <div class="manga-grid">
     {% for m in titles %}
     {% set status = manga_reading_status(m, manga_completed) %}
-    {% set genre_ok = title_matches_genre(m, selected_genre) if title_matches_genre is defined else true %}
+    {% set read_n = chapters_read_count(m, manga_completed) %}
+    {% set total_n = total_chapters_target(m) if total_chapters_target is defined else (m.chapter_count or m.num_chapters_mal or 0) %}
+    {% set read_pct = ((read_n * 100) / total_n)|round|int if total_n else 0 %}
+    {% if read_pct > 100 %}{% set read_pct = 100 %}{% endif %}
     <article
       class="manga-card{% if not m.has_local %} manga-card--meta{% endif %}"
       data-status="{{ status }}"
       data-has-local="{{ '1' if m.has_local else '0' }}"
       data-genres="{{ (m.genres or []) | join('|') }}"
-      {% if status != active_tab or (selected_avail == 'local' and not m.has_local) or not genre_ok %}hidden{% endif %}
     >
       <button
         type="button"
@@ -88,7 +118,7 @@
         data-release-year="{{ m.release_year or '' }}"
         data-chapter-count="{{ m.chapter_count }}"
         data-num-chapters-mal="{{ m.num_chapters_mal }}"
-        data-chapters-read="{{ chapters_read_count(m, manga_completed) }}"
+        data-chapters-read="{{ read_n }}"
         data-needs-request="{{ '1' if manga_needs_request(m) else '0' }}"
         data-already-requested="{{ '1' if request_key(library_kind, m.id) in requested_ids else '0' }}"
         data-local-count="{{ manga_local_counts(m)[0] }}"
@@ -101,6 +131,9 @@
         aria-label="Open {{ m.title }}"
       >
         <span class="manga-card-cover" aria-hidden="true">
+          {% if total_n > 0 %}
+          <span class="manga-card-progress-badge" title="{{ read_pct }}%">{{ read_pct }}%</span>
+          {% endif %}
           {% if m.poster_url %}
           <img src="{{ m.poster_url }}" alt="" loading="lazy" referrerpolicy="no-referrer">
           {% elif m.cover_chapter_id %}
@@ -135,9 +168,6 @@
     </article>
     {% endfor %}
   </div>
-  <p id="manga-filter-empty" class="schedule-empty" hidden>
-    No titles match these filters. Try another status, availability, or genre.
-  </p>
   {% endif %}
 </section>
 
@@ -156,7 +186,13 @@
         <h2 id="overview-title" class="manga-overview-title"></h2>
         <p id="overview-meta" class="manga-overview-meta"></p>
         <div id="overview-tags" class="meta-tags manga-overview-tags" hidden></div>
-        <p id="overview-synopsis" class="manga-overview-synopsis"></p>
+        <div class="synopsis-block" id="overview-synopsis-block" hidden data-synopsis>
+          <div class="synopsis-panel">
+            <p id="overview-synopsis" class="manga-overview-synopsis synopsis-text"></p>
+            <button type="button" class="synopsis-toggle" id="overview-synopsis-toggle" hidden
+              data-more="{{ _('Show more') }}" data-less="{{ _('Show less') }}">{{ _('Show more') }}</button>
+          </div>
+        </div>
         <div class="manga-overview-actions">
           <button type="button" class="btn-watch manga-overview-continue" id="overview-continue" hidden>
             {{ _('Continue') }}
@@ -266,7 +302,6 @@
 <script>
 (function () {
   const malConnected = {{ mal_connected | tojson }};
-  const initialTab = {{ active_tab | tojson }};
   const openMangaId = {{ open_manga_id | tojson }};
   const overview = document.getElementById('manga-overview');
   const overviewCompleteAll = document.getElementById('overview-complete-all');
@@ -288,6 +323,8 @@
   const overviewMeta = document.getElementById('overview-meta');
   const overviewTags = document.getElementById('overview-tags');
   const overviewSynopsis = document.getElementById('overview-synopsis');
+  const overviewSynopsisBlock = document.getElementById('overview-synopsis-block');
+  const overviewSynopsisToggle = document.getElementById('overview-synopsis-toggle');
   const overviewPoster = document.getElementById('overview-poster');
   const overviewChapters = document.getElementById('overview-chapters');
   const overviewEmpty = document.getElementById('overview-empty');
@@ -297,7 +334,6 @@
   const overviewRangeTo = document.getElementById('overview-range-to');
   const overviewRangeApply = document.getElementById('overview-range-apply');
   const overviewRangeStatus = document.getElementById('overview-range-status');
-  const genreSelect = document.getElementById('manga-genre');
   const chaptersReadMap = {};
   const malChaptersMap = {};
   const lastChapterMap = {};
@@ -340,62 +376,6 @@
     if (btn) statusMap[btn.dataset.mangaId] = card.dataset.status;
   });
 
-  function currentGenre() {
-    return (genreSelect && genreSelect.value) || '';
-  }
-
-  function cardMatchesGenre(card, genre) {
-    if (!genre) return true;
-    const raw = card.dataset.genres || '';
-    if (!raw) return false;
-    return raw.split('|').includes(genre);
-  }
-
-  function applyMangaFilters(tab, avail, genre) {
-    const statusTab = tab || document.querySelector('[data-manga-tab].is-active')?.dataset.mangaTab || 'reading';
-    const availTab = avail || document.querySelector('[data-manga-avail].is-active')?.dataset.mangaAvail || 'all';
-    const genreTab = genre != null ? genre : currentGenre();
-
-    document.querySelectorAll('[data-manga-tab]').forEach((btn) => {
-      const on = btn.dataset.mangaTab === statusTab;
-      btn.classList.toggle('is-active', on);
-      btn.setAttribute('aria-selected', on ? 'true' : 'false');
-    });
-    document.querySelectorAll('[data-manga-avail]').forEach((btn) => {
-      const on = btn.dataset.mangaAvail === availTab;
-      btn.classList.toggle('is-active', on);
-      btn.setAttribute('aria-selected', on ? 'true' : 'false');
-    });
-    if (genreSelect && genre != null) {
-      genreSelect.value = genreTab;
-    }
-
-    let visible = 0;
-    document.querySelectorAll('.manga-card[data-status]').forEach((card) => {
-      const statusOk = card.dataset.status === statusTab;
-      const availOk = availTab === 'all' || card.dataset.hasLocal === '1';
-      const genreOk = cardMatchesGenre(card, genreTab);
-      const show = statusOk && availOk && genreOk;
-      card.hidden = !show;
-      if (show) visible += 1;
-    });
-
-    const empty = document.getElementById('manga-filter-empty');
-    if (empty) empty.hidden = visible > 0;
-
-    const url = new URL(window.location.href);
-    url.searchParams.set('tab', statusTab);
-    if (availTab === 'local') url.searchParams.set('avail', 'local');
-    else url.searchParams.delete('avail');
-    if (genreTab) url.searchParams.set('genre', genreTab);
-    else url.searchParams.delete('genre');
-    window.history.replaceState({}, '', url);
-  }
-
-  function setMangaTab(tab) {
-    applyMangaFilters(tab, null, null);
-  }
-
   function setOverviewStatus(msg, isError) {
     if (!overviewActionStatus) return;
     if (!msg) {
@@ -409,14 +389,38 @@
     overviewActionStatus.classList.toggle('is-error', !!isError);
   }
 
-  document.querySelectorAll('[data-manga-tab]').forEach((btn) => {
-    btn.addEventListener('click', () => applyMangaFilters(btn.dataset.mangaTab, null, null));
-  });
-  document.querySelectorAll('[data-manga-avail]').forEach((btn) => {
-    btn.addEventListener('click', () => applyMangaFilters(null, btn.dataset.mangaAvail, null));
-  });
-  genreSelect?.addEventListener('change', () => {
-    applyMangaFilters(null, null, genreSelect.value || '');
+  function syncOverviewSynopsis(text) {
+    if (!overviewSynopsis || !overviewSynopsisBlock) return;
+    const value = (text || '').trim();
+    overviewSynopsis.textContent = value;
+    overviewSynopsisBlock.hidden = !value;
+    overviewSynopsisBlock.classList.remove('is-expanded');
+    overviewSynopsisBlock.style.minHeight = '';
+    if (overviewSynopsisToggle) {
+      overviewSynopsisToggle.hidden = true;
+      overviewSynopsisToggle.textContent = overviewSynopsisToggle.dataset.more || 'Show more';
+    }
+    if (!value) return;
+    requestAnimationFrame(() => {
+      if (!overviewSynopsisToggle) return;
+      const needs = overviewSynopsis.scrollHeight > overviewSynopsis.clientHeight + 2;
+      overviewSynopsisToggle.hidden = !needs;
+    });
+  }
+
+  overviewSynopsisToggle?.addEventListener('click', () => {
+    if (!overviewSynopsisBlock || !overviewSynopsisToggle) return;
+    const willOpen = !overviewSynopsisBlock.classList.contains('is-expanded');
+    if (willOpen) {
+      overviewSynopsisBlock.style.minHeight = `${overviewSynopsisBlock.offsetHeight}px`;
+    }
+    const open = overviewSynopsisBlock.classList.toggle('is-expanded');
+    if (!open) {
+      overviewSynopsisBlock.style.minHeight = '';
+    }
+    overviewSynopsisToggle.textContent = open
+      ? (overviewSynopsisToggle.dataset.less || 'Show less')
+      : (overviewSynopsisToggle.dataset.more || 'Show more');
   });
 
   let pages = [];
@@ -619,7 +623,7 @@
     const nextIndex = index + dir;
     if (nextIndex >= 0 && nextIndex < pages.length) {
       index = nextIndex;
-      showPage();
+    showPage();
       return;
     }
     const adj = adjacentChapters();
@@ -827,8 +831,7 @@
     overviewTitle.textContent = title;
     overviewMeta.textContent = btn.dataset.meta || '';
     fillOverviewTags(btn);
-    overviewSynopsis.textContent = btn.dataset.synopsis || '';
-    overviewSynopsis.hidden = !btn.dataset.synopsis;
+    syncOverviewSynopsis(btn.dataset.synopsis || '');
     setOverviewStatus('');
 
     overviewPoster.innerHTML = '';
@@ -1029,7 +1032,7 @@
     } else if (row && row.page_index > 0) {
       index = row.page_index;
     } else {
-      index = 0;
+    index = 0;
     }
     showPage();
   }
@@ -1110,7 +1113,7 @@
       overviewRequest.setAttribute('aria-disabled', 'true');
       const cardBtn = document.querySelector(`[data-open-overview][data-manga-id="${CSS.escape(mid)}"]`);
       if (cardBtn) cardBtn.dataset.alreadyRequested = '1';
-      setOverviewStatus(data.created ? 'Added to Library → Requests' : 'Already in Requests', false);
+      setOverviewStatus(data.created ? 'Added to Catalog → Requests' : 'Already in Requests', false);
     } catch (_) {
       setOverviewStatus('Could not save request', true);
       overviewRequest.disabled = false;
@@ -1442,25 +1445,15 @@
         'Title marked completed' + (data.mal_synced ? ' · synced to MAL' : ''),
         false
       );
-      applyMangaFilters(
-        document.querySelector('[data-manga-tab].is-active')?.dataset.mangaTab || 'reading',
-        null,
-        null
-      );
     } catch (_) {
       overviewCompleteAll.disabled = false;
       setOverviewStatus('Could not mark title completed', true);
     }
   });
 
-  // Sync visibility + empty message with SSR tab/avail/genre (e.g. ?avail=local&genre=Action).
-  applyMangaFilters(null, null, null);
-
   if (openMangaId) {
     const openBtn = document.querySelector('[data-open-overview][data-manga-id="' + openMangaId + '"]');
     if (openBtn) {
-      const st = openBtn.dataset.status || statusMap[openMangaId];
-      if (st) setMangaTab(st);
       openOverview(openBtn);
     }
   }

@@ -1,31 +1,31 @@
 {% extends "base.html" %}
-{% block title %}Schedule — {{ site_name }}{% endblock %}
+{% block title %}{{ _('Schedule') }} — {{ site_name }}{% endblock %}
 {% block content %}
 {% set comics_mode = schedule_mode in ('manga', 'manhwa') %}
-{% set comics_label = 'Manhwa' if schedule_mode == 'manhwa' else 'Manga' %}
+{% set comics_label = _('Manhwa') if schedule_mode == 'manhwa' else _('Manga') %}
 {% set comics_endpoint = 'manhwa_page' if schedule_mode == 'manhwa' else 'manga_page' %}
 <section class="page-search schedule-page">
   <header class="browse-header">
-    <h1>Schedule</h1>
-    <div class="schedule-mode-tabs" role="tablist" aria-label="Schedule type">
+    <h1>{{ _('Schedule') }}</h1>
+    <div class="schedule-mode-tabs" role="tablist" aria-label="{{ _('Schedule type') }}">
       <a
         href="{{ url_for('schedule_page', mode='anime') }}"
         class="schedule-mode-tab{% if schedule_mode == 'anime' %} is-active{% endif %}"
         role="tab"
         aria-selected="{{ 'true' if schedule_mode == 'anime' else 'false' }}"
-      >Anime</a>
+      >{{ _('Anime') }}</a>
       <a
         href="{{ url_for('schedule_page', mode='manga') }}"
         class="schedule-mode-tab{% if schedule_mode == 'manga' %} is-active{% endif %}"
         role="tab"
         aria-selected="{{ 'true' if schedule_mode == 'manga' else 'false' }}"
-      >Manga</a>
+      >{{ _('Manga') }}</a>
       <a
         href="{{ url_for('schedule_page', mode='manhwa') }}"
         class="schedule-mode-tab{% if schedule_mode == 'manhwa' %} is-active{% endif %}"
         role="tab"
         aria-selected="{{ 'true' if schedule_mode == 'manhwa' else 'false' }}"
-      >Manhwa</a>
+      >{{ _('Manhwa') }}</a>
     </div>
     {% if comics_mode %}
     <p class="browse-meta">
@@ -36,21 +36,27 @@
     </p>
     {% else %}
     <p class="browse-meta">
-      Currently airing titles from your library — episode drop day &amp; time in your local timezone
-      (MAL times are JST).
+      {{ _('Currently airing titles from your library — episode drop day & time in your local timezone (MAL times are JST).') }}
     </p>
     {% endif %}
   </header>
 
   {% if comics_mode %}
     {% if not manga_releasing %}
-    <p class="schedule-empty">
-      No currently publishing {{ comics_label|lower }} in your library yet. Sync MAL or enable publishing titles in Catalog.
-    </p>
+    <div class="browse-empty">
+      <p class="empty">
+        {% if schedule_mode == 'manhwa' %}
+        {{ _('No currently publishing manhwa in your library yet. Sync MAL or enable publishing titles in Catalog.') }}
+        {% else %}
+        {{ _('No currently publishing manga in your library yet. Sync MAL or enable publishing titles in Catalog.') }}
+        {% endif %}
+      </p>
+      <a href="{{ url_for('catalog_page') }}" class="btn-browse-secondary">{{ _('Sync MAL') }}</a>
+    </div>
     {% else %}
     <section class="schedule-unknown schedule-manga-releasing">
-      <h2>Currently releasing</h2>
-      <p class="browse-meta">{{ manga_releasing|length }} title{{ 's' if manga_releasing|length != 1 else '' }} · no chapter calendar data available</p>
+      <h2>{{ _('Currently releasing') }}</h2>
+      <p class="browse-meta">{{ manga_releasing|length }} {{ _('titles') if manga_releasing|length != 1 else _('title') }} · no chapter calendar data available</p>
       <ul class="schedule-entries">
         {% for m in manga_releasing %}
         <li class="schedule-entry">
@@ -77,14 +83,17 @@
     {% endif %}
   {% else %}
   {% if not schedule_days %}
-  <p class="schedule-empty">No currently airing shows in the library yet. Sync MAL or enable airing titles in Catalog.</p>
+  <div class="browse-empty">
+    <p class="empty">{{ _('No currently airing shows in the library yet. Sync MAL or enable airing titles in Catalog.') }}</p>
+    <a href="{{ url_for('catalog_page') }}" class="btn-browse-secondary">{{ _('Sync MAL') }}</a>
+  </div>
   {% else %}
   <div class="schedule-week" role="list">
     {% for day in schedule_days %}
     <section class="schedule-day{% if day.key == today_key %} is-today{% endif %}" role="listitem" id="day-{{ day.key }}">
       <header class="schedule-day-head">
         <h2>{{ day.label }}</h2>
-        {% if day.key == today_key %}<span class="schedule-today-badge">Today</span>{% endif %}
+        {% if day.key == today_key %}<span class="schedule-today-badge">{{ _('Today') }}</span>{% endif %}
         <span class="schedule-day-count">{{ day.entries|length }}</span>
       </header>
       {% if day.entries %}
@@ -111,7 +120,7 @@
         {% endfor %}
       </ul>
       {% else %}
-      <p class="schedule-day-empty">No drops</p>
+      <p class="schedule-day-empty">{{ _('No drops') }}</p>
       {% endif %}
     </section>
     {% endfor %}
@@ -134,7 +143,7 @@
           </span>
           <span class="schedule-entry-body">
             <span class="schedule-entry-title">{{ entry.title }}</span>
-            <span class="schedule-entry-time">TBA</span>
+            <span class="schedule-entry-time">{{ _('TBA') }}</span>
           </span>
         </a>
       </li>

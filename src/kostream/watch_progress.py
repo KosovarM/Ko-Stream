@@ -90,6 +90,45 @@ def should_persist_watch_progress(
     return True
 
 
+def format_duration(seconds: float) -> str:
+    """Format seconds as M:SS or H:MM:SS for episode list / player chrome."""
+    total = max(0, int(round(seconds)))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
+
+
+def format_episode_progress(entry: float | dict | None) -> str | None:
+    """Display string like ``2:00/24:20`` or ``8%`` for in-progress episodes."""
+    seconds = _progress_seconds(entry)
+    if seconds <= 0:
+        return None
+    duration = _progress_duration(entry)
+    if duration and duration > 0:
+        return f"{format_duration(seconds)}/{format_duration(duration)}"
+    return format_duration(seconds)
+
+
+def episode_in_progress(
+    show: Show,
+    episode: Episode,
+    local_progress: dict | None = None,
+    completed: dict[str, int] | None = None,
+) -> bool:
+    """True when the episode has saved watch progress and is not completed."""
+    if episode_completed(show, episode, local_progress, completed):
+        return False
+    entry = (local_progress or {}).get(episode.id)
+    if not entry:
+        return False
+    seconds = _progress_seconds(entry)
+    if seconds <= 0:
+        return False
+    return not progress_reached_completion(entry)
+
+
 def episode_completed(
     show: Show,
     episode: Episode,

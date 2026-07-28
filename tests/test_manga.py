@@ -615,27 +615,29 @@ def test_manga_genre_filter_ui(tmp_path: Path, monkeypatch):
 
     page = client.get("/manga")
     assert page.status_code == 200
-    assert b'data-manga-genre' in page.data or b'id="manga-genre"' in page.data
+    assert b'name="genre"' in page.data
+    assert b'name="tab"' in page.data
+    assert b"browse-filters--manga" in page.data
+    assert b"browse-status-tabs" in page.data
+    assert b">Apply<" in page.data
     assert b"Mark title completed" in page.data
     assert b"Mark chapter range" in page.data
     assert b"Action" in page.data
     assert b"Romance" in page.data
-    assert b'data-genres="Action|Adventure"' in page.data
-    assert b'data-genres="Romance"' in page.data
 
-    filtered = client.get("/manga?genre=Romance")
+    # Cache metadata has no personal list overlay → titles classify as "new".
+    new_tab = client.get("/manga?tab=new")
+    assert new_tab.status_code == 200
+    assert b'data-genres="Action|Adventure"' in new_tab.data
+    assert b'data-genres="Romance"' in new_tab.data
+    assert b"manga-card-progress-badge" in new_tab.data or b"Action Title" in new_tab.data
+
+    filtered = client.get("/manga?tab=new&genre=Romance")
     assert filtered.status_code == 200
     assert b'value="Romance" selected' in filtered.data or b'selected' in filtered.data
-    # Romance title visible; Action title card hidden via SSR
     assert b"Romance Title" in filtered.data
-    html = filtered.data.decode("utf-8")
-    # Action Title article should carry hidden when genre filter excludes it
-    assert 'data-genres="Action|Adventure"' in html
-    action_idx = html.index('data-genres="Action|Adventure"')
-    article_start = html.rfind("<article", 0, action_idx)
-    article_snip = html[article_start : action_idx + 80]
-    assert "hidden" in article_snip
-
+    assert b"Action Title" not in filtered.data
+    assert b"Clear" in filtered.data or b"Clear filters" in filtered.data
 
 def test_chapter_display_title_from_filename():
     assert chapter_display_title("Chapter 01") == "Chapter 01"

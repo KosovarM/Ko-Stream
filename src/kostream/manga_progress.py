@@ -217,7 +217,7 @@ def manga_reading_status(
     total = total_chapters_target(manga)
     if total and read >= total:
         return "completed"
-    if read >= 1:
+    if read >= 1 or manga.list_status in {"reading", "on_hold"}:
         return "reading"
     return "new"
 

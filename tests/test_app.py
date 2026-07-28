@@ -132,8 +132,50 @@ def test_catalog_page(tmp_path: Path):
     client = _logged_in_client(app)
     resp = client.get("/catalog")
     assert resp.status_code == 200
-    assert b"Library" in resp.data
+    assert b"Catalog" in resp.data
     assert b'name="csrf-token"' in resp.data
+
+
+def test_header_search_empty_q_scope_all_shows_everything(tmp_path: Path):
+    app = _test_app(tmp_path)
+    client = _logged_in_client(app)
+    fake = [
+        Show(
+            id="s1",
+            title="Alpha Series",
+            description="x",
+            media_type="tv",
+            type_label="TV",
+        ),
+        Show(
+            id="m1",
+            title="Beta Movie",
+            description="x",
+            media_type="movie",
+            type_label="Movie",
+        ),
+        Show(
+            id="o1",
+            title="Gamma OVA",
+            description="x",
+            media_type="ova",
+            type_label="OVA",
+        ),
+    ]
+    with patch("kostream.app.scan_library", return_value=fake):
+        empty = client.get("/search?scope=all")
+        assert empty.status_code == 200
+        assert b"All titles" in empty.data
+        assert b"Alpha Series" in empty.data
+        assert b"Beta Movie" in empty.data
+        assert b"Gamma OVA" in empty.data
+        assert b"No titles match" not in empty.data
+
+        blank_q = client.get("/search?scope=all&q=")
+        assert blank_q.status_code == 200
+        assert b"Alpha Series" in blank_q.data
+        assert b"Beta Movie" in blank_q.data
+        assert b"Gamma OVA" in blank_q.data
 
 
 def test_browse_studio_filter(tmp_path: Path):
