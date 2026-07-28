@@ -269,10 +269,11 @@
       </div>
       <span id="reader-progress" class="manga-reader-progress"></span>
     </header>
-    <div class="manga-reader-stage">
-      <div class="manga-reader-page-wrap">
+    <div class="manga-reader-stage" id="reader-stage">
+      <div class="manga-reader-page-wrap" id="reader-paged-wrap">
         <img id="reader-image" class="manga-reader-image" alt="Manga page" draggable="false">
       </div>
+      <div class="manga-reader-webtoon" id="reader-webtoon" hidden></div>
       <button type="button" class="manga-reader-zone manga-reader-zone--left" id="reader-prev" aria-label="Previous page">
         <span class="manga-reader-chevron" aria-hidden="true">‹</span>
       </button>
@@ -281,6 +282,13 @@
       </button>
     </div>
     <footer class="manga-reader-footer">
+      <label class="manga-reader-mode" for="reader-webtoon-toggle" title="Stack all pages in one vertical scroll (webtoon / manhwa style)">
+        <span class="manga-switch">
+          <input type="checkbox" id="reader-webtoon-toggle" role="switch" aria-checked="false">
+          <span class="manga-switch-track" aria-hidden="true"></span>
+        </span>
+        <span class="manga-reader-mode-label">Vertical scroll</span>
+      </label>
       <label class="manga-reader-rtl" for="reader-rtl" title="Flip side taps so the left side advances (manga-style)">
         <span class="manga-switch">
           <input type="checkbox" id="reader-rtl" role="switch" aria-checked="false">
@@ -292,7 +300,7 @@
         title="{% if mal_connected %}Mark this chapter read and sync to MAL{% else %}Mark this chapter as read{% endif %}">
         Mark chapter read{% if mal_connected %} on MAL{% endif %}
       </button>
-      <span class="manga-reader-hint">← → or tap sides · Esc closes</span>
+      <span class="manga-reader-hint" id="reader-hint">← → or tap sides · Esc closes</span>
     </footer>
   </div>
 </div>
@@ -346,14 +354,23 @@
   });
 
   const overlay = document.getElementById('manga-reader');
+  const readerStage = document.getElementById('reader-stage');
+  const pagedWrap = document.getElementById('reader-paged-wrap');
+  const webtoonEl = document.getElementById('reader-webtoon');
   const img = document.getElementById('reader-image');
   const titleEl = document.getElementById('reader-title');
   const chapterEl = document.getElementById('reader-chapter');
   const progressEl = document.getElementById('reader-progress');
   const prevBtn = document.getElementById('reader-prev');
   const nextBtn = document.getElementById('reader-next');
+  const webtoonToggle = document.getElementById('reader-webtoon-toggle');
   const rtlToggle = document.getElementById('reader-rtl');
+  const rtlLabel = document.querySelector('.manga-reader-rtl');
+  const readerHint = document.getElementById('reader-hint');
   const completeBtn = document.getElementById('reader-complete');
+  const READER_MODE_KEY = 'kostream-manga-reader-mode';
+  let webtoonObserver = null;
+  let webtoonScrollTimer = null;
 
   const completeAllLabel = malConnected ? 'Mark title completed on MAL' : 'Mark title completed';
   const completeChapterLabel = malConnected ? 'Mark chapter read on MAL' : 'Mark chapter read';
@@ -553,13 +570,172 @@
     }
   }
 
+  function isWebtoon() {
+    return !!(webtoonToggle && webtoonToggle.checked);
+  }
+
+  function loadReaderMode() {
+    try {
+      return localStorage.getItem(READER_MODE_KEY) === 'webtoon' ? 'webtoon' : 'paged';
+    } catch (_) {
+      return 'paged';
+    }
+  }
+
+  function persistReaderMode(mode) {
+    try {
+      localStorage.setItem(READER_MODE_KEY, mode === 'webtoon' ? 'webtoon' : 'paged');
+    } catch (_) {}
+  }
+
+  function teardownWebtoonObserver() {
+    if (webtoonObserver) {
+      webtoonObserver.disconnect();
+      webtoonObserver = null;
+    }
+    if (webtoonScrollTimer) {
+      clearTimeout(webtoonScrollTimer);
+      webtoonScrollTimer = null;
+    }
+  }
+
+  function clearWebtoonStrip() {
+    teardownWebtoonObserver();
+    if (webtoonEl) webtoonEl.innerHTML = '';
+  }
+
+  function syncModeUi() {
+    const webtoon = isWebtoon();
+    if (webtoonToggle) {
+      webtoonToggle.setAttribute('aria-checked', webtoon ? 'true' : 'false');
+    }
+    if (overlay) overlay.classList.toggle('is-webtoon', webtoon);
+    if (pagedWrap) pagedWrap.hidden = webtoon;
+    if (webtoonEl) webtoonEl.hidden = !webtoon;
+    if (prevBtn) prevBtn.hidden = webtoon;
+    if (nextBtn) nextBtn.hidden = webtoon;
+    if (rtlLabel) {
+      rtlLabel.hidden = webtoon;
+      rtlLabel.setAttribute('aria-hidden', webtoon ? 'true' : 'false');
+    }
+    if (readerHint) {
+      readerHint.textContent = webtoon
+        ? 'Scroll · ↑ ↓ · Esc closes'
+        : '← → or tap sides · Esc closes';
+    }
+  }
+
+  function updateWebtoonProgress(pageIndex) {
+    if (!pages.length) return;
+    index = Math.max(0, Math.min(pageIndex, pages.length - 1));
+    viewedPages.add(index);
+    // Mark earlier pages as viewed when scrolling down past them
+    for (let i = 0; i <= index; i++) viewedPages.add(i);
+    if (progressEl) progressEl.textContent = (index + 1) + ' / ' + pages.length;
+    savePageProgress();
+    maybeAutoComplete();
+  }
+
+  function setupWebtoonObserver() {
+    teardownWebtoonObserver();
+    if (!webtoonEl || !readerStage || !pages.length) return;
+    const ratios = new Map();
+    webtoonObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const i = Number(entry.target.dataset.pageIndex);
+          if (!Number.isFinite(i)) return;
+          ratios.set(i, entry.isIntersecting ? entry.intersectionRatio : 0);
+          if (entry.isIntersecting) viewedPages.add(i);
+        });
+        let best = index;
+        let bestRatio = -1;
+        ratios.forEach((ratio, i) => {
+          if (ratio > bestRatio) {
+            bestRatio = ratio;
+            best = i;
+          }
+        });
+        if (bestRatio > 0 && best !== index) {
+          updateWebtoonProgress(best);
+        } else if (bestRatio > 0) {
+          if (progressEl) progressEl.textContent = (index + 1) + ' / ' + pages.length;
+          savePageProgress();
+          maybeAutoComplete();
+        }
+      },
+      { root: readerStage, threshold: [0.15, 0.35, 0.55, 0.75] }
+    );
+    webtoonEl.querySelectorAll('[data-page-index]').forEach((el) => {
+      webtoonObserver.observe(el);
+    });
+  }
+
+  function scrollWebtoonToIndex(pageIndex, behavior) {
+    if (!webtoonEl) return;
+    const target = webtoonEl.querySelector(
+      '[data-page-index="' + pageIndex + '"]'
+    );
+    if (!target) return;
+    target.scrollIntoView({
+      block: 'start',
+      behavior: behavior === 'smooth' ? 'smooth' : 'auto',
+    });
+  }
+
+  function renderWebtoon() {
+    if (!webtoonEl || !pages.length) return;
+    clearWebtoonStrip();
+    syncModeUi();
+    const frag = document.createDocumentFragment();
+    pages.forEach((page, i) => {
+      const pageImg = document.createElement('img');
+      pageImg.className = 'manga-reader-webtoon-img';
+      pageImg.src = page.url;
+      pageImg.alt = 'Page ' + (i + 1);
+      pageImg.dataset.pageIndex = String(i);
+      pageImg.draggable = false;
+      pageImg.loading = i <= index + 2 ? 'eager' : 'lazy';
+      pageImg.decoding = 'async';
+      frag.appendChild(pageImg);
+    });
+    webtoonEl.appendChild(frag);
+    index = Math.max(0, Math.min(index, pages.length - 1));
+    viewedPages.add(index);
+    if (progressEl) progressEl.textContent = (index + 1) + ' / ' + pages.length;
+    requestAnimationFrame(() => {
+      scrollWebtoonToIndex(index, 'auto');
+      setupWebtoonObserver();
+      savePageProgress();
+    });
+  }
+
+  function renderReader() {
+    syncModeUi();
+    if (!pages.length) return;
+    if (isWebtoon()) {
+      renderWebtoon();
+    } else {
+      clearWebtoonStrip();
+      showPage();
+    }
+  }
+
+  function setReaderMode(mode) {
+    const webtoon = mode === 'webtoon';
+    if (webtoonToggle) webtoonToggle.checked = webtoon;
+    persistReaderMode(webtoon ? 'webtoon' : 'paged');
+    renderReader();
+  }
+
   function isRtl() {
-    return !!(rtlToggle && rtlToggle.checked);
+    return !!(rtlToggle && rtlToggle.checked) && !isWebtoon();
   }
 
   function syncRtlUi() {
     const rtl = isRtl();
     if (rtlToggle) rtlToggle.setAttribute('aria-checked', rtl ? 'true' : 'false');
+    if (isWebtoon()) return;
     const atFirst = !pages.length || index <= 0;
     const atLast = pages.length > 0 && index >= pages.length - 1;
     const adj = adjacentChapters();
@@ -594,7 +770,7 @@
   }
 
   function showPage() {
-    if (!pages.length) return;
+    if (!pages.length || isWebtoon()) return;
     index = Math.max(0, Math.min(index, pages.length - 1));
     viewedPages.add(index);
     img.src = pages[index].url;
@@ -617,6 +793,37 @@
 
   async function step(delta) {
     if (stepping || !pages.length) return;
+    if (isWebtoon()) {
+      // In vertical mode, left/right (and arrows) move one page via scroll.
+      const nextIndex = index + delta;
+      if (nextIndex >= 0 && nextIndex < pages.length) {
+        index = nextIndex;
+        viewedPages.add(index);
+        scrollWebtoonToIndex(index, 'smooth');
+        if (progressEl) progressEl.textContent = (index + 1) + ' / ' + pages.length;
+        savePageProgress();
+        return;
+      }
+      const adj = adjacentChapters();
+      if (delta > 0 && adj.next) {
+        stepping = true;
+        try {
+          await openReader(activeMangaId, adj.next.id, activeMangaTitle, adj.next.title);
+        } finally {
+          stepping = false;
+        }
+      } else if (delta < 0 && adj.prev) {
+        stepping = true;
+        try {
+          await openReader(activeMangaId, adj.prev.id, activeMangaTitle, adj.prev.title, {
+            startAtEnd: true,
+          });
+        } finally {
+          stepping = false;
+        }
+      }
+      return;
+    }
     // delta is visual direction: -1 = left, +1 = right.
     // RTL flips so visual left advances (higher page index).
     const dir = isRtl() ? -delta : delta;
@@ -997,6 +1204,8 @@
     chapterEl.textContent = activeChapterTitle;
     progressEl.textContent = '…';
     img.removeAttribute('src');
+    clearWebtoonStrip();
+    syncModeUi();
     if (completeBtn) {
       completeBtn.disabled = chapterDone;
       completeBtn.textContent = chapterDone ? 'Chapter marked read' : completeChapterLabel;
@@ -1034,7 +1243,7 @@
     } else {
     index = 0;
     }
-    showPage();
+    renderReader();
   }
 
   async function closeReader() {
@@ -1046,6 +1255,7 @@
     pages = [];
     viewedPages = new Set();
     img.removeAttribute('src');
+    clearWebtoonStrip();
     if (activeMangaId && !overview.hidden) {
       refreshOverviewDoneState();
     }
@@ -1063,9 +1273,35 @@
   // step() applies RTL flip so left advances when RTL is on.
   prevBtn?.addEventListener('click', () => step(-1));
   nextBtn?.addEventListener('click', () => step(1));
+  if (webtoonToggle) {
+    webtoonToggle.checked = loadReaderMode() === 'webtoon';
+    syncModeUi();
+  }
+  webtoonToggle?.addEventListener('change', () => {
+    setReaderMode(webtoonToggle.checked ? 'webtoon' : 'paged');
+  });
+  readerStage?.addEventListener(
+    'scroll',
+    () => {
+      if (!isWebtoon() || !pages.length) return;
+      if (webtoonScrollTimer) clearTimeout(webtoonScrollTimer);
+      webtoonScrollTimer = setTimeout(() => {
+        webtoonScrollTimer = null;
+        // Near bottom of last page → ensure final page counted for autocomplete
+        const el = readerStage;
+        if (!el) return;
+        const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 48;
+        if (nearBottom && pages.length) {
+          viewedPages.add(pages.length - 1);
+          updateWebtoonProgress(pages.length - 1);
+        }
+      }, 120);
+    },
+    { passive: true }
+  );
   rtlToggle?.addEventListener('change', () => {
     syncRtlUi();
-    if (pages.length) showPage();
+    if (pages.length && !isWebtoon()) showPage();
   });
   completeBtn?.addEventListener('click', () => markChapterComplete({ silent: false }));
 
@@ -1330,6 +1566,30 @@
         closeReader();
         return;
       }
+      if (isWebtoon()) {
+        if (event.key === 'ArrowDown' || event.key === 'PageDown') {
+          event.preventDefault();
+          step(1);
+          return;
+        }
+        if (event.key === 'ArrowUp' || event.key === 'PageUp') {
+          event.preventDefault();
+          step(-1);
+          return;
+        }
+        // Keep left/right usable as page jumps in vertical mode too
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          step(-1);
+          return;
+        }
+        if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          step(1);
+          return;
+        }
+        return;
+      }
       if (event.key === 'ArrowLeft') {
         event.preventDefault();
         step(-1);
@@ -1459,6 +1719,7 @@
   }
 
   syncRtlUi();
+  syncModeUi();
 })();
 </script>
 {% endblock %}

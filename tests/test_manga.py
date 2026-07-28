@@ -264,6 +264,10 @@ def test_manga_routes(tmp_path: Path):
     resp = client.get("/manga")
     assert resp.status_code == 200
     assert b"Manga" in resp.data
+    assert b'id="reader-webtoon-toggle"' in resp.data
+    assert b"Vertical scroll" in resp.data
+    assert b"manga-reader-webtoon" in resp.data
+    assert b"kostream-manga-reader-mode" in resp.data
     titles = scan_manga_library(manga_root)
     mid = titles[0].id
     pages = client.get(f"/api/manga/{mid}/pages").get_json()

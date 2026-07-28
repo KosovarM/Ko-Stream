@@ -3350,6 +3350,16 @@ body.manga-reader-open {
   padding: 0.35rem;
 }
 
+.manga-reader.is-webtoon .manga-reader-stage {
+  align-items: flex-start;
+  justify-content: center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+  -webkit-overflow-scrolling: touch;
+}
+
 .manga-reader-page-wrap {
   height: 100%;
   width: 100%;
@@ -3359,12 +3369,54 @@ body.manga-reader-open {
   overflow: auto;
 }
 
+.manga-reader-page-wrap[hidden],
+.manga-reader-webtoon[hidden] {
+  display: none !important;
+}
+
 .manga-reader-image {
   max-width: 100%;
   max-height: calc(100vh - 7.5rem);
   object-fit: contain;
   user-select: none;
   pointer-events: none;
+}
+
+.manga-reader-webtoon {
+  width: min(860px, 100%);
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding-bottom: 2.5rem;
+}
+
+.manga-reader-webtoon-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  user-select: none;
+  -webkit-user-drag: none;
+  background: #0a0b12;
+}
+
+.manga-reader-mode {
+  font-size: 0.82rem;
+  color: var(--muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.manga-reader-mode-label {
+  line-height: 1.2;
+}
+
+.manga-reader.is-webtoon .manga-reader-zone {
+  display: none;
 }
 
 /* ~20% side tap strips; center stays non-nav */
