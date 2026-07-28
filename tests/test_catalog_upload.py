@@ -161,6 +161,67 @@ def test_catalog_upload_episode_with_optional_subtitle(tmp_path: Path):
     assert again.status_code == 400
 
 
+def test_catalog_upload_creates_show_folder_when_missing(tmp_path: Path):
+    """First upload for a catalog title must create the anime folder under media root."""
+    media = tmp_path / "media" / "shows"
+    media.mkdir(parents=True)
+    catalog = tmp_path / "selected.json"
+    # Catalog row with a folder name, but directory intentionally absent.
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-42",
+                    enabled=True,
+                    source="mal",
+                    title="Brand New Show",
+                    folder="Brand New Show",
+                    mal_id=42,
+                )
+            ]
+        ),
+        catalog,
+    )
+    assert not (media / "Brand New Show").exists()
+
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    add_test_user(users, "manager", "managerpass", role="manager")
+    app = create_app(
+        media_root=media,
+        catalog_path=catalog,
+        users_path=users,
+        user_data_base=user_data,
+    )
+    client = app.test_client()
+    login_client(client, "manager", "managerpass")
+
+    missing = client.get("/api/catalog/mal-42/missing-episodes")
+    assert missing.status_code == 200
+    episode_id = missing.get_json()["episodes"][0]["episode_id"]
+
+    resp = client.post(
+        "/api/catalog/upload-episode",
+        data={
+            "show_id": "mal-42",
+            "episode_id": episode_id,
+            "video": (BytesIO(b"first-ep"), "ep1.mp4"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data["folder"] == "Brand New Show"
+    assert data["filename"] == "S01E01.mp4"
+    folder = media / "Brand New Show"
+    assert folder.is_dir()
+    assert (folder / "S01E01.mp4").read_bytes() == b"first-ep"
+    assert data["local_count"] >= 1
+    assert episode_id not in {ep["episode_id"] for ep in data["missing_episodes"]}
+
+
 def test_require_missing_blocks_existing_file(tmp_path: Path):
     media = tmp_path / "shows"
     catalog = tmp_path / "selected.json"

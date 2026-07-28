@@ -83,6 +83,7 @@ def test_upload_renames_to_sxxexx(tmp_path: Path):
     )
     ep = Episode("mal-1-s04e02", "mal-1", 4, 2, "Episode 2", "demo.mp4")
     show = Show(id="mal-1", title="Demo Show", description="", mal_id=1, episodes=[ep])
+    assert not (media / "Demo Show").exists()
     result = save_episode_file(
         show,
         ep,
@@ -92,6 +93,7 @@ def test_upload_renames_to_sxxexx(tmp_path: Path):
         catalog_path=catalog,
     )
     assert result["filename"] == "S04E02.mp4"
+    assert (media / "Demo Show").is_dir()
     assert (media / "Demo Show" / "S04E02.mp4").read_bytes() == b"fake-video-bytes"
 
 

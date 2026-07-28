@@ -96,12 +96,10 @@ def prepare_show_folder(
     folder_name: str | None = None,
 ) -> dict:
     """Create media folder if needed and attach ``folder`` on the catalog entry."""
-    media_root.mkdir(parents=True, exist_ok=True)
     catalog = load_catalog(catalog_path)
     entry = catalog.get(show.id)
     name = _sanitize_folder_name(folder_name or suggest_folder_name(show, entry))
-    folder_path = _safe_child_dir(media_root, name)
-    folder_path.mkdir(parents=True, exist_ok=True)
+    folder_path = _ensure_show_dir(media_root, name)
 
     if entry:
         updated = CatalogEntry(
@@ -127,7 +125,13 @@ def prepare_show_folder(
         )
     catalog = upsert_entry(catalog, updated)
     save_catalog(catalog, catalog_path)
-    return build_local_info(show, media_root, catalog_path=catalog_path)
+    info = build_local_info(show, media_root, catalog_path=catalog_path)
+    # Prefer the directory we actually created — avoid stale catalog/title mismatch.
+    info["folder"] = name
+    info["folder_path"] = str(folder_path)
+    info["folder_exists"] = folder_path.is_dir()
+    info["under_media_root"] = _is_under(folder_path, media_root.resolve())
+    return info
 
 
 def list_incomplete_shows(
@@ -236,12 +240,16 @@ def save_episode_file(
         raise LocalMediaError("Episode is already available")
 
     info = prepare_show_folder(show, media_root, catalog_path=catalog_path)
-    folder_path = Path(info["folder_path"])
+    # Re-ensure under anime root (first upload for a title must create the folder).
+    folder_path = _ensure_show_dir(media_root, str(info["folder"]))
     target_name = expected_episode_filename(episode, ext=ext)
     target = _safe_child_file(folder_path, target_name)
     if require_missing and target.is_file():
         raise LocalMediaError("Episode file already exists")
-    target.write_bytes(data)
+    try:
+        target.write_bytes(data)
+    except OSError as exc:
+        raise LocalMediaError(f"Could not write episode file: {exc}") from exc
     entry = mark_local(
         show.id,
         episode.id,
@@ -274,9 +282,12 @@ def save_subtitle_file(
         raise LocalMediaError("Empty subtitle upload")
     target_name = expected_subtitle_filename(episode, upload_name)
     info = prepare_show_folder(show, media_root, catalog_path=catalog_path)
-    folder_path = Path(info["folder_path"])
+    folder_path = _ensure_show_dir(media_root, str(info["folder"]))
     target = _safe_child_file(folder_path, target_name)
-    target.write_bytes(data)
+    try:
+        target.write_bytes(data)
+    except OSError as exc:
+        raise LocalMediaError(f"Could not write subtitle file: {exc}") from exc
     return {
         "ok": True,
         "filename": target_name,
@@ -314,6 +325,18 @@ def _sanitize_folder_name(name: str) -> str:
     if cleaned in (".", ".."):
         raise LocalMediaError("Invalid folder name")
     return cleaned[:_MAX_FOLDER_LEN]
+
+
+def _ensure_show_dir(media_root: Path, folder_name: str) -> Path:
+    """Resolve a path-safe show folder under ``media_root`` and create it."""
+    name = _sanitize_folder_name(folder_name)
+    try:
+        media_root.mkdir(parents=True, exist_ok=True)
+        folder_path = _safe_child_dir(media_root, name)
+        folder_path.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise LocalMediaError(f"Could not create show folder: {exc}") from exc
+    return folder_path
 
 
 def _safe_child_dir(root: Path, name: str) -> Path:
