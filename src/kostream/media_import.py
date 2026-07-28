@@ -29,7 +29,7 @@ from kostream.mal import (
     merge_anime_details_into_cache,
     update_anime_list_status,
 )
-from kostream.manga_catalog import _manga_match_key, _manga_tokens
+from kostream.manga_catalog import _manga_tokens
 from kostream.media_title_aliases import (
     best_catalog_match,
     entry_match_keys,

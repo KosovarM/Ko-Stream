@@ -9,6 +9,7 @@ from pathlib import Path
 import kostream.sync_jobs as sync_jobs
 from kostream.app import create_app
 from kostream.mal import MalConfig, MalTokens
+from kostream.mangadex import ChapterTitleSyncResult
 
 _MAL_ID = "a" * 32
 _MAL_SECRET = "b" * 32
@@ -67,12 +68,20 @@ def test_anime_sync_skips_manga_and_titles(tmp_path, monkeypatch):
         sync_jobs,
         "sync_catalog_chapter_titles",
         lambda *a, **k: calls.append("chapter_titles")
-        or sync_jobs.ChapterTitleSyncResult(updated=9),
+        or ChapterTitleSyncResult(updated=9),
     )
     monkeypatch.setattr("kostream.library.scan_library", lambda *a, **k: [])
     monkeypatch.setattr(
         "kostream.requests_store.clear_fulfilled_requests",
         lambda **k: 0,
+    )
+    monkeypatch.setattr(
+        "kostream.thumbnails.sync_anime_thumbnails_from_cache",
+        lambda *a, **k: 0,
+    )
+    monkeypatch.setattr(
+        "kostream.sync_index.refresh_anime_index",
+        lambda **k: None,
     )
 
     job = sync_jobs.start_anime_sync(
@@ -119,11 +128,19 @@ def test_manga_sync_skips_anime_and_titles(tmp_path, monkeypatch):
         sync_jobs,
         "sync_catalog_chapter_titles",
         lambda *a, **k: calls.append("chapter_titles")
-        or sync_jobs.ChapterTitleSyncResult(updated=9),
+        or ChapterTitleSyncResult(updated=9),
     )
     monkeypatch.setattr(
         "kostream.requests_store.clear_fulfilled_requests",
         lambda **k: 0,
+    )
+    monkeypatch.setattr(
+        "kostream.thumbnails.sync_manga_thumbnails_from_cache",
+        lambda *a, **k: 0,
+    )
+    monkeypatch.setattr(
+        "kostream.sync_index.refresh_manga_index",
+        lambda **k: None,
     )
 
     job = sync_jobs.start_manga_sync(
@@ -163,7 +180,7 @@ def test_anime_title_sync_only(tmp_path, monkeypatch):
         sync_jobs,
         "sync_catalog_chapter_titles",
         lambda *a, **k: calls.append("chapter_titles")
-        or sync_jobs.ChapterTitleSyncResult(updated=5),
+        or ChapterTitleSyncResult(updated=5),
     )
 
     job = sync_jobs.start_anime_title_sync(catalog)
@@ -190,7 +207,7 @@ def test_chapter_title_sync_only(tmp_path, monkeypatch):
         "sync_catalog_chapter_titles",
         lambda *a, **k: (
             calls.append("chapter_titles")
-            or sync_jobs.ChapterTitleSyncResult(updated=5, attempted=5)
+            or ChapterTitleSyncResult(updated=5, attempted=5)
         ),
     )
 

@@ -147,13 +147,13 @@
     <p class="catalog-meta">
       {{ _('Scan your anime media folder for titles with video files that are not in the catalog yet. Matches MAL where possible and sets Plan to Watch when connected.') }}
     </p>
-    {% if is_master %}
+    {% if can_import_media %}
     <div class="mal-actions">
       <button type="button" class="btn-watch" id="catalog-import-media">{{ _('Import from media') }}</button>
       <span class="catalog-meta" id="catalog-import-preview" hidden></span>
     </div>
     {% else %}
-    <p class="catalog-meta">{{ _('Master account required to import from media.') }}</p>
+    <p class="catalog-meta">{{ _('Admin or Manager account required to import from media.') }}</p>
     {% endif %}
   </section>
 

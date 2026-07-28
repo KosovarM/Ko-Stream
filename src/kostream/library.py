@@ -341,20 +341,6 @@ def _mal_episode_count(cached) -> int:
     return total
 
 
-def _mal_episode_list(show_id: str, count: int) -> list[Episode]:
-    return [
-        Episode(
-            f"{show_id}-s01e{num:02d}",
-            show_id,
-            1,
-            num,
-            f"Episode {num}",
-            "demo.mp4",
-        )
-        for num in range(1, count + 1)
-    ]
-
-
 def _metadata_only_show(entry: CatalogEntry) -> Show:
     show_id = entry.id
     meta = fetch_anime(entry.anilist_id) if entry.anilist_id else None

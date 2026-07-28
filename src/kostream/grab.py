@@ -268,18 +268,6 @@ def set_overrides_bulk(
     return saved
 
 
-def clear_override(show_id: str, episode_id: str, *, base: Path | None = None) -> bool:
-    path = overrides_path(base)
-    data = _load_json(path, default={})
-    key = _cache_key(show_id, episode_id)
-    if key not in data:
-        return False
-    del data[key]
-    _save_json(path, data)
-    _delete_cache_entry(key, base=base)
-    return True
-
-
 def _demo_url_for(episode: Episode) -> str:
     idx = max(0, episode.number - 1) % len(DEMO_STREAM_URLS)
     return DEMO_STREAM_URLS[idx]
@@ -383,14 +371,6 @@ def _write_cache_entry(
         "expires_at": int(time.time()) + cache_ttl_seconds(),
     }
     _save_json(path, data)
-
-
-def _delete_cache_entry(key: str, *, base: Path | None = None) -> None:
-    path = cache_path(base)
-    data = _load_json(path, default={})
-    if key in data:
-        del data[key]
-        _save_json(path, data)
 
 
 def _load_json(path: Path, *, default: Any) -> Any:

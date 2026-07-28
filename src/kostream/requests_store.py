@@ -59,14 +59,6 @@ def kind_for_show(show: Show) -> str:
     return _SHOW_KIND_MAP.get(classify_show_kind(show), KIND_SERIES)
 
 
-def kind_for_manga(manga: MangaTitle, *, library_kind: str | None = None) -> str:
-    if library_kind in (KIND_MANGA, KIND_MANHWA):
-        return library_kind
-    if manga.is_manhwa:
-        return KIND_MANHWA
-    return KIND_MANGA
-
-
 def show_local_counts(
     show: Show,
     local_info: dict[str, Any] | None = None,

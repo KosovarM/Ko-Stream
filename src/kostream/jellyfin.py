@@ -9,7 +9,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 import json
 
-from kostream.models import Episode, Show, slugify
+from kostream.models import Episode, Show
 
 
 @dataclass

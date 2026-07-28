@@ -79,18 +79,21 @@ If it does not load, allow the port in Windows Firewall (Admin PowerShell):
 New-NetFirewallRule -DisplayName "Ko-Stream" -Direction Inbound -Protocol TCP -LocalPort 5001 -Action Allow -Profile Private
 ```
 
-**Security:** There is no login yet. Basic CSRF protection covers mutating POSTs (session token + `X-CSRF-Token` on fetch). Use only on a trusted home network (not public Wi‑Fi / not exposed to the internet). Optional secret: `KOSTREAM_SECRET_KEY` (otherwise a key is stored in `data/.flask_secret`). Disable CSRF for local scripts with `KOSTREAM_CSRF=0`.
+**Security:** Login + roles are required. CSRF protects mutating POSTs. For home LAN only — do **not** port-forward to the internet yet. Set `KOSTREAM_SECRET_KEY` on the Pi (see `.env.example`). Disable CSRF for local scripts with `KOSTREAM_CSRF=0`.
+
+**Pi / USB disk:** See [`docs/PI_LAN_PREP.md`](docs/PI_LAN_PREP.md). Backup accounts/progress with `python scripts/backup_data.py`.
 
 ## Media roots
 
 Anime and manga files live **outside the git repo** (disk space):
 
-| Kind | Default path | Env override |
-|------|----------------|--------------|
-| Anime | `D:\Media\Ko-Stream\anime` | `KOSTREAM_ANIME_ROOT` or `KOSTREAM_MEDIA_ROOT` |
-| Manga | `D:\Media\Ko-Stream\manga` | `KOSTREAM_MANGA_ROOT` |
+| Kind | Windows default | Raspberry Pi (USB `PiVault`) | Env |
+|------|-----------------|------------------------------|-----|
+| Anime | `D:\Media\Ko-Stream\anime` | `/media/kosovar/PiVault/Media/Ko-Stream/anime` | `KOSTREAM_ANIME_ROOT` |
+| Manga | `D:\Media\Ko-Stream\manga` | `/media/kosovar/PiVault/Media/Ko-Stream/manga` | `KOSTREAM_MANGA_ROOT` |
+| Thumbnails | `D:\Media\Ko-Stream\Thumbnail` | `/media/kosovar/PiVault/Media/Ko-Stream/Thumbnail` | optional `KOSTREAM_THUMBNAIL_ROOT` |
 
-Repo `media/shows/` and `media/manga/` keep README stubs only. On a Pi / other host, set the env vars to your NAS or USB path.
+Pi SSH: `kosovar@192.168.178.10`. Full LAN prep: [`docs/PI_LAN_PREP.md`](docs/PI_LAN_PREP.md). Host inventory lives in the Obsidian vault.
 
 ## Catalog (fast local testing)
 

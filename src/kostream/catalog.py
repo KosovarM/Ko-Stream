@@ -90,16 +90,6 @@ def save_catalog(state: CatalogState, path: Path | None = None) -> None:
     atomic_write_json(file_path, payload, ensure_ascii=False)
 
 
-def list_local_folders(media_root: Path) -> list[str]:
-    if not media_root.exists():
-        return []
-    return sorted(
-        folder.name
-        for folder in media_root.iterdir()
-        if folder.is_dir() and not folder.name.startswith(".")
-    )
-
-
 def upsert_entry(state: CatalogState, entry: CatalogEntry) -> CatalogState:
     existing = state.get(entry.id)
     if existing and existing.added_at and not entry.added_at:

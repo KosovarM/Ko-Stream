@@ -66,4 +66,8 @@ Thumbs.db
 
 .env
 .env.*
+!.env.example
 data/.flask_secret
+
+# Local data backups (scripts/backup_data.py)
+backups/

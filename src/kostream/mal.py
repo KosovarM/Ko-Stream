@@ -32,14 +32,9 @@ MAL_API_URL = "https://api.myanimelist.net/v2"
 MAL_DATA_DIR = Path(__file__).resolve().parents[2] / "data" / "mal"
 # Shared anime/manga metadata cache (personal list fields live in per-user overlay).
 CACHE_DIR = MAL_DATA_DIR / "cache"
-# Legacy global paths — unused at runtime (migrate-accounts moves them to master).
-TOKEN_FILE = MAL_DATA_DIR / "tokens.json"
-LAST_SYNC_FILE = MAL_DATA_DIR / "last_sync.json"
-PENDING_OAUTH_FILE = MAL_DATA_DIR / "pending_oauth.json"
 
 # Personal list fields — never written to shared cache after list-state split.
 ANIME_LIST_FIELD_KEYS = ("list_status", "num_episodes_watched", "score")
-MANGA_LIST_FIELD_KEYS = ("list_status", "num_volumes_read", "num_chapters_read", "score")
 ANIME_LIST_STATUSES = frozenset(
     {"watching", "completed", "on_hold", "dropped", "plan_to_watch"}
 )
@@ -1815,11 +1810,6 @@ def _related_anime_from_cache(items: list[dict[str, Any]]) -> list[RelatedAnime]
                 )
             )
     return related
-
-
-def _pending_file(user_id: str) -> Path:
-    """Deprecated alias — use ``pending_oauth_path``."""
-    return pending_oauth_path(user_id)
 
 
 def _exchange_code(cfg: MalConfig, code: str, code_verifier: str) -> MalTokens:

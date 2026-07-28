@@ -46,10 +46,8 @@ from kostream.browse import (
     resolve_request_availability,
 )
 from kostream.catalog import (
-    CATALOG_DIR,
     SELECTED_FILE,
     CatalogEntry,
-    CatalogState,
     find_matching_entry,
     load_catalog,
     remove_entry,
@@ -170,7 +168,6 @@ from kostream.watch_progress import (
     next_unwatched_episode,
     recently_added,
     resume_seconds_for_episode,
-    save_completed,
     should_persist_watch_progress,
     sort_by_mean_score,
 )
@@ -265,11 +262,8 @@ from kostream.users import (
 )
 
 
-import m3u8
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
-PROGRESS_FILE = Path(__file__).resolve().parents[2] / "data" / "progress.json"
-COMPLETED_FILE = Path(__file__).resolve().parents[2] / "data" / "completed.json"
 _SECRET_FILE = Path(__file__).resolve().parents[2] / "data" / ".flask_secret"
 
 
@@ -685,6 +679,7 @@ def create_app(
             "current_user": current_user(),
             "is_master": user_has_role("master"),
             "can_manage_requests": user_has_role("master", "manager"),
+            "can_import_media": user_has_role("master", "manager"),
             "users_bootstrapped": users_bootstrapped(app.config["USERS_PATH"]),
             "jellyfin_connected": jellyfin is not None,
             "mal_connected": bool(uid and mal_is_connected(uid)),
@@ -1544,7 +1539,7 @@ def create_app(
 
     @app.route("/api/catalog/import-media/preview")
     def api_catalog_import_media_preview():
-        denied = _require_api_roles("master")
+        denied = _require_api_roles("master", "manager")
         if denied:
             return denied
         rows = preview_media_import(
@@ -1555,7 +1550,7 @@ def create_app(
 
     @app.route("/api/catalog/import-media", methods=["POST"])
     def api_catalog_import_media():
-        denied = _require_api_roles("master")
+        denied = _require_api_roles("master", "manager")
         if denied:
             return denied
         uid = _current_mal_user_id()
@@ -2961,15 +2956,6 @@ def _continue_watching(
         if nxt:
             pairs.append((show, nxt))
     pairs.sort(key=lambda pair: pair[0].title.casefold())
-    return pairs[:limit]
-
-
-def _latest_episodes(shows: list[Show], limit: int = 12) -> list[tuple[Show, Episode]]:
-    pairs: list[tuple[Show, Episode]] = []
-    for show in shows:
-        ep = show.latest_episode
-        if ep:
-            pairs.append((show, ep))
     return pairs[:limit]
 
 

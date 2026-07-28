@@ -56,16 +56,6 @@ def login_error_message(error_code: str) -> str:
     return _(LOGIN_ERRORS.get(error_code, LOGIN_ERRORS["invalid"]))
 
 
-def login_required(view: F) -> F:
-    @wraps(view)
-    def wrapped(*args: Any, **kwargs: Any):
-        if current_user_id() is None:
-            return redirect(url_for("login", next=request.path))
-        return view(*args, **kwargs)
-
-    return wrapped  # type: ignore[return-value]
-
-
 def role_required(*roles: str) -> Callable[[F], F]:
     allowed = {r.casefold() for r in roles}
 

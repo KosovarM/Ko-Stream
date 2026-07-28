@@ -6,7 +6,6 @@ from kostream.models import Show
 
 META_GENRES = frozenset({"Local", "Demo", "Catalog", "MAL"})
 PAGE_SIZE = 25
-GRID_COLS = 5
 AVAIL_ALL = "all"
 AVAIL_LOCAL = "local"
 AVAIL_STREAM = "stream"
@@ -42,8 +41,6 @@ _TYPE_LABELS = {
 
 # Strict MAL movie types
 _MOVIE_TYPES = frozenset({"movie", "film"})
-# Primary series list — TV only when type is known
-_TV_TYPES = frozenset({"tv"})
 # Non-TV / non-Movie extras
 _SPECIAL_TYPES = frozenset({
     "ova",

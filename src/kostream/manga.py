@@ -329,25 +329,6 @@ def _chapter_number_from_stem(raw_name: str) -> str | None:
     return m.group(1) if m else None
 
 
-def _comicinfo_title_from_cbz(path: Path) -> str | None:
-    """Read ``<Title>`` from ComicInfo.xml inside a CBZ/ZIP, if present."""
-    try:
-        with zipfile.ZipFile(path, "r") as zf:
-            comicinfo_name = next(
-                (
-                    n
-                    for n in zf.namelist()
-                    if Path(n.replace("\\", "/")).name.casefold() == "comicinfo.xml"
-                ),
-                None,
-            )
-            if not comicinfo_name:
-                return None
-            raw = zf.read(comicinfo_name)
-    except (OSError, zipfile.BadZipFile, KeyError):
-        return None
-    return _comicinfo_title_from_bytes(raw)
-
 def _is_under(child: Path, root: Path) -> bool:
     try:
         child.resolve().relative_to(root.resolve())

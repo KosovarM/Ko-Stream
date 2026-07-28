@@ -27,7 +27,6 @@ from kostream.mal import (
 )
 from kostream.mangadex import (
     CHAPTER_TITLE_BATCH_SIZE,
-    ChapterTitleSyncResult,
     sync_catalog_chapter_titles,
 )
 from kostream.sync_index import (
@@ -434,40 +433,3 @@ def start_chapter_title_sync(
 
     threading.Thread(target=runner, daemon=True, name="mal-sync-chapter-titles").start()
     return job
-
-
-# Back-compat aliases used by older callers / tests during transition.
-def start_mal_sync(
-    cfg: MalConfig,
-    catalog_path,
-    *,
-    user_id: str,
-    manga_catalog_path=None,
-    manga_media_root=None,
-    media_root=None,
-    requests_path=None,
-) -> SyncJob:
-    """Deprecated: prefer ``start_anime_sync`` / ``start_manga_sync``.
-
-    Runs anime sync only (manga is a separate job).
-    """
-    return start_anime_sync(
-        cfg,
-        catalog_path,
-        user_id=user_id,
-        media_root=media_root,
-        requests_path=requests_path,
-    )
-
-
-def start_title_sync(
-    catalog_path,
-    *,
-    manga_catalog_path=None,
-    manga_media_root=None,
-) -> SyncJob:
-    """Deprecated: prefer ``start_anime_title_sync`` / ``start_chapter_title_sync``.
-
-    Runs episode-title sync only.
-    """
-    return start_anime_title_sync(catalog_path)

@@ -96,10 +96,6 @@ def fetch_anime(anilist_id: int, *, network: bool = True) -> AniListMedia | None
     return parsed
 
 
-def fetch_anime_cached_only(anilist_id: int) -> AniListMedia | None:
-    return fetch_anime(anilist_id, network=False)
-
-
 def fetch_anime_by_mal_id(mal_id: int, *, network: bool = True) -> AniListMedia | None:
     """Resolve AniList media (incl. wide bannerImage) from a MAL id."""
     try:

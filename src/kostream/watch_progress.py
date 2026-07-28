@@ -331,11 +331,6 @@ def reconcile_anime_progress(
     return merged
 
 
-def apply_mal_progress(show: Show, cached) -> None:
-    """Copy MAL list progress onto a Show instance."""
-    apply_mal_metadata(show, cached)
-
-
 def sort_by_mean_score(shows: list[Show], limit: int = 12) -> list[Show]:
     return sorted(
         shows,

@@ -58,22 +58,6 @@ def mark_local(
     return entry
 
 
-def unmark_local(
-    show_id: str,
-    episode_id: str,
-    *,
-    registry_path: Path | None = None,
-) -> bool:
-    file_path = registry_path or DEFAULT_REGISTRY
-    data = _load(file_path)
-    key = registry_key(show_id, episode_id)
-    if key not in data["episodes"]:
-        return False
-    del data["episodes"][key]
-    _save(file_path, data)
-    return True
-
-
 def get_local(
     show_id: str,
     episode_id: str,
@@ -97,12 +81,3 @@ def list_for_show(
         if key.startswith(prefix) and isinstance(entry, dict):
             out.append(entry)
     return out
-
-
-def is_registered(
-    show_id: str,
-    episode_id: str,
-    *,
-    registry_path: Path | None = None,
-) -> bool:
-    return get_local(show_id, episode_id, registry_path=registry_path) is not None

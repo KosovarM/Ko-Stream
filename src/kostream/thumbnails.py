@@ -23,7 +23,6 @@ from kostream.library import MEDIA_ROOT
 
 Kind = Literal["anime", "manga"]
 
-_DEFAULT_THUMB = Path(os.environ.get("KOSTREAM_THUMBNAIL_ROOT", ""))
 _EXT_RE = re.compile(r"\.(jpe?g|png|webp|gif)(?:\?|$)", re.IGNORECASE)
 
 

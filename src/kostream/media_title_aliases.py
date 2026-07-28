@@ -50,10 +50,6 @@ TITLE_SYNONYMS: dict[str, tuple[str, ...]] = {
 
 _APOSTROPHE_RE = re.compile(r"[''`´]")
 _JOJO_RE = re.compile(r"\bjojos\b", re.IGNORECASE)
-_NOISE_RE = re.compile(
-    r"\b(uncensored|tv|sub|dub|season|the|a|an|of|no|na|ni|wo|hen)\b",
-    re.IGNORECASE,
-)
 
 
 def normalize_title_for_match(value: str) -> str:

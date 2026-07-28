@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from kostream.models import RelatedAnime, Show
+from kostream.models import Show
 
 MAL_ANIME_URL = "https://myanimelist.net/anime/{mal_id}"
 NAV_RELATION_TYPES = ("prequel", "sequel")

@@ -416,3 +416,42 @@ def test_catalog_add_existing_redirects(tmp_path: Path):
     assert data["ok"] is True
     assert data["existing"] is True
     assert data["redirect"].endswith("/show/mal-42")
+
+
+def test_import_media_api_allows_manager_rejects_user(tmp_path: Path):
+    from conftest import add_test_user
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(CatalogState(shows=[]), catalog_path)
+    media = tmp_path / "media" / "shows"
+    media.mkdir(parents=True)
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    add_test_user(users, "manager1", "mgrpass", role="manager")
+    add_test_user(users, "sister", "sispass", role="user")
+    app = create_app(
+        media_root=media,
+        catalog_path=catalog_path,
+        users_path=users,
+        user_data_base=user_data,
+    )
+    client = app.test_client()
+
+    login_client(client, "sister", "sispass")
+    denied = client.get("/api/catalog/import-media/preview")
+    assert denied.status_code == 403
+    client.post("/logout")
+
+    login_client(client, "manager1", "mgrpass")
+    ok = client.get("/api/catalog/import-media/preview")
+    assert ok.status_code == 200
+    body = ok.get_json()
+    assert body["ok"] is True
+    assert "count" in body
+
+    page = client.get("/catalog")
+    assert page.status_code == 200
+    assert b"can_import_media" not in page.data  # template var, not HTML
+    assert b'id="catalog-import-media"' in page.data
+    assert b"Admin or Manager account required" not in page.data
