@@ -190,6 +190,30 @@ def mark_episode_watched(show: Show, episode: Episode, path: Path | None = None)
     return show.episodes_watched
 
 
+def unmark_episode_watched(show: Show, episode: Episode, path: Path | None = None) -> int:
+    """Undo a single episode complete: set local watched count to position − 1.
+
+    Returns the new watched count. If the show was list-completed, status becomes
+    ``watching`` when any episode remains unfinished.
+    """
+    pos = _episode_position(show, episode)
+    if not pos:
+        return _effective_watched_count(show, load_completed(path or COMPLETED_FILE))
+    file_path = path or COMPLETED_FILE
+    data = load_completed(file_path)
+    new_count = max(0, pos - 1)
+    if new_count > 0:
+        data[show.id] = new_count
+    else:
+        data.pop(show.id, None)
+    save_completed(file_path, data)
+    show.episodes_watched = new_count
+    total = max(len(sorted_episodes(show)), show.episode_count or 0, 0)
+    if show.list_status == "completed" and (not total or new_count < total):
+        show.list_status = "watching"
+    return new_count
+
+
 def mark_show_completed(show: Show, path: Path | None = None) -> int:
     """Mark the whole show complete locally; returns watched-episode count."""
     total = max(len(sorted_episodes(show)), show.episode_count or 0, 0)

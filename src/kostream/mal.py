@@ -806,6 +806,20 @@ JIKAN_SHOW_SLEEP = 1.0
 JIKAN_MAX_RETRIES = 2
 
 
+@dataclass
+class EpisodeTitleSyncResult:
+    """Outcome of a catalog episode-title sync batch."""
+
+    updated: int = 0
+    attempted: int = 0
+    failed: int = 0
+    remaining: int = 0
+    last_error: str | None = None
+
+    def __int__(self) -> int:
+        return self.updated
+
+
 def enrich_catalog_mal_details(
     cfg: MalConfig,
     catalog_path: Path | None = None,
@@ -844,12 +858,11 @@ def sync_catalog_episode_titles(
     limit: int | None = EPISODE_TITLE_BATCH_SIZE,
     enabled_only: bool = True,
     skip_mal_ids: set[int] | frozenset[int] | None = None,
-) -> int:
+) -> EpisodeTitleSyncResult:
     """Fetch missing Jikan episode titles into MAL cache for catalog titles.
 
     Skips ids whose cache is fresh (``episode_titles_need_fetch`` is False).
     Prioritizes folder-linked / shorter shows. Rate-limits between shows.
-    Returns how many caches gained titles.
     """
     catalog = load_catalog(catalog_path)
     entries = catalog.enabled if enabled_only else catalog.shows
@@ -872,18 +885,24 @@ def sync_catalog_episode_titles(
         entry.mal_id
         for entry in sorted(best.values(), key=_episode_title_sync_priority)
     ]
+    remaining_after = 0
     if limit is not None:
+        remaining_after = max(0, len(pending) - max(0, limit))
         pending = pending[: max(0, limit)]
 
-    updated = 0
+    result = EpisodeTitleSyncResult(attempted=len(pending), remaining=remaining_after)
     for mal_id in pending:
         try:
             if ensure_episode_titles(mal_id):
-                updated += 1
+                result.updated += 1
+            elif episode_titles_need_fetch(mal_id):
+                result.failed += 1
             time.sleep(JIKAN_SHOW_SLEEP)
-        except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError):
+        except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError) as exc:
+            result.failed += 1
+            result.last_error = str(exc)
             continue
-    return updated
+    return result
 
 
 def _resolve_catalog_mal_ids(catalog_path: Path | None = None) -> int:
@@ -948,7 +967,7 @@ _episode_title_inflight: set[int] = set()
 
 
 def episode_titles_need_fetch(mal_id: int) -> bool:
-    """True when MAL episode titles are missing or likely stale (airing)."""
+    """True when MAL episode titles are missing, partial, or marked incomplete."""
     path = CACHE_DIR / f"{mal_id}.json"
     if not path.exists():
         return False
@@ -959,13 +978,20 @@ def episode_titles_need_fetch(mal_id: int) -> bool:
     titles = data.get("episode_titles") or {}
     fetched_at = data.get("episode_titles_fetched_at")
     num_episodes = int(data.get("num_episodes") or 0)
-    status = data.get("anime_status")
-    if data.get("episode_titles_incomplete"):
+    walk_complete = bool(data.get("episode_titles_walk_complete"))
+    if data.get("episode_titles_incomplete") and not walk_complete:
         return True
-    if not titles:
-        return not fetched_at
-    # Airing growth, or prior page-cap truncations on long airing series.
-    if status == "currently_airing" and num_episodes > len(titles):
+    title_count = len(titles)
+    if title_count == 0:
+        # Empty never-fetched, or empty marked fetched without a finished walk
+        # (legacy false-complete) — retry while we expect episodes.
+        if walk_complete and fetched_at:
+            return False
+        if not fetched_at:
+            return True
+        return num_episodes > 0
+    # Coverage gap: retry until a full page-walk completed (unsticks legacy partials).
+    if num_episodes > 0 and title_count < num_episodes and not walk_complete:
         return True
     return False
 
@@ -1180,14 +1206,26 @@ def _store_episode_titles(
     data["episode_titles"] = {str(k): v for k, v in sorted(existing.items())}
     for key in ANIME_LIST_FIELD_KEYS:
         data.pop(key, None)
+    num_episodes = int(data.get("num_episodes") or 0)
+    coverage_ok = not num_episodes or len(existing) >= num_episodes
     if complete:
         data["episode_titles_fetched_at"] = (
             datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         )
+        # Full API page-walk finished — stop retrying even if Jikan lacks some titles.
+        data["episode_titles_walk_complete"] = True
         data.pop("episode_titles_incomplete", None)
+        if not existing and num_episodes > 0:
+            # Empty after a complete walk; keep walk_complete so we do not loop.
+            pass
+        elif not coverage_ok and existing:
+            # Partial coverage after a complete walk is accepted (source limitation).
+            pass
     else:
         data["episode_titles_incomplete"] = True
-        # Leave fetched_at unset/uncleared so need_fetch stays true via incomplete flag.
+        data.pop("episode_titles_walk_complete", None)
+        if not existing:
+            data.pop("episode_titles_fetched_at", None)
     atomic_write_json(path, data, ensure_ascii=False, trailing_newline=False)
 
 
@@ -1341,15 +1379,20 @@ def update_episodes_watched(
     status: str | None = None,
     *,
     user_id: str,
+    allow_decrease: bool = False,
 ) -> None:
     """Push local watch progress to MAL (PATCH my_list_status).
 
-    Never decreases MAL progress: the value sent is at least the overlay remote count.
+    By default never decreases MAL progress (floor = overlay remote count).
+    Pass ``allow_decrease=True`` for explicit uncomplete / undo.
     """
     access_token = get_valid_access_token(cfg, user_id)
     row = get_anime_list_row(user_id, mal_id) or {}
     floor = int(row.get("num_episodes_watched") or 0)
-    num_watched = max(0, int(num_watched), floor)
+    if allow_decrease:
+        num_watched = max(0, int(num_watched))
+    else:
+        num_watched = max(0, int(num_watched), floor)
     form: dict[str, str] = {"num_watched_episodes": str(num_watched)}
     if status:
         form["status"] = status
@@ -1450,15 +1493,20 @@ def update_chapters_read(
     status: str | None = None,
     *,
     user_id: str,
+    allow_decrease: bool = False,
 ) -> None:
     """Push manga chapter progress to MAL (PATCH my_list_status).
 
-    Never decreases MAL chapter progress relative to the per-user overlay floor.
+    By default never decreases MAL chapter progress relative to the overlay floor.
+    Pass ``allow_decrease=True`` for explicit uncomplete / undo.
     """
     access_token = get_valid_access_token(cfg, user_id)
     row = get_manga_list_row(user_id, mal_id) or {}
     floor = int(row.get("num_chapters_read") or 0)
-    num_chapters_read = max(0, int(num_chapters_read), floor)
+    if allow_decrease:
+        num_chapters_read = max(0, int(num_chapters_read))
+    else:
+        num_chapters_read = max(0, int(num_chapters_read), floor)
     form: dict[str, str] = {"num_chapters_read": str(num_chapters_read)}
     if status:
         form["status"] = status

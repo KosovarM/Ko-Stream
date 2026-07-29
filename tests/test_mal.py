@@ -519,7 +519,8 @@ def test_sync_catalog_episode_titles_prioritizes_folder_and_short(tmp_path, monk
 
     monkeypatch.setattr(mal_mod, "ensure_episode_titles", fake_ensure)
     updated = mal_mod.sync_catalog_episode_titles(catalog_path, limit=2)
-    assert updated == 2
+    assert int(updated) == 2
+    assert updated.attempted == 2
     # Folder-linked Re:Zero first, then shortest no-folder (99), One Piece last.
     assert fetched_ids == [31240, 99]
 
@@ -563,7 +564,7 @@ def test_sync_catalog_episode_titles_skips_fresh_and_respects_limit(tmp_path, mo
 
     for mid, titles, fetched in (
         (1, {}, None),  # needs fetch
-        (2, {"1": "A"}, "2026-01-01T00:00:00Z"),  # fresh
+        (2, {"1": "A"}, "2026-01-01T00:00:00Z"),  # walk complete (accept partial)
         (3, {}, None),  # needs fetch
         (4, {}, None),  # needs fetch but over limit
     ):
@@ -583,6 +584,7 @@ def test_sync_catalog_episode_titles_skips_fresh_and_respects_limit(tmp_path, mo
         }
         if fetched:
             payload["episode_titles_fetched_at"] = fetched
+            payload["episode_titles_walk_complete"] = True
         (tmp_path / f"{mid}.json").write_text(
             __import__("json").dumps(payload), encoding="utf-8"
         )
@@ -605,7 +607,7 @@ def test_sync_catalog_episode_titles_skips_fresh_and_respects_limit(tmp_path, mo
 
     monkeypatch.setattr(mal_mod, "ensure_episode_titles", fake_ensure)
     updated = mal_mod.sync_catalog_episode_titles(catalog_path, limit=2)
-    assert updated == 2
+    assert int(updated) == 2
     assert fetched_ids == [1, 3]
 
 
@@ -631,5 +633,50 @@ def test_sync_catalog_episode_titles_skips_disabled(tmp_path, monkeypatch):
         catalog_path,
     )
     monkeypatch.setattr(mal_mod, "ensure_episode_titles", lambda *_a, **_k: True)
-    assert mal_mod.sync_catalog_episode_titles(catalog_path) == 0
+    assert int(mal_mod.sync_catalog_episode_titles(catalog_path)) == 0
+
+
+def test_episode_titles_need_fetch_legacy_partial_without_walk(tmp_path, monkeypatch):
+    """Finished shows with partial titles + fetched_at (no walk_complete) must retry."""
+    from kostream import mal as mal_mod
+
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    (tmp_path / "21.json").write_text(
+        '{"mal_id":21,"title":"Naruto","synopsis":"","poster_url":null,"genres":[],'
+        '"num_episodes":500,"list_status":"completed","num_episodes_watched":500,'
+        '"anime_status":"finished_airing","score":10,"mean_score":8.0,'
+        '"episode_titles":{"1":"Enter Naruto!"},"episode_titles_fetched_at":"2026-01-01T00:00:00Z"}',
+        encoding="utf-8",
+    )
+    assert mal_mod.episode_titles_need_fetch(21) is True
+
+
+def test_episode_titles_need_fetch_empty_fetched_retries(tmp_path, monkeypatch):
+    from kostream import mal as mal_mod
+
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    (tmp_path / "9.json").write_text(
+        '{"mal_id":9,"title":"Empty","synopsis":"","poster_url":null,"genres":[],'
+        '"num_episodes":12,"list_status":"completed","num_episodes_watched":12,'
+        '"anime_status":"finished_airing","score":0,"mean_score":null,'
+        '"episode_titles":{},"episode_titles_fetched_at":"2026-01-01T00:00:00Z"}',
+        encoding="utf-8",
+    )
+    assert mal_mod.episode_titles_need_fetch(9) is True
+
+
+def test_episode_titles_walk_complete_stops_partial_retry(tmp_path, monkeypatch):
+    from kostream import mal as mal_mod
+
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    (tmp_path / "3.json").write_text(
+        '{"mal_id":3,"title":"Partial","synopsis":"","poster_url":null,"genres":[],'
+        '"num_episodes":26,"list_status":"completed","num_episodes_watched":26,'
+        '"anime_status":"finished_airing","score":0,"mean_score":null,'
+        '"episode_titles":{"1":"A","2":"B"},'
+        '"episode_titles_fetched_at":"2026-01-01T00:00:00Z",'
+        '"episode_titles_walk_complete":true}',
+        encoding="utf-8",
+    )
+    assert mal_mod.episode_titles_need_fetch(3) is False
 

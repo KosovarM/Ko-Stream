@@ -44,6 +44,32 @@ def test_mark_chapter_read(tmp_path: Path):
     assert chapter_completed(manga, "c2", load_manga_completed(path), 0)
 
 
+def test_unmark_chapter_read(tmp_path: Path):
+    from kostream.manga_progress import next_unread_chapter, unmark_chapter_read
+
+    path = tmp_path / "manga_completed.json"
+    manga = _manga()
+    mark_chapter_read(manga, "c2", path)
+    count = unmark_chapter_read(manga, "c2", path)
+    assert count == 1
+    assert chapter_completed(manga, "c1", load_manga_completed(path), 0)
+    assert not chapter_completed(manga, "c2", load_manga_completed(path), 0)
+    nxt = next_unread_chapter(manga, load_manga_completed(path), 0)
+    assert nxt is not None
+    assert nxt.id == "c2"
+
+
+def test_next_unread_chapter_and_hide_when_completed(tmp_path: Path):
+    from kostream.manga_progress import next_unread_chapter
+
+    path = tmp_path / "manga_completed.json"
+    manga = _manga()
+    assert next_unread_chapter(manga, {}, 0) is not None
+    mark_manga_completed(manga, path)
+    assert manga_reading_status(manga, load_manga_completed(path)) == "completed"
+    assert next_unread_chapter(manga, load_manga_completed(path), 0) is None
+
+
 def test_mark_chapters_read_through_range(tmp_path: Path):
     from kostream.manga_progress import mark_chapters_read_through
 

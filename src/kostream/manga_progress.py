@@ -233,6 +233,18 @@ def chapter_completed(
     return pos <= effective_chapters_read(manga, completed, mal_chapters_read)
 
 
+def next_unread_chapter(
+    manga: MangaTitle,
+    completed: dict[str, int] | None = None,
+    mal_chapters_read: int = 0,
+) -> MangaChapter | None:
+    """First chapter in order that is not marked read (anime Continue semantics)."""
+    for ch in sorted_chapters(manga):
+        if not chapter_completed(manga, ch.id, completed, mal_chapters_read):
+            return ch
+    return None
+
+
 def mark_chapter_read(
     manga: MangaTitle,
     chapter_id: str,
@@ -268,6 +280,30 @@ def mark_chapters_read_through(
     manga.num_chapters_read = max(manga.num_chapters_read, through)
     clear_page_progress_through(manga, through, page_path)
     return data[manga.id]
+
+
+def unmark_chapter_read(
+    manga: MangaTitle,
+    chapter_id: str,
+    path: Path | None = None,
+) -> int:
+    """Undo a single chapter complete: set local chapters-read to position − 1."""
+    pos = chapter_position(manga, chapter_id)
+    if not pos:
+        return effective_chapters_read(manga, load_manga_completed(path or MANGA_COMPLETED_FILE))
+    file_path = path or MANGA_COMPLETED_FILE
+    data = load_manga_completed(file_path)
+    new_count = max(0, pos - 1)
+    if new_count > 0:
+        data[manga.id] = new_count
+    else:
+        data.pop(manga.id, None)
+    save_manga_completed(file_path, data)
+    manga.num_chapters_read = new_count
+    total = total_chapters_target(manga)
+    if manga.list_status == "completed" and (not total or new_count < total):
+        manga.list_status = "reading"
+    return new_count
 
 
 def mark_manga_completed(

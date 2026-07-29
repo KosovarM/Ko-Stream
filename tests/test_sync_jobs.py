@@ -103,6 +103,56 @@ def test_anime_sync_skips_manga_and_titles(tmp_path, monkeypatch):
     assert done.chapter_titles == 0
     assert calls == ["anime", "enrich"]
     assert "Animes synced" in (done.message or "")
+    assert "from your MAL list" in (done.message or "")
+
+
+def test_anime_sync_message_includes_catalog_only_count(tmp_path, monkeypatch):
+    _reset_job(monkeypatch)
+    catalog = tmp_path / "selected.json"
+    catalog.write_text(
+        '{"shows":[{"id":"mal-1","enabled":true,"source":"mal","mal_id":1,"title":"A"},'
+        '{"id":"mal-2","enabled":true,"source":"mal","mal_id":2,"title":"B"},'
+        '{"id":"mal-3","enabled":true,"source":"mal","mal_id":3,"title":"C"}]}',
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(
+        sync_jobs,
+        "sync_animelist_to_catalog",
+        lambda *a, **k: 2,
+    )
+    monkeypatch.setattr(
+        sync_jobs,
+        "enrich_catalog_mal_details",
+        lambda *a, **k: 0,
+    )
+    monkeypatch.setattr("kostream.library.scan_library", lambda *a, **k: [])
+    monkeypatch.setattr(
+        "kostream.requests_store.clear_fulfilled_requests",
+        lambda **k: 0,
+    )
+    monkeypatch.setattr(
+        "kostream.thumbnails.sync_anime_thumbnails_from_cache",
+        lambda *a, **k: 0,
+    )
+    monkeypatch.setattr(
+        "kostream.sync_index.refresh_anime_index",
+        lambda **k: None,
+    )
+
+    sync_jobs.start_anime_sync(
+        _cfg(),
+        catalog,
+        user_id="u_test",
+        media_root=tmp_path / "anime",
+        requests_path=tmp_path / "requests.json",
+    )
+    done = _wait_done()
+    assert done.status == "done"
+    assert done.synced == 2
+    assert "2 from your MAL list" in (done.message or "")
+    assert "catalog 3" in (done.message or "")
+    assert "1 not on your list" in (done.message or "")
 
 
 def test_manga_sync_skips_anime_and_titles(tmp_path, monkeypatch):

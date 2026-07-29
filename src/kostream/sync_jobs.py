@@ -18,6 +18,7 @@ from typing import Any, Literal
 from kostream.mal import (
     ENRICH_BATCH_SIZE,
     EPISODE_TITLE_BATCH_SIZE,
+    EpisodeTitleSyncResult,
     MalConfig,
     MalError,
     enrich_catalog_mal_details,
@@ -132,10 +133,28 @@ def start_anime_sync(
             count = sync_animelist_to_catalog(
                 cfg, catalog_path, user_id=user_id, enrich=False
             )
+            catalog_count = 0
+            try:
+                from kostream.catalog import load_catalog
+
+                catalog_count = sum(
+                    1 for e in load_catalog(catalog_path).shows if e.mal_id
+                )
+            except (OSError, ValueError, TypeError):
+                catalog_count = count
+            catalog_only = max(0, catalog_count - count)
+            list_label = (
+                f"{count} from your MAL list"
+                if catalog_only == 0
+                else (
+                    f"{count} from your MAL list · catalog {catalog_count}"
+                    f" ({catalog_only} not on your list)"
+                )
+            )
             with _lock:
                 job.synced = count
                 job.phase = "progress"
-                job.message = f"List synced ({count} anime). Reconciling watch progress…"
+                job.message = f"List synced ({list_label}). Reconciling watch progress…"
 
             skip_anime = skipped_mal_ids("anime_sync", index_path=anime_index_path)
             try:
@@ -167,7 +186,7 @@ def start_anime_sync(
                 if cleared:
                     with _lock:
                         job.message = (
-                            f"Synced {count} anime. "
+                            f"Synced {list_label}. "
                             f"Cleared {cleared} fulfilled request"
                             f"{'s' if cleared != 1 else ''}. "
                             "Fetching prequel/sequel metadata…"
@@ -179,7 +198,7 @@ def start_anime_sync(
                 job.phase = "enrich"
                 if "Cleared" not in (job.message or ""):
                     job.message = (
-                        f"Synced {count} anime. Fetching prequel/sequel metadata…"
+                        f"Synced {list_label}. Fetching prequel/sequel metadata…"
                     )
             enriched = 0
             try:
@@ -203,7 +222,7 @@ def start_anime_sync(
                     pass
                 _finish_ok(
                     job,
-                    f"Animes synced: {count}. Metadata enrich partial ({enriched}): {exc}",
+                    f"Animes synced: {list_label}. Metadata enrich partial ({enriched}): {exc}",
                 )
                 return
 
@@ -215,14 +234,14 @@ def start_anime_sync(
                 with _lock:
                     job.phase = "thumbnails"
                     job.message = (
-                        f"Synced {count} anime · enriched {enriched}. "
+                        f"Synced {list_label} · enriched {enriched}. "
                         "Caching posters…"
                     )
                 thumbs = sync_anime_thumbnails_from_cache()
                 with _lock:
                     if thumbs:
                         job.message = (
-                            f"Synced {count} anime · enriched {enriched} · "
+                            f"Synced {list_label} · enriched {enriched} · "
                             f"thumbnails {thumbs}."
                         )
             except (OSError, ValueError, TypeError):
@@ -243,7 +262,7 @@ def start_anime_sync(
             thumb_hint = f" · thumbnails {thumbs}" if thumbs else ""
             _finish_ok(
                 job,
-                f"Animes synced: {count} · enriched {enriched}{thumb_hint}.{more_hint}",
+                f"Animes synced: {list_label} · enriched {enriched}{thumb_hint}.{more_hint}",
             )
         except (MalError, TimeoutError, OSError) as exc:
             _finish_error(job, f"Anime sync failed: {exc}", exc)
@@ -336,11 +355,20 @@ def start_anime_title_sync(catalog_path, *, anime_index_path=None) -> SyncJob:
         nonlocal job
         try:
             skip_titles = skipped_mal_ids("episode_titles", index_path=anime_index_path)
-            titles_updated = sync_catalog_episode_titles(
+            raw_titles = sync_catalog_episode_titles(
                 catalog_path,
                 limit=EPISODE_TITLE_BATCH_SIZE,
                 skip_mal_ids=skip_titles,
             )
+            title_result = (
+                raw_titles
+                if isinstance(raw_titles, EpisodeTitleSyncResult)
+                else EpisodeTitleSyncResult(
+                    updated=int(raw_titles),
+                    attempted=int(raw_titles),
+                )
+            )
+            titles_updated = int(title_result)
             with _lock:
                 job.episode_titles = titles_updated
             try:
@@ -352,13 +380,21 @@ def start_anime_title_sync(catalog_path, *, anime_index_path=None) -> SyncJob:
                 pass
             more_hint = (
                 " Run Sync anime titles again later for more batches if needed."
-                if titles_updated >= EPISODE_TITLE_BATCH_SIZE
+                if title_result.remaining > 0
+                or titles_updated >= EPISODE_TITLE_BATCH_SIZE
                 else ""
             )
-            _finish_ok(
-                job,
-                f"Anime titles synced: {titles_updated}.{more_hint}",
-            )
+            detail = f"Anime titles synced: {titles_updated}"
+            if title_result.attempted:
+                detail = (
+                    f"Anime titles synced: {titles_updated}/{title_result.attempted}"
+                )
+            if title_result.remaining:
+                detail += f" · {title_result.remaining} remaining"
+            if title_result.failed and titles_updated == 0:
+                err = f": {title_result.last_error}" if title_result.last_error else ""
+                detail += f" ({title_result.failed} failed{err})"
+            _finish_ok(job, f"{detail}.{more_hint}")
         except (TimeoutError, OSError) as exc:
             _finish_error(job, f"Anime title sync failed: {exc}", exc)
 

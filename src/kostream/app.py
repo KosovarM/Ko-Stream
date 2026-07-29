@@ -95,6 +95,8 @@ from kostream.mal import (
     update_anime_list_status,
     update_chapters_read,
     update_episodes_watched,
+    upsert_anime_list_row,
+    upsert_manga_list_row,
 )
 from kostream.library import (
     MEDIA_ROOT,
@@ -132,6 +134,7 @@ from kostream.manga_progress import (
     mark_manga_completed,
     set_chapter_page_index,
     total_chapters_target,
+    unmark_chapter_read,
 )
 from kostream.episode_fetch import fetch_episode_from_url
 from kostream.local_media import (
@@ -144,7 +147,12 @@ from kostream.local_media import (
     save_episode_file,
     save_subtitle_file,
 )
-from kostream.media_import import import_media_to_catalog, preview_media_import, summarize_import
+from kostream.media_import import (
+    import_media_to_catalog,
+    preview_media_import,
+    resync_catalog_folders,
+    summarize_import,
+)
 from kostream.local_registry import list_for_show
 from kostream.stream_fetch import StreamFetchError, ffmpeg_available, resolve_fetch_source
 
@@ -175,6 +183,7 @@ from kostream.watch_progress import (
     resume_seconds_for_episode,
     should_persist_watch_progress,
     sort_by_mean_score,
+    unmark_episode_watched,
 )
 from kostream.sync_jobs import (
     get_sync_job,
@@ -1060,6 +1069,62 @@ def create_app(
             "mal_error": mal_error,
         }
 
+    @app.route("/api/manga/uncomplete", methods=["POST"])
+    def api_manga_uncomplete():
+        """Undo chapter complete: lower local (+ MAL) chapters-read to position − 1."""
+        paths = _paths_for_user()
+        payload = request.get_json(silent=True) or {}
+        manga_id = payload.get("manga_id")
+        chapter_id = payload.get("chapter_id")
+        if not manga_id or not chapter_id:
+            abort(400)
+        manga = get_manga(
+            manga_id, app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
+        )
+        if not manga:
+            abort(404)
+        if not get_chapter(manga, chapter_id):
+            abort(404)
+
+        chapters_read = unmark_chapter_read(manga, chapter_id, paths["manga_completed"])
+        status = manga.list_status or "reading"
+        if status == "completed":
+            status = "reading"
+            manga.list_status = "reading"
+
+        mal_synced = False
+        mal_error = None
+        cfg = MalConfig.from_env()
+        uid = _current_mal_user_id()
+        if manga.mal_id and uid:
+            upsert_manga_list_row(
+                uid,
+                manga.mal_id,
+                list_status=status,
+                num_chapters_read=chapters_read,
+            )
+        if cfg and manga.mal_id and uid and mal_is_connected(uid):
+            try:
+                update_chapters_read(
+                    cfg,
+                    manga.mal_id,
+                    chapters_read,
+                    status=status,
+                    user_id=uid,
+                    allow_decrease=True,
+                )
+                mal_synced = True
+            except MalError as exc:
+                mal_error = str(exc)
+
+        return {
+            "ok": True,
+            "chapters_read": chapters_read,
+            "status": status,
+            "mal_synced": mal_synced,
+            "mal_error": mal_error,
+        }
+
     @app.route("/api/manga/complete-all", methods=["POST"])
     def api_manga_complete_all():
         paths = _paths_for_user()
@@ -1613,6 +1678,22 @@ def create_app(
             return {"ok": False, "error": str(exc)}, 400
         message = summarize_import(result)
         return {"ok": True, "message": message, **result.to_dict()}
+
+    @app.route("/api/catalog/resync-folders", methods=["POST"])
+    def api_catalog_resync_folders():
+        """Rebuild catalog folder↔show bindings from on-disk anime folders."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
+        result = resync_catalog_folders(
+            media_root=app.config["MEDIA_ROOT"],
+            catalog_path=app.config["CATALOG_PATH"],
+        )
+        return {
+            "ok": True,
+            "message": result.summary(),
+            **result.to_dict(),
+        }
 
     @app.route("/api/catalog/incomplete-shows")
     def api_catalog_incomplete_shows():
@@ -2591,6 +2672,61 @@ def create_app(
         return {
             "ok": True,
             "watched_count": watched_count,
+            "mal_synced": mal_synced,
+            "mal_error": mal_error,
+        }
+
+    @app.route("/api/episodes/uncomplete", methods=["POST"])
+    def api_episode_uncomplete():
+        """Undo episode complete: lower local (+ MAL) watched count to position − 1."""
+        paths = _paths_for_user()
+        payload = request.get_json(silent=True) or {}
+        show_id = payload.get("show_id")
+        episode_id = payload.get("episode_id")
+        if not show_id or not episode_id:
+            abort(400)
+        show = _get_show(show_id)
+        if not show:
+            abort(404)
+        episode = next((e for e in show.episodes if e.id == episode_id), None)
+        if not episode:
+            abort(404)
+
+        watched_count = unmark_episode_watched(show, episode, paths["completed"])
+        status = show.list_status or "watching"
+        if status == "completed":
+            status = "watching"
+            show.list_status = "watching"
+
+        mal_synced = False
+        mal_error = None
+        cfg = MalConfig.from_env()
+        uid = _current_mal_user_id()
+        if show.mal_id and uid:
+            upsert_anime_list_row(
+                uid,
+                show.mal_id,
+                list_status=status,
+                num_episodes_watched=watched_count,
+            )
+        if cfg and show.mal_id and uid and mal_is_connected(uid):
+            try:
+                update_episodes_watched(
+                    cfg,
+                    show.mal_id,
+                    watched_count,
+                    status=status,
+                    user_id=uid,
+                    allow_decrease=True,
+                )
+                mal_synced = True
+            except MalError as exc:
+                mal_error = str(exc)
+
+        return {
+            "ok": True,
+            "watched_count": watched_count,
+            "status": status,
             "mal_synced": mal_synced,
             "mal_error": mal_error,
         }

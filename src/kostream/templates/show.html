@@ -254,15 +254,15 @@
         <span class="ep-badge ep-next-badge">▶ {{ _('Next') }}</span>
         {% endif %}
       </a>
-      {% if not done %}
       <button
         type="button"
-        class="ep-mark-btn"
+        class="ep-mark-btn{% if done %} is-done{% endif %}"
         data-show-id="{{ show.id }}"
         data-episode-id="{{ ep.id }}"
-        title="{% if mal_connected %}{{ _('Mark as watched and sync to MAL') }}{% else %}{{ _('Mark as watched') }}{% endif %}"
-      >✓</button>
-      {% endif %}
+        data-done="{{ '1' if done else '0' }}"
+        title="{% if done %}{% if mal_connected %}{{ _('Undo complete and sync to MAL') }}{% else %}{{ _('Undo complete') }}{% endif %}{% elif mal_connected %}{{ _('Mark as watched and sync to MAL') }}{% else %}{{ _('Mark as watched') }}{% endif %}"
+        aria-label="{% if done %}{{ _('Undo complete') }}{% else %}{{ _('Mark as watched') }}{% endif %}"
+      ><span class="ep-mark-check" aria-hidden="true">✓</span><span class="ep-mark-forbid" aria-hidden="true"></span></button>
     </div>
     {% endfor %}
   </div>
@@ -329,7 +329,11 @@
     btn.addEventListener('click', async (event) => {
       event.preventDefault();
       btn.disabled = true;
-      const resp = await fetch('{{ url_for("api_episode_complete") }}', {
+      const done = btn.dataset.done === '1' || btn.classList.contains('is-done');
+      const url = done
+        ? '{{ url_for("api_episode_uncomplete") }}'
+        : '{{ url_for("api_episode_complete") }}';
+      const resp = await fetch(url, {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({

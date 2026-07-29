@@ -454,4 +454,146 @@ def test_import_media_api_allows_manager_rejects_user(tmp_path: Path):
     assert page.status_code == 200
     assert b"can_import_media" not in page.data  # template var, not HTML
     assert b'id="catalog-import-media"' in page.data
+    assert b'id="catalog-resync-folders"' in page.data
     assert b"Admin or Manager account required" not in page.data
+
+
+def test_folder_plausibly_matches_title():
+    from kostream.media_title_aliases import folder_plausibly_matches_title
+
+    assert folder_plausibly_matches_title(
+        "Fate strange Fake", "Fate/strange Fake"
+    )
+    assert not folder_plausibly_matches_title(
+        "Gintama 3-Z Ginpachi-sensei",
+        "Kun Tun Tianxia Zhi Zhang Men Guilai",
+    )
+    assert not folder_plausibly_matches_title(
+        "Jujutsu Kaisen 0 Movie",
+        "Fate/kaleid liner Prisma Illya Movie: Sekka no Chikai",
+    )
+    assert folder_plausibly_matches_title(
+        "Jujutsu Kaisen 0 Movie",
+        "Jujutsu Kaisen 0 Movie",
+    )
+
+
+def test_resync_clears_crosswired_and_relinks(tmp_path: Path):
+    from kostream.media_import import resync_catalog_folders
+
+    root = tmp_path / "anime"
+    (root / "Gintama 3-Z Ginpachi-sensei").mkdir(parents=True)
+    (root / "Gintama 3-Z Ginpachi-sensei" / "S01E01.mp4").write_bytes(b"v")
+    (root / "Jujutsu Kaisen 0 Movie").mkdir()
+    (root / "Jujutsu Kaisen 0 Movie" / "S01E01.mp4").write_bytes(b"v")
+    (root / "Fate strange Fake").mkdir()
+    (root / "Fate strange Fake" / "S01E01.mp4").write_bytes(b"v")
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-60572",
+                    enabled=True,
+                    source="mal",
+                    folder="Gintama 3-Z Ginpachi-sensei",
+                    mal_id=60572,
+                    title="Kun Tun Tianxia Zhi Zhang Men Guilai",
+                ),
+                CatalogEntry(
+                    id="mal-48561",
+                    enabled=True,
+                    source="mal",
+                    folder="Black Clover Sword of the Wizard King",
+                    mal_id=48561,
+                    title="Jujutsu Kaisen 0 Movie",
+                ),
+                CatalogEntry(
+                    id="mal-34100",
+                    enabled=True,
+                    source="mal",
+                    folder="Jujutsu Kaisen 0 Movie",
+                    mal_id=34100,
+                    title="Fate/kaleid liner Prisma Illya Movie: Sekka no Chikai",
+                ),
+                CatalogEntry(
+                    id="mal-55830",
+                    enabled=True,
+                    source="mal",
+                    folder="Fate strange Fake",
+                    mal_id=55830,
+                    title="Fate/strange Fake",
+                ),
+            ]
+        ),
+        catalog_path,
+    )
+
+    with patch("kostream.media_import._load_folder_mal_map", return_value={}):
+        result = resync_catalog_folders(media_root=root, catalog_path=catalog_path)
+
+    state = load_catalog(catalog_path)
+    # Cross-wired Ginpachi folder cleared off Whale; no Ginpachi title on site.
+    assert state.get("mal-60572").folder is None
+    # JJK 0 folder moves to the JJK 0 catalog row.
+    assert state.get("mal-48561").folder == "Jujutsu Kaisen 0 Movie"
+    assert state.get("mal-34100").folder is None
+    # Correct binding kept.
+    assert state.get("mal-55830").folder == "Fate strange Fake"
+    assert result.cleared >= 1
+    assert result.refreshed + result.remapped >= 1
+
+
+def test_resolve_mal_from_search_rejects_weak_first_hit():
+    from kostream.media_import import _resolve_mal_from_search
+
+    with patch("kostream.media_import.search_anime") as mock_search:
+        mock_search.return_value = [
+            AniListMedia(
+                anilist_id=1,
+                title="Completely Unrelated Whale Movie",
+                description="",
+                genres=[],
+                poster_url=None,
+                banner_url=None,
+                mal_id=60572,
+            )
+        ]
+        mal_id, title = _resolve_mal_from_search("Gintama 3-Z Ginpachi-sensei")
+    assert mal_id is None
+    assert title is None
+
+
+def test_resync_folders_api_allows_manager(tmp_path: Path):
+    from conftest import add_test_user
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(CatalogState(shows=[]), catalog_path)
+    media = tmp_path / "media" / "shows"
+    media.mkdir(parents=True)
+    users = tmp_path / "users.json"
+    user_data = tmp_path / "user_data"
+    bootstrap_test_users(users)
+    add_test_user(users, "manager1", "mgrpass", role="manager")
+    add_test_user(users, "sister", "sispass", role="user")
+    app = create_app(
+        media_root=media,
+        catalog_path=catalog_path,
+        users_path=users,
+        user_data_base=user_data,
+    )
+    client = app.test_client()
+
+    login_client(client, "sister", "sispass")
+    denied = client.post("/api/catalog/resync-folders")
+    assert denied.status_code == 403
+    client.post("/logout")
+
+    login_client(client, "manager1", "mgrpass")
+    ok = client.post("/api/catalog/resync-folders")
+    assert ok.status_code == 200
+    body = ok.get_json()
+    assert body["ok"] is True
+    assert "message" in body
+    assert "scanned_folders" in body

@@ -45,6 +45,32 @@ def test_mark_episode_watched(tmp_path):
     assert data[show.id] == 3
 
 
+def test_unmark_episode_watched(tmp_path):
+    from kostream.watch_progress import load_completed, mark_episode_watched, unmark_episode_watched
+
+    completed_path = tmp_path / "completed.json"
+    show = _show(ep_count=5)
+    mark_episode_watched(show, show.episodes[2], completed_path)
+    count = unmark_episode_watched(show, show.episodes[2], completed_path)
+    assert count == 2
+    assert show.episodes_watched == 2
+    assert load_completed(completed_path)[show.id] == 2
+    assert episode_completed(show, show.episodes[1], completed=load_completed(completed_path))
+    assert not episode_completed(show, show.episodes[2], completed=load_completed(completed_path))
+
+
+def test_unmark_episode_lowers_completed_status(tmp_path):
+    from kostream.watch_progress import mark_show_completed, unmark_episode_watched
+
+    completed_path = tmp_path / "completed.json"
+    show = _show(ep_count=5, list_status="watching")
+    mark_show_completed(show, completed_path)
+    assert show.list_status == "completed"
+    unmark_episode_watched(show, show.episodes[-1], completed_path)
+    assert show.list_status == "watching"
+    assert next_unwatched_episode(show, completed={show.id: 4}) is not None
+
+
 def test_episode_completed_uses_local_completed(tmp_path):
     show = _show(episodes_watched=0)
     ep = show.episodes[1]

@@ -1542,6 +1542,7 @@ a.header-notify-item:hover {
 }
 
 .ep-mark-btn {
+  position: relative;
   flex-shrink: 0;
   width: 2.5rem;
   border-radius: var(--radius);
@@ -1550,6 +1551,9 @@ a.header-notify-item:hover {
   color: var(--hd);
   font-weight: 800;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .ep-mark-btn:hover {
@@ -1560,6 +1564,50 @@ a.header-notify-item:hover {
 .ep-mark-btn:disabled {
   opacity: 0.5;
   cursor: wait;
+}
+
+.ep-mark-btn.is-done {
+  color: var(--accent);
+  border-color: rgba(110, 231, 183, 0.45);
+}
+
+.ep-mark-btn.is-done:hover {
+  border-color: #e57373;
+  background: rgba(229, 115, 115, 0.08);
+}
+
+.ep-mark-check {
+  line-height: 1;
+}
+
+.ep-mark-forbid {
+  display: none;
+  position: absolute;
+  inset: 18%;
+  border: 2.5px solid #c62828;
+  border-radius: 50%;
+  box-sizing: border-box;
+  pointer-events: none;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ep-mark-forbid::after {
+  content: "";
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  top: 50%;
+  height: 2.5px;
+  margin-top: -1.25px;
+  background: #c62828;
+  transform: rotate(-45deg);
+}
+
+.ep-mark-btn.is-done .ep-mark-forbid,
+.manga-overview-mark.is-done .ep-mark-forbid,
+.player-complete.is-done .ep-mark-forbid,
+.manga-reader-complete.is-done .ep-mark-forbid {
+  display: block;
 }
 
 .player-section {
@@ -1704,12 +1752,47 @@ a.header-notify-item:hover {
   padding: 0.45rem 1.15rem;
   font-size: 0.85rem;
   white-space: nowrap;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
 }
 
 .player-complete:disabled {
   opacity: 0.65;
   cursor: default;
   box-shadow: none;
+}
+
+.player-complete.is-done {
+  padding-inline: 0.85rem;
+}
+
+.player-complete .ep-mark-forbid {
+  inset: 22% auto 22% 0.55rem;
+  width: 1.15rem;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.player-complete-label {
+  font-weight: 700;
+}
+
+.manga-reader-complete {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+
+.manga-reader-complete.is-done .ep-mark-forbid {
+  inset: 22% auto 22% 0.55rem;
+  width: 1.15rem;
+  height: auto;
+  aspect-ratio: 1;
 }
 
 .episode-item {
@@ -3219,27 +3302,42 @@ a.header-notify-item:hover {
 }
 
 .manga-overview-mark {
+  position: relative;
+  flex-shrink: 0;
+  width: 2.5rem;
+  min-width: 2.5rem;
   border: 1px solid var(--border);
-  background: var(--bg-elevated);
-  color: inherit;
-  border-radius: var(--radius-lg);
-  padding: 0 0.75rem;
+  background: var(--bg-card);
+  color: var(--hd);
+  border-radius: var(--radius);
+  padding: 0;
   cursor: pointer;
   font: inherit;
-  font-size: 0.78rem;
-  font-weight: 700;
-  white-space: nowrap;
-  min-width: 6.5rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .manga-overview-mark:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--text);
+  border-color: var(--hd);
+  background: rgba(110, 231, 183, 0.1);
+  color: var(--hd);
 }
 
 .manga-overview-mark:disabled {
-  opacity: 0.55;
-  cursor: default;
+  opacity: 0.5;
+  cursor: wait;
+}
+
+.manga-overview-mark.is-done {
+  color: var(--accent);
+  border-color: rgba(110, 231, 183, 0.45);
+}
+
+.manga-overview-mark.is-done:hover:not(:disabled) {
+  border-color: #e57373;
+  background: rgba(229, 115, 115, 0.08);
 }
 
 .manga-overview-actions {
@@ -3473,16 +3571,17 @@ body.manga-reader-open {
   line-height: 1.2;
 }
 
-.manga-reader.is-webtoon .manga-reader-zone {
+.manga-reader.is-webtoon .manga-reader-zone--left,
+.manga-reader.is-webtoon .manga-reader-zone--right,
+.manga-reader.is-webtoon .manga-reader-zone--center {
   display: none;
 }
 
-/* ~20% side tap strips; center stays non-nav */
+/* ~20% side tap strips; center ~60% toggles chrome */
 .manga-reader-zone {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 20%;
   z-index: 2;
   margin: 0;
   padding: 0;
@@ -3498,14 +3597,37 @@ body.manga-reader-open {
 
 .manga-reader-zone--left {
   left: 0;
+  width: 20%;
   justify-content: flex-start;
   padding-left: 0.35rem;
 }
 
+.manga-reader-zone--center {
+  left: 20%;
+  width: 60%;
+  justify-content: center;
+  z-index: 1;
+  cursor: pointer;
+}
+
 .manga-reader-zone--right {
   right: 0;
+  width: 20%;
   justify-content: flex-end;
   padding-right: 0.35rem;
+}
+
+.manga-reader-panel.chrome-hidden .manga-reader-bar,
+.manga-reader-panel.chrome-hidden .manga-reader-footer {
+  transform: translateY(0);
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.manga-reader-bar,
+.manga-reader-footer {
+  transition: opacity 0.18s ease, visibility 0.18s ease;
 }
 
 .manga-reader-chevron {
@@ -3985,6 +4107,7 @@ body.manga-reader-open {
   justify-content: space-between;
   gap: 1rem;
   padding: 1rem 1.25rem 0.5rem;
+  flex-shrink: 0;
 }
 
 .sync-index-header h2 {
@@ -4008,6 +4131,7 @@ body.manga-reader-open {
 
 .sync-index-help {
   margin: 0 1.25rem 0.75rem;
+  flex-shrink: 0;
 }
 
 .sync-index-tabs {
@@ -4016,6 +4140,11 @@ body.manga-reader-open {
   gap: 0.35rem;
   padding: 0 1.25rem 0.75rem;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--bg-card);
 }
 
 .sync-index-tab {
@@ -4039,6 +4168,7 @@ body.manga-reader-open {
   justify-content: flex-end;
   gap: 0.5rem;
   padding: 0.65rem 1.25rem 0.35rem;
+  flex-shrink: 0;
 }
 
 .sync-index-toggle-all:disabled {
@@ -4052,6 +4182,7 @@ body.manga-reader-open {
   padding: 0.5rem 0;
   overflow-y: auto;
   flex: 1;
+  min-height: 0;
 }
 
 .sync-index-row {
@@ -4145,6 +4276,17 @@ body.sync-index-open {
   flex-wrap: wrap;
   gap: 0.65rem;
   margin-top: 0.25rem;
+}
+
+.catalog-upload-form .btn-watch.is-uploading,
+.catalog-upload-form .btn-watch.is-uploading:disabled,
+#catalog-import-media.is-uploading,
+#catalog-import-media.is-uploading:disabled {
+  background: var(--hd);
+  color: #0c1210;
+  box-shadow: 0 8px 24px rgba(110, 231, 183, 0.35);
+  opacity: 1;
+  cursor: wait;
 }
 
 .catalog-upload-form .catalog-error,

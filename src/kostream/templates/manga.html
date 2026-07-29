@@ -277,6 +277,8 @@
       <button type="button" class="manga-reader-zone manga-reader-zone--left" id="reader-prev" aria-label="Previous page">
         <span class="manga-reader-chevron" aria-hidden="true">‹</span>
       </button>
+      <button type="button" class="manga-reader-zone manga-reader-zone--center" id="reader-chrome-toggle" aria-label="Toggle menus">
+      </button>
       <button type="button" class="manga-reader-zone manga-reader-zone--right" id="reader-next" aria-label="Next page">
         <span class="manga-reader-chevron" aria-hidden="true">›</span>
       </button>
@@ -300,7 +302,7 @@
         title="{% if mal_connected %}Mark this chapter read and sync to MAL{% else %}Mark this chapter as read{% endif %}">
         Mark chapter read{% if mal_connected %} on MAL{% endif %}
       </button>
-      <span class="manga-reader-hint" id="reader-hint">← → or tap sides · Esc closes</span>
+      <span class="manga-reader-hint" id="reader-hint">← → or tap sides · middle toggles menus · Esc closes</span>
     </footer>
   </div>
 </div>
@@ -374,7 +376,7 @@
 
   const completeAllLabel = malConnected ? 'Mark title completed on MAL' : 'Mark title completed';
   const completeChapterLabel = malConnected ? 'Mark chapter read on MAL' : 'Mark chapter read';
-  const markChapterLabel = malConnected ? 'Mark read on MAL' : 'Mark read';
+  const uncompleteChapterLabel = malConnected ? 'Undo complete (MAL)' : 'Undo complete';
   const rangeToggleOpen = 'Mark chapter range';
   const rangeToggleClose = 'Hide chapter range';
 
@@ -549,10 +551,7 @@
         );
       }
       lastSavedPageKey = '';
-      if (completeBtn) {
-        completeBtn.disabled = true;
-        completeBtn.textContent = 'Chapter marked read';
-      }
+      syncReaderCompleteBtn();
       refreshOverviewDoneState();
       syncContinueButton(activeMangaId);
       if (!silent && overlay.hidden) {
@@ -561,6 +560,78 @@
       return true;
     } finally {
       completing = false;
+    }
+  }
+
+  async function markChapterUncomplete(opts) {
+    const silent = !!(opts && opts.silent);
+    if (!activeMangaId || !activeChapterId || !chapterDone || completing) return false;
+    completing = true;
+    try {
+      const resp = await fetch('{{ url_for("api_manga_uncomplete") }}', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          manga_id: activeMangaId,
+          chapter_id: activeChapterId,
+        }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) {
+        const err = data.error || data.mal_error || 'Could not undo chapter complete';
+        if (!silent) {
+          if (!overlay.hidden && progressEl) progressEl.textContent = err;
+          else setOverviewStatus(err, true);
+        }
+        return false;
+      }
+      chapterDone = false;
+      const list = chapterMap[activeMangaId] || [];
+      const through = Math.max(0, Number(data.chapters_read) || 0);
+      list.forEach((ch, idx) => {
+        ch.done = idx + 1 <= through;
+      });
+      chaptersReadMap[activeMangaId] = through;
+      if (statusMap[activeMangaId] === 'completed' && data.status === 'reading') {
+        statusMap[activeMangaId] = 'reading';
+      }
+      syncReaderCompleteBtn();
+      refreshOverviewDoneState();
+      syncContinueButton(activeMangaId);
+      if (!silent && overlay.hidden) {
+        setOverviewStatus(
+          'Chapter unmarked' + (data.mal_synced ? ' · synced to MAL' : ''),
+          false
+        );
+      }
+      return true;
+    } finally {
+      completing = false;
+    }
+  }
+
+  function syncReaderCompleteBtn() {
+    if (!completeBtn) return;
+    completeBtn.disabled = false;
+    completeBtn.classList.toggle('is-done', !!chapterDone);
+    completeBtn.dataset.done = chapterDone ? '1' : '0';
+    if (chapterDone) {
+      completeBtn.title = malConnected
+        ? 'Undo complete and sync to MAL'
+        : 'Undo complete';
+      completeBtn.setAttribute('aria-label', 'Undo complete');
+      completeBtn.innerHTML =
+        '<span class="ep-mark-check" aria-hidden="true">✓</span>' +
+        '<span class="ep-mark-forbid" aria-hidden="true"></span>' +
+        '<span class="player-complete-label">' +
+        uncompleteChapterLabel +
+        '</span>';
+    } else {
+      completeBtn.title = malConnected
+        ? 'Mark this chapter read and sync to MAL'
+        : 'Mark this chapter as read';
+      completeBtn.setAttribute('aria-label', completeChapterLabel);
+      completeBtn.textContent = completeChapterLabel;
     }
   }
 
@@ -876,9 +947,14 @@
       const mark = rowEl && rowEl.querySelector('.manga-overview-mark');
       if (mark) {
         const done = !!(row && row.done);
-        mark.hidden = done;
-        mark.disabled = done;
-        if (!done) mark.textContent = markChapterLabel;
+        mark.hidden = false;
+        mark.disabled = false;
+        mark.classList.toggle('is-done', done);
+        mark.dataset.done = done ? '1' : '0';
+        mark.title = done
+          ? (malConnected ? 'Undo complete and sync to MAL' : 'Undo complete')
+          : (malConnected ? 'Mark this chapter read and sync to MAL' : 'Mark this chapter as read');
+        mark.setAttribute('aria-label', done ? 'Undo complete' : 'Mark as read');
       }
     });
     syncContinueButton(activeMangaId);
@@ -886,18 +962,24 @@
 
   function continueTarget(mid) {
     const list = chapterMap[mid] || [];
+    const status = statusMap[mid] || '';
+    if (status === 'completed') return null;
     const lastId = lastChapterMap[mid];
     if (lastId) {
-      const last = list.find((ch) => ch.id === lastId && !ch.done && ch.page_index > 0);
+      const last = list.find((ch) => ch.id === lastId && !ch.done);
       if (last) return last;
     }
-    return list.find((ch) => !ch.done && ch.page_index > 0) || null;
+    // Prefer in-progress page resume, else first unread chapter (anime Continue semantics).
+    const inProgress = list.find((ch) => !ch.done && ch.page_index > 0);
+    if (inProgress) return inProgress;
+    return list.find((ch) => !ch.done) || null;
   }
 
   function syncContinueButton(mid) {
     if (!overviewContinue) return;
-    const target = mid ? continueTarget(mid) : null;
-    if (!target || !(target.page_index > 0)) {
+    const status = mid ? (statusMap[mid] || '') : '';
+    const target = mid && status !== 'completed' ? continueTarget(mid) : null;
+    if (!target) {
       overviewContinue.hidden = true;
       overviewContinue.dataset.chapterId = '';
       return;
@@ -905,8 +987,14 @@
     overviewContinue.hidden = false;
     overviewContinue.dataset.mangaId = mid;
     overviewContinue.dataset.chapterId = target.id;
-    overviewContinue.textContent =
-      'Continue · ' + target.title + ' p. ' + (target.page_index + 1);
+    const read = chaptersReadMap[mid] || 0;
+    const label = read > 0 ? 'Continue' : 'Start';
+    if (target.page_index > 0) {
+      overviewContinue.textContent =
+        label + ' · ' + target.title + ' p. ' + (target.page_index + 1);
+    } else {
+      overviewContinue.textContent = label + ' · ' + target.title;
+    }
   }
 
   function rangeOptionsFor(mid) {
@@ -1094,28 +1182,30 @@
         }
         b.addEventListener('click', () => openReader(mid, ch.id, title, ch.title));
         li.appendChild(b);
-        if (!ch.done) {
-          const mark = document.createElement('button');
-          mark.type = 'button';
-          mark.className = 'manga-overview-mark';
-          mark.title = malConnected
-            ? 'Mark this chapter read and sync to MAL'
-            : 'Mark this chapter as read';
-          mark.textContent = markChapterLabel;
-          mark.addEventListener('click', async (event) => {
-            event.stopPropagation();
-            activeMangaId = mid;
-            activeChapterId = ch.id;
-            activeChapterTitle = ch.title;
-            chapterDone = !!ch.done;
-            setOverviewStatus('Saving…', false);
-            const ok = await markChapterComplete({ silent: false });
-            if (ok) {
-              mark.hidden = true;
-            }
-          });
-          li.appendChild(mark);
-        }
+        const mark = document.createElement('button');
+        mark.type = 'button';
+        mark.className = 'manga-overview-mark ep-mark-btn' + (ch.done ? ' is-done' : '');
+        mark.dataset.done = ch.done ? '1' : '0';
+        mark.title = ch.done
+          ? (malConnected ? 'Undo complete and sync to MAL' : 'Undo complete')
+          : (malConnected ? 'Mark this chapter read and sync to MAL' : 'Mark this chapter as read');
+        mark.setAttribute('aria-label', ch.done ? 'Undo complete' : 'Mark as read');
+        mark.innerHTML =
+          '<span class="ep-mark-check" aria-hidden="true">✓</span>' +
+          '<span class="ep-mark-forbid" aria-hidden="true"></span>';
+        mark.addEventListener('click', async (event) => {
+          event.stopPropagation();
+          activeMangaId = mid;
+          activeChapterId = ch.id;
+          activeChapterTitle = ch.title;
+          chapterDone = !!ch.done;
+          setOverviewStatus('Saving…', false);
+          const ok = chapterDone
+            ? await markChapterUncomplete({ silent: false })
+            : await markChapterComplete({ silent: false });
+          if (!ok) setOverviewStatus('Could not update chapter.', true);
+        });
+        li.appendChild(mark);
         overviewChapters.appendChild(li);
       });
     }
@@ -1206,10 +1296,7 @@
     img.removeAttribute('src');
     clearWebtoonStrip();
     syncModeUi();
-    if (completeBtn) {
-      completeBtn.disabled = chapterDone;
-      completeBtn.textContent = chapterDone ? 'Chapter marked read' : completeChapterLabel;
-    }
+    syncReaderCompleteBtn();
     overlay.hidden = false;
     overlay.setAttribute('aria-hidden', 'false');
     setBodyScrollLock(true, 'manga-reader-open');
@@ -1251,6 +1338,7 @@
     await maybeAutoComplete();
     overlay.hidden = true;
     overlay.setAttribute('aria-hidden', 'true');
+    overlay.querySelector('.manga-reader-panel')?.classList.remove('chrome-hidden');
     setBodyScrollLock(false, 'manga-reader-open');
     pages = [];
     viewedPages = new Set();
@@ -1273,6 +1361,20 @@
   // step() applies RTL flip so left advances when RTL is on.
   prevBtn?.addEventListener('click', () => step(-1));
   nextBtn?.addEventListener('click', () => step(1));
+  document.getElementById('reader-chrome-toggle')?.addEventListener('click', () => {
+    const panel = overlay?.querySelector('.manga-reader-panel');
+    if (!panel) return;
+    panel.classList.toggle('chrome-hidden');
+  });
+  readerStage?.addEventListener('click', (event) => {
+    if (!isWebtoon() || !overlay || overlay.hidden) return;
+    if (event.target.closest('.manga-reader-bar, .manga-reader-footer')) return;
+    const rect = readerStage.getBoundingClientRect();
+    if (!rect.width) return;
+    const ratio = (event.clientX - rect.left) / rect.width;
+    if (ratio <= 0.2 || ratio >= 0.8) return;
+    overlay.querySelector('.manga-reader-panel')?.classList.toggle('chrome-hidden');
+  });
   if (webtoonToggle) {
     webtoonToggle.checked = loadReaderMode() === 'webtoon';
     syncModeUi();
@@ -1303,7 +1405,10 @@
     syncRtlUi();
     if (pages.length && !isWebtoon()) showPage();
   });
-  completeBtn?.addEventListener('click', () => markChapterComplete({ silent: false }));
+  completeBtn?.addEventListener('click', () => {
+    if (chapterDone) markChapterUncomplete({ silent: false });
+    else markChapterComplete({ silent: false });
+  });
 
   overviewContinue?.addEventListener('click', () => {
     const mid = overviewContinue.dataset.mangaId || activeMangaId;

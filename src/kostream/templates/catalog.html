@@ -159,7 +159,14 @@
     <div class="mal-actions">
       <button type="button" class="btn-watch" id="catalog-import-media">{{ _('Import from media') }}</button>
       <button type="button" class="btn-watch" id="catalog-upload-open">{{ _('Upload') }}</button>
+      <button
+        type="button"
+        class="btn-detail"
+        id="catalog-resync-folders"
+        title="{{ _('Re-bind on-disk episode folders to the correct catalog titles') }}"
+      >{{ _('Resync local episodes') }}</button>
       <span class="catalog-meta" id="catalog-import-preview" hidden></span>
+      <span class="catalog-meta" id="catalog-resync-status" hidden></span>
     </div>
     {% else %}
     <p class="catalog-meta">{{ _('Admin or Manager account required to import from media.') }}</p>
@@ -229,6 +236,8 @@
     <p class="catalog-meta sync-index-help">
       Checked titles are skipped on the next sync. Uncheck to force a re-sync.
       Completed titles are auto-checked after each sync run.
+      Anime sync count is your MAL list size; this index shows the full shared catalog
+      (titles not on your list stay in the catalog but are not counted as list-synced).
     </p>
     <nav class="sync-index-tabs" role="tablist" aria-label="Sync index sections">
       <button type="button" class="sync-index-tab is-active" role="tab" data-section="anime_sync" aria-selected="true">Anime sync</button>
@@ -789,9 +798,26 @@ anilistForm.addEventListener('submit', async (event) => {
       } catch (_) {}
     };
     refreshImportPreview();
+    let importBusy = false;
+    let importMediaLabel = '';
+    const setImportBusy = (busy) => {
+      importBusy = !!busy;
+      catalogImportMedia.setAttribute('aria-busy', importBusy ? 'true' : 'false');
+      if (importBusy) {
+        importMediaLabel = catalogImportMedia.textContent || 'Import from media';
+        catalogImportMedia.disabled = true;
+        catalogImportMedia.textContent = 'Importing…';
+        catalogImportMedia.classList.add('is-uploading');
+      } else {
+        catalogImportMedia.disabled = false;
+        catalogImportMedia.textContent = importMediaLabel || 'Import from media';
+        catalogImportMedia.classList.remove('is-uploading');
+      }
+    };
     catalogImportMedia.addEventListener('click', async () => {
+      if (importBusy) return;
       if (!confirm('Import all uncataloged anime folders from your media library?\n\nTitles will be added to the catalog and linked to MAL where possible (Plan to Watch when connected).')) return;
-      catalogImportMedia.disabled = true;
+      setImportBusy(true);
       try {
         const resp = await fetch('{{ url_for("api_catalog_import_media") }}', {
           method: 'POST',
@@ -800,13 +826,60 @@ anilistForm.addEventListener('submit', async (event) => {
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok || !data.ok) {
           alert(data.error || 'Import failed');
-          catalogImportMedia.disabled = false;
+          setImportBusy(false);
           return;
         }
         location.href = '{{ url_for("catalog_page") }}?mal_message=' + encodeURIComponent(data.message || 'Import finished.');
       } catch (_) {
         alert('Import failed');
-        catalogImportMedia.disabled = false;
+        setImportBusy(false);
+      }
+    });
+  }
+
+  const catalogResyncFolders = document.getElementById('catalog-resync-folders');
+  const catalogResyncStatus = document.getElementById('catalog-resync-status');
+  if (catalogResyncFolders) {
+    catalogResyncFolders.addEventListener('click', async () => {
+      if (!confirm(
+        'Resync local episode folders?\n\n'
+        + 'This re-binds on-disk anime folders to catalog titles by folder/title match '
+        + 'and clears cross-wired folders (wrong show). Files on disk are not moved.'
+      )) return;
+      catalogResyncFolders.disabled = true;
+      if (catalogResyncStatus) {
+        catalogResyncStatus.hidden = false;
+        catalogResyncStatus.textContent = 'Resyncing folders…';
+        catalogResyncStatus.classList.remove('is-error');
+      }
+      try {
+        const resp = await fetch('{{ url_for("api_catalog_resync_folders") }}', {
+          method: 'POST',
+          headers: { 'X-CSRF-Token': csrfToken() },
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          const err = data.error || 'Resync failed';
+          if (catalogResyncStatus) {
+            catalogResyncStatus.textContent = err;
+            catalogResyncStatus.classList.add('is-error');
+          } else {
+            alert(err);
+          }
+          catalogResyncFolders.disabled = false;
+          return;
+        }
+        location.href = '{{ url_for("catalog_page") }}?mal_message=' + encodeURIComponent(
+          data.message || 'Folder resync finished.'
+        );
+      } catch (_) {
+        if (catalogResyncStatus) {
+          catalogResyncStatus.textContent = 'Resync failed';
+          catalogResyncStatus.classList.add('is-error');
+        } else {
+          alert('Resync failed');
+        }
+        catalogResyncFolders.disabled = false;
       }
     });
   }
@@ -824,6 +897,19 @@ anilistForm.addEventListener('submit', async (event) => {
   const uploadSubmit = document.getElementById('catalog-upload-submit');
   const uploadError = document.getElementById('catalog-upload-error');
   const uploadSuccess = document.getElementById('catalog-upload-success');
+  let uploadBusy = false;
+  let uploadDisabledSnapshot = null;
+  let uploadSubmitLabel = '';
+
+  const uploadInteractiveControls = () => [
+    uploadSubmit,
+    uploadCancel,
+    uploadClose,
+    uploadShow,
+    uploadEpisode,
+    uploadVideo,
+    uploadSubtitle,
+  ].filter(Boolean);
 
   const setUploadError = (msg) => {
     if (!uploadError) return;
@@ -845,8 +931,34 @@ anilistForm.addEventListener('submit', async (event) => {
       uploadSuccess.textContent = '';
     }
   };
+  const setUploadBusy = (busy) => {
+    uploadBusy = !!busy;
+    if (uploadForm) uploadForm.setAttribute('aria-busy', uploadBusy ? 'true' : 'false');
+    if (uploadBusy) {
+      uploadDisabledSnapshot = new Map(
+        uploadInteractiveControls().map((el) => [el, el.disabled])
+      );
+      uploadInteractiveControls().forEach((el) => { el.disabled = true; });
+      if (uploadSubmit) {
+        uploadSubmitLabel = uploadSubmit.textContent || 'Upload episode';
+        uploadSubmit.textContent = 'Uploading…';
+        uploadSubmit.classList.add('is-uploading');
+      }
+    } else {
+      if (uploadDisabledSnapshot) {
+        uploadDisabledSnapshot.forEach((wasDisabled, el) => {
+          el.disabled = wasDisabled;
+        });
+        uploadDisabledSnapshot = null;
+      }
+      if (uploadSubmit) {
+        uploadSubmit.textContent = uploadSubmitLabel || 'Upload episode';
+        uploadSubmit.classList.remove('is-uploading');
+      }
+    }
+  };
   const closeUploadModal = () => {
-    if (!uploadModal) return;
+    if (!uploadModal || uploadBusy) return;
     uploadModal.hidden = true;
     uploadModal.setAttribute('aria-hidden', 'true');
     document.body.classList.remove('sync-index-open');
@@ -963,6 +1075,7 @@ anilistForm.addEventListener('submit', async (event) => {
     });
     uploadForm.addEventListener('submit', async (event) => {
       event.preventDefault();
+      if (uploadBusy) return;
       setUploadError('');
       setUploadSuccess('');
       const showId = uploadShow.value;
@@ -986,7 +1099,7 @@ anilistForm.addEventListener('submit', async (event) => {
       if (uploadSubtitle && uploadSubtitle.files && uploadSubtitle.files.length) {
         body.append('subtitle', uploadSubtitle.files[0]);
       }
-      if (uploadSubmit) uploadSubmit.disabled = true;
+      setUploadBusy(true);
       try {
         const resp = await fetch('{{ url_for("api_catalog_upload_episode") }}', {
           method: 'POST',
@@ -1002,38 +1115,12 @@ anilistForm.addEventListener('submit', async (event) => {
           setUploadError(data.error || 'Upload failed');
           return;
         }
-        const remaining = Array.isArray(data.missing_episodes) ? data.missing_episodes : [];
-        fillEpisodeOptions(remaining);
-        if (uploadVideo) uploadVideo.value = '';
-        if (uploadSubtitle) uploadSubtitle.value = '';
-        const name = data.filename || 'episode';
-        if (!remaining.length) {
-          setUploadSuccess('Uploaded ' + name + '. No missing episodes left for this title.');
-          const opt = Array.from(uploadShow.options).find((o) => o.value === showId);
-          if (opt) opt.remove();
-          uploadShow.value = '';
-          uploadEpisode.disabled = true;
-          if (!Array.from(uploadShow.options).some((o) => o.value)) {
-            fillShowOptions([]);
-          }
-        } else {
-          setUploadSuccess('Uploaded ' + name + '. ' + remaining.length + ' missing episode(s) left.');
-          const selected = Array.from(uploadShow.options).find((o) => o.value === showId);
-          if (selected) {
-            const local = Number(data.local_count);
-            const expected = Number(data.expected_count);
-            const base = selected.textContent.replace(/\s*\([^)]*\)\s*$/, '');
-            if (Number.isFinite(local) && Number.isFinite(expected)) {
-              selected.textContent = `${base} (${local}/${expected}, ${remaining.length} missing)`;
-            } else {
-              selected.textContent = `${base} (${remaining.length} missing)`;
-            }
-          }
-        }
+        setUploadBusy(false);
+        closeUploadModal();
       } catch (_) {
         setUploadError('Upload failed');
       } finally {
-        if (uploadSubmit) uploadSubmit.disabled = false;
+        if (uploadBusy) setUploadBusy(false);
       }
     });
   }

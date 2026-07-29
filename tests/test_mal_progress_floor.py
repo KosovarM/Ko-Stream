@@ -46,6 +46,27 @@ def test_update_episodes_watched_never_below_cache_floor(monkeypatch, tmp_path):
     assert sent[0]["num_watched_episodes"] == "8"
 
 
+def test_update_episodes_watched_allow_decrease(monkeypatch, tmp_path):
+    sent: list[dict] = []
+
+    def fake_api(token, path, form, method="POST"):
+        sent.append(dict(form))
+        return b"{}"
+
+    monkeypatch.setattr("kostream.mal.get_valid_access_token", lambda cfg, user_id: "tok")
+    monkeypatch.setattr(
+        "kostream.mal.get_anime_list_row",
+        lambda user_id, mal_id: {"num_episodes_watched": 8, "list_status": "watching", "score": 0},
+    )
+    monkeypatch.setattr("kostream.mal.upsert_anime_list_row", lambda *a, **k: {})
+    monkeypatch.setattr("kostream.mal._api_form_raw", fake_api)
+
+    cfg = MagicMock()
+    update_episodes_watched(cfg, 21, 3, user_id="u_test", allow_decrease=True)
+    assert sent
+    assert sent[0]["num_watched_episodes"] == "3"
+
+
 def test_apply_mal_metadata_keeps_higher_local():
     show = Show(
         id="s",

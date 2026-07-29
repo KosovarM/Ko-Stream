@@ -223,7 +223,7 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
     ),
     "Gintama__3_Z_Ginpachi_Sensei_sub": (
         "Gintama 3-Z Ginpachi-sensei",
-        "mal-60572",
+        None,  # was wrongly mal-60572 (All-devouring Whale); resolve via title match
     ),
     "Frieren__Beyond_Journey_s_End_sub": (
         "Frieren Beyond Journeys End",
@@ -241,7 +241,7 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
     # --- 2026-07-28 inbox batch (Ghibli + BC movie) ---
     "Black_Clover__Sword_of_the_Wizard_King_sub": (
         "Black Clover Sword of the Wizard King",
-        "mal-48561",
+        None,  # was wrongly mal-48561 (Jujutsu Kaisen 0); resolve via title match
     ),
     "Spirited_Away_sub": ("Spirited Away", "mal-199"),
     "Princess_Mononoke_sub": ("Princess Mononoke", "mal-164"),

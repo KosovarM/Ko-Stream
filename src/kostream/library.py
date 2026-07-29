@@ -273,10 +273,6 @@ def _mal_show_for_entry(
             display_season=display_season,
             episode_titles=cached.episode_titles,
         )
-        local_n = sum(1 for e in episodes if e.filename != "demo.mp4")
-        if local_n:
-            desc = f"MAL + {local_n} local file(s). {desc}"[:500]
-
         show = Show(
             id=show_id,
             title=cached.title,
@@ -305,7 +301,7 @@ def _mal_show_for_entry(
         show = Show(
             id=show_id,
             title=entry.title or (entry.folder or show_id),
-            description=f"MAL + local — {len(local_episodes)} episode(s)",
+            description=f"{len(local_episodes)} local episode(s).",
             poster=local_poster,
             episodes=episodes,
             genres=["Local", "MAL"],

@@ -141,6 +141,60 @@ def match_score(folder_keys: set[str], entry_keys: set[str]) -> float:
     return len(overlap) / min(len(folder_keys), len(entry_keys))
 
 
+def folder_plausibly_matches_title(folder: str, title: str | None, *, min_score: float = 0.5) -> bool:
+    """True when a library folder name reasonably belongs to this anime title.
+
+    Used to reject cross-wired catalog ``folder`` fields (e.g. Ginpachi folder on
+    an unrelated MAL id) and to validate FOLDER_MAP entries before linking.
+    """
+    if not folder or not title:
+        return False
+    folder_norm = normalize_title_for_match(folder)
+    title_norm = normalize_title_for_match(title)
+    if not folder_norm or not title_norm:
+        return False
+    if folder_norm == title_norm:
+        return True
+    if folder_norm in title_norm or title_norm in folder_norm:
+        return True
+    score = match_score(folder_match_keys(folder), entry_match_keys(title))
+    # Generic tokens like "movie"/"season" inflate overlap — require a higher bar
+    # when the only shared keys are weak.
+    stop = {
+        "movie",
+        "movies",
+        "season",
+        "part",
+        "the",
+        "and",
+        "of",
+        "ova",
+        "ona",
+        "special",
+        "film",
+        "arc",
+        "hen",
+        "2nd",
+        "3rd",
+        "4th",
+    }
+    folder_tokens = {t for t in _manga_tokens(folder_norm) if t not in stop}
+    title_tokens = {t for t in _manga_tokens(title_norm) if t not in stop}
+    strong_overlap = folder_tokens & title_tokens
+    # Never accept a high match_score that is only stopword noise (e.g. "movie").
+    if not strong_overlap:
+        return False
+    if score >= min_score:
+        return True
+    # Shared significant tokens (length ≥ 4), ignoring stopwords.
+    significant = {t for t in strong_overlap if len(t) >= 4}
+    if len(significant) >= 2:
+        return True
+    if len(significant) == 1 and len(next(iter(significant))) >= 8:
+        return True
+    return False
+
+
 def best_catalog_match(
     folder: str,
     candidates: Iterable[tuple[str | None, int | None]],

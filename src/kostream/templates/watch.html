@@ -92,11 +92,16 @@
       </div>
       <button
         type="button"
-        class="btn-watch player-complete"
+        class="btn-watch player-complete{% if episode_completed_flag %} is-done{% endif %}"
         id="mark-complete"
-        {% if episode_completed_flag %}disabled{% endif %}
+        data-done="{{ '1' if episode_completed_flag else '0' }}"
+        title="{% if episode_completed_flag %}{% if mal_connected %}{{ _('Undo complete and sync to MAL') }}{% else %}{{ _('Undo complete') }}{% endif %}{% elif mal_connected %}{{ _('Mark as watched and sync to MAL') }}{% else %}{{ _('Mark as watched') }}{% endif %}"
+        aria-label="{% if episode_completed_flag %}{{ _('Undo complete') }}{% elif mal_connected %}{{ _('Complete on MAL') }}{% else %}{{ _('Complete') }}{% endif %}"
       >
-        {% if episode_completed_flag %}✓ {{ _('Completed') }}{% elif mal_connected %}✓ {{ _('Complete on MAL') }}{% else %}✓ {{ _('Complete') }}{% endif %}
+        {% if episode_completed_flag %}
+        <span class="ep-mark-check" aria-hidden="true">✓</span><span class="ep-mark-forbid" aria-hidden="true"></span>
+        <span class="player-complete-label">{{ _('Undo complete') }}</span>
+        {% elif mal_connected %}✓ {{ _('Complete on MAL') }}{% else %}✓ {{ _('Complete') }}{% endif %}
       </button>
     </div>
   </div>
@@ -144,7 +149,52 @@
     return resp.ok;
   }
 
-  document.getElementById('mark-complete')?.addEventListener('click', () => markComplete());
+  async function markUncomplete(opts) {
+    const stay = !!(opts && opts.stay);
+    const resp = await fetch('{{ url_for("api_episode_uncomplete") }}', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({show_id: showId, episode_id: epId}),
+    });
+    if (resp.ok && !stay) {
+      window.location.href = '{{ url_for("show_detail", show_id=show.id) }}';
+    }
+    return resp.ok;
+  }
+
+  function setCompleteButtonDone(done) {
+    const btn = document.getElementById('mark-complete');
+    if (!btn) return;
+    btn.disabled = false;
+    btn.dataset.done = done ? '1' : '0';
+    btn.classList.toggle('is-done', !!done);
+    if (done) {
+      btn.title = {% if mal_connected %}'Undo complete and sync to MAL'{% else %}'Undo complete'{% endif %};
+      btn.setAttribute('aria-label', 'Undo complete');
+      btn.innerHTML =
+        '<span class="ep-mark-check" aria-hidden="true">✓</span>' +
+        '<span class="ep-mark-forbid" aria-hidden="true"></span>' +
+        '<span class="player-complete-label">Undo complete</span>';
+    } else {
+      btn.title = {% if mal_connected %}'Mark as watched and sync to MAL'{% else %}'Mark as watched'{% endif %};
+      btn.setAttribute('aria-label', {% if mal_connected %}'Complete on MAL'{% else %}'Complete'{% endif %});
+      btn.textContent = {% if mal_connected %}'✓ Complete on MAL'{% else %}'✓ Complete'{% endif %};
+    }
+  }
+
+  document.getElementById('mark-complete')?.addEventListener('click', async () => {
+    const btn = document.getElementById('mark-complete');
+    const done = btn && (btn.dataset.done === '1' || btn.classList.contains('is-done'));
+    if (done) {
+      const ok = await markUncomplete({ stay: true });
+      if (ok) {
+        setCompleteButtonDone(false);
+        try { location.reload(); } catch (_) {}
+      }
+      return;
+    }
+    await markComplete();
+  });
 
   const grabMsg = document.getElementById('grab-override-msg');
   function showGrabError(text) {
@@ -329,11 +379,7 @@
     if (autoCompleted || episodeAlreadyComplete || !video.duration || !isFinite(video.duration)) return;
     if (video.currentTime < video.duration * 0.9) return;
     autoCompleted = true;
-    const btn = document.getElementById('mark-complete');
-    if (btn) {
-      btn.disabled = true;
-      btn.textContent = '✓ Completed';
-    }
+    setCompleteButtonDone(true);
     await markComplete({ stay: true });
   }
 
@@ -437,11 +483,7 @@
         episodeAlreadyComplete || showListCompleted || nextEpisodeCompleted;
       if (!episodeAlreadyComplete && !autoCompleted) {
         autoCompleted = true;
-        const btn = document.getElementById('mark-complete');
-        if (btn) {
-          btn.disabled = true;
-          btn.textContent = '✓ Completed';
-        }
+        setCompleteButtonDone(true);
         await markComplete({ stay: true });
       }
       // First-time watch with an unwatched next episode → continue binge.
