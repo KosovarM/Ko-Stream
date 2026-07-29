@@ -116,14 +116,26 @@
   </div>
 
   {% if total_pages > 1 %}
-        <nav class="browse-pagination" aria-label="{{ _(browse_label) }} pages">
+  {% set page_window_end = [page + 4, total_pages] | min %}
+  <nav class="browse-pagination" aria-label="{{ _(browse_label) }} pages">
     {% if page > 1 %}
     <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=page - 1, scope=scope_arg) }}">‹ {{ _('Previous') }}</a>
     {% else %}
     <span class="browse-page-btn disabled">‹ {{ _('Previous') }}</span>
     {% endif %}
 
-    <span class="browse-page-status">{{ _('Page') }} {{ page }} {{ _('of') }} {{ total_pages }}</span>
+    <div class="browse-page-nums" role="list">
+      {% for p in range(page, page_window_end + 1) %}
+      {% if p == page %}
+      <span class="browse-page-num is-active" role="listitem" aria-current="page">{{ p }}</span>
+      {% else %}
+      <a class="browse-page-num" role="listitem" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=p, scope=scope_arg) }}">{{ p }}</a>
+      {% endif %}
+      {% endfor %}
+      {% if page_window_end < total_pages %}
+      <span class="browse-page-ellipsis" aria-hidden="true">…</span>
+      {% endif %}
+    </div>
 
     {% if page < total_pages %}
     <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=page + 1, scope=scope_arg) }}">{{ _('Next') }} ›</a>

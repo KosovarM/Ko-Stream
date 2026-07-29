@@ -35,6 +35,11 @@ FOLDER_MAL_IDS: dict[str, int] = {
     "Demon Slayer Entertainment District Arc": 47778,
     "Demon Slayer Swordsmith Village Arc": 51019,
     "Demon Slayer Infinity Castle": 59192,
+    # Frieren / Magi — prevent Solo Leveling / Danmachi cross-wires
+    "Frieren Beyond Journeys End": 52991,
+    "Frieren Beyond Journeys End Season 2": 59978,
+    "Magi Sinbad no Bouken": 22097,  # OVA (5 eps); not TV 31741
+    "Magi Adventure of Sinbad": 31741,  # TV
 }
 
 # English arc/series phrases -> extra match tokens (incl. romanized MAL fragments).
@@ -69,6 +74,17 @@ TITLE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "your name": ("kimi no na wa", "32281"),
     "nausicaa": ("kaze no tani no nausicaa", "572"),
     "castle in the sky": ("tenkuu no shiro laputa", "513"),
+    "frieren beyond journeys end season 2": (
+        "sousou no frieren 2nd season",
+        "59978",
+    ),
+    "frieren beyond journeys end": ("sousou no frieren", "52991"),
+    "magi sinbad no bouken": ("magi sinbad no bouken", "22097"),
+    "magi adventure of sinbad": (
+        "magi sinbad no bouken tv",
+        "adventure of sinbad",
+        "31741",
+    ),
 }
 
 _APOSTROPHE_RE = re.compile(r"[''`´]")
@@ -222,6 +238,11 @@ def folder_plausibly_matches_title(
     if not folder_norm or not title_norm:
         return False
 
+    # Explicit folder→MAL aliases always win (before soft containment / tokens).
+    mapped = folder_mal_id(folder)
+    if mapped is not None and mal_id is not None:
+        return int(mapped) == int(mal_id)
+
     # Punctuation-insensitive near-equality / tight containment.
     # Reject loose containment like TV title inside a longer movie folder name.
     folder_key = _manga_match_key(folder_norm)
@@ -236,10 +257,6 @@ def folder_plausibly_matches_title(
         )
         if shorter in longer and len(shorter) / max(len(longer), 1) >= 0.85:
             return True
-
-    mapped = folder_mal_id(folder)
-    if mapped is not None and mal_id is not None:
-        return int(mapped) == int(mal_id)
 
     f_keys = folder_match_keys(folder)
     e_keys = entry_match_keys(title, mal_id=mal_id)

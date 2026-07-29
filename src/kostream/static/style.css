@@ -1974,7 +1974,7 @@ a.header-notify-item:hover {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 1rem;
+  gap: 0.65rem 1rem;
   flex-wrap: wrap;
   padding-top: 0.5rem;
 }
@@ -1997,6 +1997,51 @@ a.header-notify-item:hover {
 .browse-page-btn.disabled {
   opacity: 0.35;
   pointer-events: none;
+}
+
+.browse-page-nums {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+}
+
+.browse-page-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.4rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-weight: 700;
+  font-size: 0.88rem;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.browse-page-num:hover:not(.is-active) {
+  border-color: var(--accent-muted);
+  color: var(--accent);
+}
+
+.browse-page-num.is-active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #1a1408;
+  cursor: default;
+}
+
+.browse-page-ellipsis {
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 700;
+  padding: 0 0.15rem;
+  line-height: 1;
+  user-select: none;
 }
 
 .browse-page-status {

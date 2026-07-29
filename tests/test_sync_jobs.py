@@ -330,14 +330,19 @@ def test_api_mal_sync_endpoints_require_connection(tmp_path, monkeypatch):
     client = app.test_client()
     login_client(client)
 
+    # Anime/manga list sync still need a MAL connection.
     for path in (
         "/api/mal/sync/animes",
         "/api/mal/sync/mangas",
-        "/api/mal/sync/anime-titles",
         "/api/mal/sync/chapter-titles",
     ):
         resp = client.post(path)
         assert resp.status_code == 401, path
+
+    # Episode titles use Jikan/HTML — login is enough (no MAL OAuth).
+    titles = client.post("/api/mal/sync/anime-titles")
+    assert titles.status_code == 200
+    assert titles.get_json().get("ok") is True
 
     status = client.get("/api/mal/sync/status")
     assert status.status_code == 200

@@ -855,3 +855,91 @@ def test_episode_titles_walk_complete_stops_partial_retry(tmp_path, monkeypatch)
     )
     assert mal_mod.episode_titles_need_fetch(3) is False
 
+
+def test_format_episode_title_user_error_hides_raw_504():
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    from kostream import mal as mal_mod
+
+    exc = HTTPError("https://api.jikan.moe/v4/x", 504, "Gateway Time-out", hdrs=None, fp=BytesIO())
+    msg = mal_mod.format_episode_title_user_error(exc)
+    assert "504" not in msg
+    assert "Gateway" not in msg
+    assert "Jikan unavailable" in msg
+    assert mal_mod.is_jikan_outage_error(exc) is True
+
+
+def test_ensure_episode_titles_html_fallback_default_on(tmp_path, monkeypatch):
+    """Default KOSTREAM_MAL_HTML_SCRAPE is on so Sync works during Jikan 504s."""
+    from io import BytesIO
+    from urllib.error import HTTPError
+
+    from kostream import mal as mal_mod
+
+    monkeypatch.delenv("KOSTREAM_MAL_HTML_SCRAPE", raising=False)
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(mal_mod, "JIKAN_MIN_INTERVAL", 0.0)
+    (tmp_path / "9.json").write_text(
+        '{"mal_id":9,"title":"X","synopsis":"","poster_url":null,"genres":[],'
+        '"num_episodes":2,"list_status":"watching","num_episodes_watched":0,'
+        '"anime_status":"finished_airing","score":0,"mean_score":null,"episode_titles":{}}',
+        encoding="utf-8",
+    )
+
+    def boom(req, timeout=20):
+        raise HTTPError(req.full_url, 504, "Gateway Time-out", hdrs=None, fp=BytesIO())
+
+    monkeypatch.setattr(mal_mod, "urlopen", boom)
+    monkeypatch.setattr(mal_mod.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(
+        mal_mod,
+        "fetch_episode_titles_from_mal_site",
+        lambda _mid: ({1: "One", 2: "Two"}, True),
+    )
+    assert mal_mod.ensure_episode_titles(9) is True
+    cached = mal_mod.load_cached_anime(9)
+    assert cached is not None
+    assert cached.episode_titles[1] == "One"
+
+
+def test_sync_catalog_episode_titles_user_message_on_jikan_outage(tmp_path, monkeypatch):
+    from kostream import mal as mal_mod
+    from kostream.catalog import CatalogEntry, CatalogState, save_catalog
+
+    catalog_path = tmp_path / "selected.json"
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path / "cache")
+    (tmp_path / "cache").mkdir()
+    (tmp_path / "cache" / "1.json").write_text(
+        '{"mal_id":1,"title":"Cowboy Bebop","synopsis":"","poster_url":null,"genres":[],'
+        '"num_episodes":2,"anime_status":"finished_airing","episode_titles":{}}',
+        encoding="utf-8",
+    )
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-1",
+                    enabled=True,
+                    source="mal",
+                    folder="Cowboy Bebop",
+                    mal_id=1,
+                    title="Cowboy Bebop",
+                )
+            ]
+        ),
+        catalog_path,
+    )
+
+    def fail(_mid, *, force=False):
+        mal_mod._last_episode_title_jikan_outage = True
+        return False
+
+    monkeypatch.setattr(mal_mod, "ensure_episode_titles", fail)
+    monkeypatch.setattr(mal_mod.time, "sleep", lambda _s: None)
+    result = mal_mod.sync_catalog_episode_titles(catalog_path, limit=5)
+    assert result.failed >= 1
+    assert result.jikan_unavailable is True
+    assert result.last_error is not None
+    assert "Jikan unavailable" in result.last_error
+    assert "mal_id=" not in result.last_error

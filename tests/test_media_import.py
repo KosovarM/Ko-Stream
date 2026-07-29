@@ -938,3 +938,139 @@ def test_import_resync_idempotent_bindings_and_episode_sum(tmp_path: Path):
     # Local-only mystery folder stays bound to its local catalog row.
     local_ids = [eid for eid, folder in bindings_a.items() if folder == "Mystery Local Show"]
     assert len(local_ids) == 1
+
+
+def test_folder_mal_ids_override_bad_folder_map(tmp_path, monkeypatch):
+    """Explicit aliases win over a wrong FOLDER_MAP catalog id (Frieren S2)."""
+    from kostream.media_import import _load_folder_mal_map
+    from kostream.media_title_aliases import FOLDER_MAL_IDS
+
+    assert FOLDER_MAL_IDS["Frieren Beyond Journeys End Season 2"] == 59978
+    fm = _load_folder_mal_map()
+    assert fm.get("Frieren Beyond Journeys End Season 2") == 59978
+    assert fm.get("Magi Sinbad no Bouken") == 22097
+    assert fm.get("Magi Adventure of Sinbad") == 31741
+
+
+def test_import_relinks_crosswired_folder_via_alias(tmp_path: Path):
+    """Import repairs Magi Sinbad folder stuck on the wrong MAL id."""
+    from kostream.media_import import import_media_to_catalog
+
+    root = tmp_path / "anime"
+    folder = root / "Magi Sinbad no Bouken"
+    folder.mkdir(parents=True)
+    (folder / "S01E01.mp4").write_bytes(b"v")
+    (folder / "S01E02.mp4").write_bytes(b"v")
+    (folder / "S01E03.mp4").write_bytes(b"v")
+    (folder / "S01E04.mp4").write_bytes(b"v")
+    (folder / "S01E05.mp4").write_bytes(b"v")
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-28121",
+                    enabled=True,
+                    source="mal",
+                    folder="Magi Sinbad no Bouken",
+                    mal_id=28121,
+                    title="Dungeon ni Deai wo Motomeru no wa Machigatteiru Darou ka",
+                ),
+                CatalogEntry(
+                    id="mal-31741",
+                    enabled=True,
+                    source="mal",
+                    folder="Magi Adventure of Sinbad",
+                    mal_id=31741,
+                    title="Magi: Adventure of Sinbad",
+                ),
+            ]
+        ),
+        catalog_path,
+    )
+    # Adventure folder must exist for list_folders, but relink targets Magi Sinbad only.
+    adv = root / "Magi Adventure of Sinbad"
+    adv.mkdir()
+    (adv / "S01E01.mp4").write_bytes(b"v")
+
+    with patch(
+        "kostream.media_import._load_folder_mal_map",
+        return_value={
+            "Magi Sinbad no Bouken": 22097,
+            "Magi Adventure of Sinbad": 31741,
+        },
+    ), patch("kostream.media_import.ensure_episode_titles_async", return_value=False), patch(
+        "kostream.media_import._enrich_mal_cache", return_value=None
+    ):
+        result = import_media_to_catalog(media_root=root, catalog_path=catalog_path)
+
+    state = load_catalog(catalog_path)
+    assert state.get("mal-28121").folder is None
+    sinbad = state.get("mal-22097")
+    assert sinbad is not None
+    assert sinbad.folder == "Magi Sinbad no Bouken"
+    assert sinbad.mal_id == 22097
+    assert any(row.get("mal_id") == 22097 for row in result.added + result.linked)
+
+
+def test_resync_creates_alias_target_and_fixes_frieren_s2(tmp_path: Path):
+    from kostream.media_import import resync_catalog_folders
+
+    root = tmp_path / "anime"
+    (root / "Frieren Beyond Journeys End Season 2").mkdir(parents=True)
+    (root / "Frieren Beyond Journeys End Season 2" / "S01E01.mp4").write_bytes(b"v")
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-58567",
+                    enabled=True,
+                    source="mal",
+                    folder="Frieren Beyond Journeys End Season 2",
+                    mal_id=58567,
+                    title="Frieren Beyond Journeys End Season 2",
+                ),
+                CatalogEntry(
+                    id="mal-59978",
+                    enabled=True,
+                    source="mal",
+                    folder=None,
+                    mal_id=59978,
+                    title="Sousou no Frieren 2nd Season",
+                ),
+            ]
+        ),
+        catalog_path,
+    )
+
+    # Fake cache titles so restore-on-clear works.
+    cache = tmp_path / "mal_cache"
+    cache.mkdir()
+    (cache / "58567.json").write_text(
+        '{"mal_id":58567,"title":"Ore dake Level Up na Ken Season 2: Arise from the Shadow",'
+        '"synopsis":"","poster_url":null,"genres":[],"num_episodes":13,"episode_titles":{}}',
+        encoding="utf-8",
+    )
+    (cache / "59978.json").write_text(
+        '{"mal_id":59978,"title":"Sousou no Frieren 2nd Season","synopsis":"",'
+        '"poster_url":null,"genres":[],"num_episodes":10,"episode_titles":{}}',
+        encoding="utf-8",
+    )
+
+    with patch(
+        "kostream.media_import._load_folder_mal_map",
+        return_value={"Frieren Beyond Journeys End Season 2": 59978},
+    ), patch("kostream.mal.CACHE_DIR", cache), patch(
+        "kostream.media_import.ensure_episode_titles_async", return_value=False
+    ):
+        result = resync_catalog_folders(media_root=root, catalog_path=catalog_path)
+
+    state = load_catalog(catalog_path)
+    assert state.get("mal-59978").folder == "Frieren Beyond Journeys End Season 2"
+    assert state.get("mal-58567").folder is None
+    # Cross-wire title restored from MAL cache
+    assert "Frieren" not in (state.get("mal-58567").title or "")
+    assert result.cleared >= 1

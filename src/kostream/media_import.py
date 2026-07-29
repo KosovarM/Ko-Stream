@@ -194,30 +194,69 @@ def import_media_to_catalog(
             result.skipped.append({"folder": folder, "reason": "already in catalog"})
             continue
 
-        if action == "link" and existing is not None:
-            for stale in [e for e in state.shows if e.folder == folder and e.id != existing.id]:
-                state = remove_entry(state, stale.id)
-            updated = CatalogEntry(
-                id=existing.id,
-                enabled=existing.enabled,
-                source=_mal_source(existing, mal_id),
-                folder=folder,
-                jellyfin_id=existing.jellyfin_id,
-                anilist_id=existing.anilist_id,
-                mal_id=existing.mal_id or mal_id,
-                title=existing.title or title or folder,
-                added_at=existing.added_at,
-            )
-            state = upsert_entry(state, updated)
-            result.linked.append(
-                {
-                    "folder": folder,
-                    "id": updated.id,
-                    "mal_id": updated.mal_id,
-                    "title": updated.title,
-                }
-            )
-            entry = updated
+        if action in ("link", "relink") and (existing is not None or mal_id is not None):
+            # Drop/clear any other row still claiming this folder (wrong MAL cross-wire).
+            for stale in [e for e in state.shows if e.folder == folder and (existing is None or e.id != existing.id)]:
+                if action == "relink" and stale.mal_id is not None:
+                    restored = _title_for_mal(int(stale.mal_id)) or stale.title
+                    state = upsert_entry(
+                        state,
+                        CatalogEntry(
+                            id=stale.id,
+                            enabled=stale.enabled,
+                            source=stale.source,
+                            folder=None,
+                            jellyfin_id=stale.jellyfin_id,
+                            anilist_id=stale.anilist_id,
+                            mal_id=stale.mal_id,
+                            title=restored,
+                            added_at=stale.added_at,
+                        ),
+                    )
+                else:
+                    state = remove_entry(state, stale.id)
+            if existing is None and mal_id is not None:
+                entry = CatalogEntry(
+                    id=f"mal-{int(mal_id)}",
+                    enabled=True,
+                    source="mal",
+                    folder=folder,
+                    mal_id=int(mal_id),
+                    title=title or _title_for_mal(int(mal_id)) or folder,
+                )
+                state = upsert_entry(state, entry)
+                result.added.append(
+                    {
+                        "folder": folder,
+                        "id": entry.id,
+                        "mal_id": entry.mal_id,
+                        "title": entry.title,
+                        "source": "mal",
+                    }
+                )
+            else:
+                assert existing is not None
+                updated = CatalogEntry(
+                    id=existing.id,
+                    enabled=existing.enabled,
+                    source=_mal_source(existing, mal_id),
+                    folder=folder,
+                    jellyfin_id=existing.jellyfin_id,
+                    anilist_id=existing.anilist_id,
+                    mal_id=existing.mal_id or mal_id,
+                    title=existing.title or title or folder,
+                    added_at=existing.added_at,
+                )
+                state = upsert_entry(state, updated)
+                result.linked.append(
+                    {
+                        "folder": folder,
+                        "id": updated.id,
+                        "mal_id": updated.mal_id,
+                        "title": updated.title,
+                    }
+                )
+                entry = updated
         elif action == "upgrade" and existing is not None and mal_id is not None:
             entry, state = _upgrade_local_entry(
                 state,
@@ -411,7 +450,7 @@ def _classify_folder(
     state: CatalogState,
     folder_map: dict[str, int],
 ) -> tuple[str, CatalogEntry | None, int | None, str | None]:
-    """Return (action, entry, mal_id, title) where action is skip|link|add|upgrade."""
+    """Return (action, entry, mal_id, title) where action is skip|link|relink|add|upgrade."""
     folder_entry: CatalogEntry | None = None
     for entry in state.shows:
         if entry.folder == folder:
@@ -437,6 +476,22 @@ def _classify_folder(
 
     if folder_entry is not None:
         if folder_entry.mal_id is not None:
+            # Alias/map says a different MAL id — re-link instead of permanently skipping.
+            if mal_id is not None and int(mal_id) != int(folder_entry.mal_id):
+                existing = find_matching_entry(state, mal_id=int(mal_id))
+                if existing and existing.id != folder_entry.id:
+                    return (
+                        "relink",
+                        existing,
+                        int(mal_id),
+                        existing.title or _title_for_mal(int(mal_id)) or title,
+                    )
+                return (
+                    "relink",
+                    None,
+                    int(mal_id),
+                    _title_for_mal(int(mal_id)) or title,
+                )
             return "skip", folder_entry, folder_entry.mal_id, folder_entry.title
         resolved_mal = mal_id
         resolved_title = title
@@ -613,8 +668,7 @@ def _load_folder_mal_map() -> dict[str, int]:
     out: dict[str, int] = {}
     from kostream.media_title_aliases import FOLDER_MAL_IDS
 
-    for folder_name, mal_id in FOLDER_MAL_IDS.items():
-        out[str(folder_name)] = int(mal_id)
+    # FOLDER_MAP first; explicit FOLDER_MAL_IDS aliases override bad map rows.
     for _src, value in raw.items():
         try:
             if len(value) == 2:
@@ -628,6 +682,8 @@ def _load_folder_mal_map() -> dict[str, int]:
             out[str(folder_name)] = mal_id
         except (TypeError, ValueError):
             continue
+    for folder_name, mal_id in FOLDER_MAL_IDS.items():
+        out[str(folder_name)] = int(mal_id)
     return out
 
 
@@ -746,6 +802,19 @@ def resync_catalog_folders(
     def _clear_folder(entry: CatalogEntry, *, reason: str) -> None:
         nonlocal state
         folder = entry.folder
+        restored_title = entry.title
+        if entry.mal_id is not None:
+            cached_title = _title_for_mal(int(entry.mal_id))
+            # Cross-wires often overwrite catalog title with the folder name.
+            if cached_title and (
+                not restored_title
+                or (
+                    folder
+                    and normalize_search_query(restored_title)
+                    == normalize_search_query(folder)
+                )
+            ):
+                restored_title = cached_title
         state = upsert_entry(
             state,
             CatalogEntry(
@@ -756,7 +825,7 @@ def resync_catalog_folders(
                 jellyfin_id=entry.jellyfin_id,
                 anilist_id=entry.anilist_id,
                 mal_id=entry.mal_id,
-                title=entry.title,
+                title=restored_title,
                 added_at=entry.added_at,
             ),
         )
@@ -850,6 +919,36 @@ def resync_catalog_folders(
         except OSError as exc:
             result.errors.append(f"{folder}: {exc}")
             continue
+
+        # Explicit alias/map may point at a MAL id not yet in the catalog (e.g. Magi OVA).
+        mapped = folder_mal_id(folder, folder_map)
+        if mapped is not None and find_matching_entry(state, mal_id=int(mapped)) is None:
+            title = _title_for_mal(int(mapped)) or folder
+            state = upsert_entry(
+                state,
+                CatalogEntry(
+                    id=f"mal-{int(mapped)}",
+                    enabled=True,
+                    source="mal",
+                    folder=None,
+                    mal_id=int(mapped),
+                    title=title,
+                ),
+            )
+            result.details.append(
+                {
+                    "action": "created",
+                    "folder": folder,
+                    "catalog_id": f"mal-{int(mapped)}",
+                    "mal_id": int(mapped),
+                    "title": title,
+                    "reason": "explicit folder alias",
+                }
+            )
+            try:
+                ensure_episode_titles_async(int(mapped))
+            except Exception:
+                pass
 
         target = _resolve_resync_target(state, folder, folder_map)
         if target is None:

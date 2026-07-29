@@ -29,3 +29,40 @@ def test_stone_ocean_part_3_alias():
     )
     assert "53273" in folder_keys
     assert match_score(folder_keys, entry_keys) >= 0.45
+
+
+def test_frieren_s2_and_magi_sinbad_aliases():
+    from kostream.media_title_aliases import (
+        FOLDER_MAL_IDS,
+        folder_plausibly_matches_title,
+    )
+
+    assert FOLDER_MAL_IDS["Frieren Beyond Journeys End"] == 52991
+    assert FOLDER_MAL_IDS["Frieren Beyond Journeys End Season 2"] == 59978
+    assert FOLDER_MAL_IDS["Magi Sinbad no Bouken"] == 22097
+    assert folder_plausibly_matches_title(
+        "Frieren Beyond Journeys End",
+        "Sousou no Frieren",
+        mal_id=52991,
+    )
+    assert not folder_plausibly_matches_title(
+        "Frieren Beyond Journeys End",
+        "Sousou no Frieren 2nd Season",
+        mal_id=59978,
+    )
+    assert folder_plausibly_matches_title(
+        "Frieren Beyond Journeys End Season 2",
+        "Sousou no Frieren 2nd Season",
+        mal_id=59978,
+    )
+    assert folder_plausibly_matches_title(
+        "Magi Sinbad no Bouken",
+        "Magi: Sinbad no Bouken",
+        mal_id=22097,
+    )
+    # OVA folder must not soft-match the TV row via title containment.
+    assert not folder_plausibly_matches_title(
+        "Magi Sinbad no Bouken",
+        "Magi: Sinbad no Bouken (TV)",
+        mal_id=31741,
+    )

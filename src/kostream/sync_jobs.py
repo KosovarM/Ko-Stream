@@ -398,8 +398,13 @@ def start_anime_title_sync(catalog_path, *, anime_index_path=None) -> SyncJob:
                 )
             if title_result.remaining:
                 detail += f" · {title_result.remaining} remaining"
-            if title_result.failed and title_result.last_error:
-                detail += f" · last error: {title_result.last_error}"
+            if title_result.failed:
+                if getattr(title_result, "jikan_unavailable", False):
+                    detail += (
+                        " · Jikan unavailable — retry Sync anime titles later"
+                    )
+                elif title_result.last_error:
+                    detail += f" · {title_result.last_error}"
             _finish_ok(job, f"{detail}.{more_hint}")
         except (TimeoutError, OSError) as exc:
             _finish_error(job, f"Anime title sync failed: {exc}", exc)

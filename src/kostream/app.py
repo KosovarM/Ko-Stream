@@ -1428,15 +1428,11 @@ def create_app(
 
     @app.route("/api/mal/sync/anime-titles", methods=["POST"])
     def api_mal_sync_anime_titles():
-        """Sync anime episode titles only."""
+        """Sync anime episode titles only (Jikan/MAL HTML — no OAuth required)."""
         uid = _current_mal_user_id()
         if not uid:
             return {"ok": False, "error": "Login required"}, 401
-        cfg = MalConfig.from_env()
-        if not cfg:
-            return {"ok": False, "error": "MAL not configured"}, 400
-        if not mal_is_connected(uid):
-            return {"ok": False, "error": "Not connected to MyAnimeList"}, 401
+        # Episode titles come from Jikan / optional MAL HTML scrape, not the MAL API.
         job = start_anime_title_sync(
             app.config["CATALOG_PATH"],
             anime_index_path=app.config["ANIME_SYNC_INDEX_PATH"],

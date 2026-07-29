@@ -835,6 +835,8 @@ class EpisodeTitleSyncResult:
     skipped: int = 0
     remaining: int = 0
     last_error: str | None = None
+    # True when failures look like Jikan 5xx/timeout (UI should show a soft outage note).
+    jikan_unavailable: bool = False
 
     def __int__(self) -> int:
         return self.updated
@@ -871,6 +873,44 @@ def _episode_title_sync_priority(entry: CatalogEntry) -> tuple[int, int, int]:
     ep_count = int(cached.num_episodes) if cached and cached.num_episodes else 10_000
     return (has_folder, ep_count, int(entry.mal_id or 0))
 
+
+
+def is_jikan_outage_error(exc: BaseException | None) -> bool:
+    """True for gateway / timeout failures typical of Jikan free-tier outages."""
+    if exc is None:
+        return False
+    if isinstance(exc, HTTPError) and exc.code in (500, 502, 503, 504):
+        return True
+    if isinstance(exc, (TimeoutError, URLError)):
+        return True
+    msg = str(exc).casefold()
+    return any(
+        token in msg
+        for token in (
+            "gateway time-out",
+            "gateway timeout",
+            "504",
+            "502",
+            "503",
+            "timed out",
+            "timeout",
+        )
+    )
+
+
+def format_episode_title_user_error(exc: BaseException | None = None) -> str:
+    """Operator-facing episode-title error (no raw Jikan/HTTP dump)."""
+    if is_jikan_outage_error(exc):
+        return (
+            "Jikan unavailable — episode titles will retry later. "
+            "Technical details are in the server log."
+        )
+    if exc is not None:
+        return (
+            "Episode title fetch failed for some titles. "
+            "Retry Sync anime titles later (details in server log)."
+        )
+    return "Episode titles still missing after fetch. Retry later."
 
 def sync_catalog_episode_titles(
     catalog_path: Path | None = None,
@@ -931,7 +971,15 @@ def sync_catalog_episode_titles(
             elif episode_titles_need_fetch(mal_id):
                 result.failed += 1
                 consecutive_failures += 1
-                result.last_error = result.last_error or "episode titles still missing after fetch"
+                if _last_episode_title_jikan_outage:
+                    result.jikan_unavailable = True
+                result.last_error = result.last_error or (
+                    format_episode_title_user_error(
+                        TimeoutError("jikan outage")
+                    )
+                    if _last_episode_title_jikan_outage
+                    else format_episode_title_user_error()
+                )
             else:
                 # Became fresh without new writes (race / concurrent fill).
                 result.skipped += 1
@@ -943,7 +991,15 @@ def sync_catalog_episode_titles(
         except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError) as exc:
             result.failed += 1
             consecutive_failures += 1
-            result.last_error = str(exc)
+            if is_jikan_outage_error(exc):
+                result.jikan_unavailable = True
+            result.last_error = format_episode_title_user_error(exc)
+            log.warning(
+                "Episode title sync failed for mal_id=%s (%s)",
+                mal_id,
+                type(exc).__name__,
+            )
+            log.debug("Episode title sync error detail mal_id=%s: %s", mal_id, exc)
             _mark_episode_titles_retryable(mal_id)
             time.sleep(
                 JIKAN_SHOW_SLEEP
@@ -1012,6 +1068,7 @@ def _cache_needs_enrichment(mal_id: int) -> bool:
 _enrich_inflight: set[int] = set()
 _enrich_lock = threading.Lock()
 _episode_title_inflight: set[int] = set()
+_last_episode_title_jikan_outage: bool = False
 
 
 def episode_titles_need_fetch(mal_id: int) -> bool:
@@ -1067,21 +1124,31 @@ def ensure_episode_titles_async(mal_id: int) -> bool:
 def ensure_episode_titles(mal_id: int, *, force: bool = False) -> bool:
     """Fetch MAL episode titles into cache (Jikan, optional MAL HTML). Returns True if titles written.
 
-    Prefer Jikan. HTML scrape is opt-in via ``KOSTREAM_MAL_HTML_SCRAPE=1`` and soft-fails
-    (logs + keeps existing cache / incomplete flag) rather than inventing empty complete data.
+    Prefer Jikan. On Jikan failure, fall back to MAL HTML scrape unless
+    ``KOSTREAM_MAL_HTML_SCRAPE=0``. Soft-fails (logs + keeps existing cache / incomplete flag)
+    rather than inventing empty complete data.
     """
     if not force and not episode_titles_need_fetch(mal_id):
         return False
+    global _last_episode_title_jikan_outage
     titles: dict[int, str] = {}
     complete = True
     jikan_failed = False
+    _last_episode_title_jikan_outage = False
     try:
         titles, complete = fetch_episode_titles(mal_id)
     except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError) as exc:
         titles, complete = {}, False
         jikan_failed = True
-        log.warning("Jikan episode titles failed for mal_id=%s: %s", mal_id, exc)
+        _last_episode_title_jikan_outage = is_jikan_outage_error(exc)
+        log.warning(
+            "Episode titles unavailable via Jikan for mal_id=%s (%s); trying fallback if enabled",
+            mal_id,
+            type(exc).__name__,
+        )
+        log.debug("Jikan episode-title error detail mal_id=%s: %s", mal_id, exc)
 
+    # Prefer Jikan; HTML scrape is the outage fallback (default on; set KOSTREAM_MAL_HTML_SCRAPE=0 to disable).
     if not titles and mal_html_scrape_enabled():
         try:
             titles, complete = fetch_episode_titles_from_mal_site(mal_id)
@@ -1119,8 +1186,11 @@ def ensure_episode_titles(mal_id: int, *, force: bool = False) -> bool:
 
 
 def mal_html_scrape_enabled() -> bool:
-    """Opt-in MAL HTML episode-title scrape when Jikan has nothing. Default off."""
-    raw = os.environ.get("KOSTREAM_MAL_HTML_SCRAPE", "0").strip().lower()
+    """MAL HTML episode-title scrape when Jikan has nothing. Default on (outage fallback).
+
+    Set ``KOSTREAM_MAL_HTML_SCRAPE=0`` to disable scraping.
+    """
+    raw = os.environ.get("KOSTREAM_MAL_HTML_SCRAPE", "1").strip().lower()
     return raw in ("1", "true", "yes", "on")
 
 

@@ -231,7 +231,7 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
     ),
     "Frieren__Beyond_Journey_s_End_Season_2_sub": (
         "Frieren Beyond Journeys End Season 2",
-        "mal-58567",
+        "mal-59978",  # was wrongly mal-58567 (Solo Leveling S2)
     ),
     "Mob_Psycho_100_sub": ("Mob Psycho 100", "mal-32182"),
     "Mob_Psycho_100_II_sub": ("Mob Psycho 100 II", "mal-37514"),
@@ -371,9 +371,9 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
         "Kabaneri Movie 1 Tsudou Hikari",
         "mal-33519",
     ),
-    "Magi__Adventure_of_Sinbad_sub": ("Magi Adventure of Sinbad", None),
-    "Magi__Sinbad_no_Bouken_sub": ("Magi Sinbad no Bouken", None),
-    "Magi__The_Kingdom_of_Magic_sub": ("Magi The Kingdom of Magic", None),
+    "Magi__Adventure_of_Sinbad_sub": ("Magi Adventure of Sinbad", "mal-31741"),
+    "Magi__Sinbad_no_Bouken_sub": ("Magi Sinbad no Bouken", "mal-22097"),  # OVA
+    "Magi__The_Kingdom_of_Magic_sub": ("Magi The Kingdom of Magic", "mal-18115"),
     "Mashle__Magic_and_Muscles_sub": ("Mashle Magic and Muscles", None),
     "My_Hero_Academia_sub": ("My Hero Academia", None),
     "My_Hero_Academia_2_sub": ("My Hero Academia Season 2", None),
