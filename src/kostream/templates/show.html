@@ -125,7 +125,7 @@
           aria-describedby="mal-list-status-msg"
         >
           {% if not show.list_status %}
-          <option value="" selected disabled>Not on list</option>
+          <option value="" selected disabled>Not watched</option>
           {% endif %}
           <option value="plan_to_watch"{% if show.list_status == 'plan_to_watch' %} selected{% endif %}>Planned to Watch</option>
           <option value="watching"{% if show.list_status == 'watching' %} selected{% endif %}>Watching</option>

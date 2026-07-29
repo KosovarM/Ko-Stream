@@ -384,16 +384,22 @@ def start_anime_title_sync(catalog_path, *, anime_index_path=None) -> SyncJob:
                 or titles_updated >= EPISODE_TITLE_BATCH_SIZE
                 else ""
             )
-            detail = f"Anime titles synced: {titles_updated}"
             if title_result.attempted:
                 detail = (
-                    f"Anime titles synced: {titles_updated}/{title_result.attempted}"
+                    f"Anime titles synced: {titles_updated} updated"
+                    f", {title_result.failed} failed"
+                    f", {title_result.skipped} skipped"
+                    f" ({title_result.attempted} attempted)"
+                )
+            else:
+                detail = (
+                    f"Anime titles synced: {titles_updated} updated"
+                    f", {title_result.skipped} skipped"
                 )
             if title_result.remaining:
                 detail += f" · {title_result.remaining} remaining"
-            if title_result.failed and titles_updated == 0:
-                err = f": {title_result.last_error}" if title_result.last_error else ""
-                detail += f" ({title_result.failed} failed{err})"
+            if title_result.failed and title_result.last_error:
+                detail += f" · last error: {title_result.last_error}"
             _finish_ok(job, f"{detail}.{more_hint}")
         except (TimeoutError, OSError) as exc:
             _finish_error(job, f"Anime title sync failed: {exc}", exc)

@@ -198,7 +198,8 @@ def test_sync_episode_titles_respects_skip(tmp_path, monkeypatch):
         limit=10,
         skip_mal_ids={1},
     )
-    assert updated == 1
+    assert int(updated) == 1
+    assert updated.skipped == 1
     assert calls == [2]
 
 

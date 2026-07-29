@@ -321,6 +321,7 @@ def test_fetch_episode_titles_retries_transient_http_errors(monkeypatch):
     from io import BytesIO
 
     attempts = {"n": 0}
+    sleeps: list[float] = []
 
     class FakeResp:
         def __enter__(self):
@@ -336,19 +337,129 @@ def test_fetch_episode_titles_retries_transient_http_errors(monkeypatch):
                 b"]}"
             )
 
-    def fake_urlopen(req, timeout=25):
+    def fake_urlopen(req, timeout=20):
         attempts["n"] += 1
         if attempts["n"] < 2:
             raise HTTPError(req.full_url, 504, "Gateway Time-out", hdrs=None, fp=BytesIO())
         return FakeResp()
 
     monkeypatch.setattr(mal_mod, "urlopen", fake_urlopen)
-    monkeypatch.setattr(mal_mod.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(mal_mod.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(mal_mod.random, "uniform", lambda a, b: 0.2)
 
     titles, complete = mal_mod.fetch_episode_titles(31240)
     assert complete is True
     assert attempts["n"] == 2
     assert titles[1] == "The End Start"
+    assert any(s >= 2.5 for s in sleeps)  # 504 backoff base + jitter
+
+
+def test_fetch_episode_titles_retries_multiple_504_then_success(monkeypatch):
+    """504 storms: several gateway failures then success within retry budget."""
+    from kostream import mal as mal_mod
+    from urllib.error import HTTPError
+    from io import BytesIO
+
+    attempts = {"n": 0}
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return (
+                b'{"pagination":{"has_next_page":false},"data":['
+                b'{"mal_id":1,"title":"After Storm"}'
+                b"]}"
+            )
+
+    def fake_urlopen(req, timeout=20):
+        attempts["n"] += 1
+        if attempts["n"] <= 3:
+            raise HTTPError(req.full_url, 504, "Gateway Time-out", hdrs=None, fp=BytesIO())
+        return FakeResp()
+
+    monkeypatch.setattr(mal_mod, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mal_mod.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(mal_mod, "JIKAN_MIN_INTERVAL", 0.0)
+
+    titles, complete = mal_mod.fetch_episode_titles(2001)
+    assert complete is True
+    assert attempts["n"] == 4
+    assert titles[1] == "After Storm"
+
+
+def test_jikan_respects_retry_after_header(monkeypatch):
+    from kostream import mal as mal_mod
+    from urllib.error import HTTPError
+    from email.message import EmailMessage
+    from io import BytesIO
+
+    hdrs = EmailMessage()
+    hdrs["Retry-After"] = "7"
+    sleeps: list[float] = []
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"pagination":{"has_next_page":false},"data":[]}'
+
+    attempts = {"n": 0}
+
+    def fake_urlopen(req, timeout=20):
+        attempts["n"] += 1
+        if attempts["n"] == 1:
+            raise HTTPError(req.full_url, 429, "Too Many Requests", hdrs=hdrs, fp=BytesIO())
+        return FakeResp()
+
+    monkeypatch.setattr(mal_mod, "urlopen", fake_urlopen)
+    monkeypatch.setattr(mal_mod.time, "sleep", lambda s: sleeps.append(s))
+    monkeypatch.setattr(mal_mod.random, "uniform", lambda a, b: 0.3)
+    monkeypatch.setattr(mal_mod, "JIKAN_MIN_INTERVAL", 0.0)
+
+    mal_mod.fetch_episode_titles(1)
+    assert any(abs(s - 7.55) < 0.01 for s in sleeps)  # 7 + 0.25 + 0.3 jitter
+
+
+def test_ensure_episode_titles_preserves_cache_on_jikan_504(tmp_path, monkeypatch):
+    from kostream import mal as mal_mod
+    from urllib.error import HTTPError
+    from io import BytesIO
+    import json
+
+    monkeypatch.setenv("KOSTREAM_MAL_HTML_SCRAPE", "0")
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(mal_mod, "JIKAN_MIN_INTERVAL", 0.0)
+    (tmp_path / "2167.json").write_text(
+        '{"mal_id":2167,"title":"Clannad","synopsis":"","poster_url":null,"genres":[],'
+        '"num_episodes":23,"list_status":"completed","num_episodes_watched":23,'
+        '"anime_status":"finished_airing","score":10,"mean_score":8.0,'
+        '"episode_titles":{"1":"On the Hillside Path Where the Cherry Blossoms Flutter"},'
+        '"episode_titles_incomplete":true}',
+        encoding="utf-8",
+    )
+
+    def boom(req, timeout=20):
+        raise HTTPError(req.full_url, 504, "Gateway Time-out", hdrs=None, fp=BytesIO())
+
+    monkeypatch.setattr(mal_mod, "urlopen", boom)
+    monkeypatch.setattr(mal_mod.time, "sleep", lambda _s: None)
+
+    assert mal_mod.ensure_episode_titles(2167) is False
+    cached = mal_mod.load_cached_anime(2167)
+    assert cached is not None
+    assert cached.episode_titles[1].startswith("On the Hillside")
+    raw = json.loads((tmp_path / "2167.json").read_text(encoding="utf-8"))
+    assert raw.get("episode_titles_incomplete") is True
+    assert "episode_titles_walk_complete" not in raw
 
 
 def test_ensure_episode_titles_falls_back_to_mal_site(tmp_path, monkeypatch):
@@ -358,6 +469,7 @@ def test_ensure_episode_titles_falls_back_to_mal_site(tmp_path, monkeypatch):
 
     monkeypatch.setenv("KOSTREAM_MAL_HTML_SCRAPE", "1")
     monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(mal_mod, "JIKAN_MIN_INTERVAL", 0.0)
     (tmp_path / "31240.json").write_text(
         '{"mal_id":31240,"title":"Re:Zero","synopsis":"","poster_url":null,"genres":[],'
         '"num_episodes":25,"list_status":"completed","num_episodes_watched":25,'
@@ -365,7 +477,7 @@ def test_ensure_episode_titles_falls_back_to_mal_site(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    def boom(req, timeout=25):
+    def boom(req, timeout=20):
         raise HTTPError(req.full_url, 504, "Gateway Time-out", hdrs=None, fp=BytesIO())
 
     monkeypatch.setattr(mal_mod, "urlopen", boom)
@@ -386,9 +498,11 @@ def test_ensure_episode_titles_skips_html_scrape_when_disabled(tmp_path, monkeyp
     from kostream import mal as mal_mod
     from urllib.error import HTTPError
     from io import BytesIO
+    import json
 
     monkeypatch.setenv("KOSTREAM_MAL_HTML_SCRAPE", "0")
     monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(mal_mod, "JIKAN_MIN_INTERVAL", 0.0)
     (tmp_path / "1.json").write_text(
         '{"mal_id":1,"title":"X","synopsis":"","poster_url":null,"genres":[],'
         '"num_episodes":2,"list_status":"watching","num_episodes_watched":0,'
@@ -396,7 +510,7 @@ def test_ensure_episode_titles_skips_html_scrape_when_disabled(tmp_path, monkeyp
         encoding="utf-8",
     )
 
-    def boom(req, timeout=25):
+    def boom(req, timeout=20):
         raise HTTPError(req.full_url, 504, "Gateway Time-out", hdrs=None, fp=BytesIO())
 
     called = {"n": 0}
@@ -414,6 +528,8 @@ def test_ensure_episode_titles_skips_html_scrape_when_disabled(tmp_path, monkeyp
     cached = mal_mod.load_cached_anime(1)
     assert cached is not None
     assert cached.episode_titles == {}
+    raw = json.loads((tmp_path / "1.json").read_text(encoding="utf-8"))
+    assert raw.get("episode_titles_incomplete") is True
 
 
 def test_mal_site_parser_unescapes_entities():
@@ -448,7 +564,7 @@ def test_fetch_episode_titles_partial_on_later_page_failure(monkeypatch):
         def read(self):
             return self.body
 
-    def fake_urlopen(req, timeout=25):
+    def fake_urlopen(req, timeout=20):
         page = int(parse_qs(urlparse(req.full_url).query).get("page", ["1"])[0])
         if page == 1:
             return FakeResp(
@@ -458,11 +574,70 @@ def test_fetch_episode_titles_partial_on_later_page_failure(monkeypatch):
 
     monkeypatch.setattr(mal_mod, "urlopen", fake_urlopen)
     monkeypatch.setattr(mal_mod.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(mal_mod, "JIKAN_MIN_INTERVAL", 0.0)
+    monkeypatch.setattr(mal_mod, "JIKAN_MAX_RETRIES", 1)
 
     titles, complete = mal_mod.fetch_episode_titles(21)
     assert complete is False
     assert titles == {1: "A"}
 
+
+def test_sync_catalog_episode_titles_reports_failed_and_skipped(tmp_path, monkeypatch):
+    from kostream import mal as mal_mod
+    from kostream.catalog import CatalogEntry, CatalogState, save_catalog
+
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(mal_mod.time, "sleep", lambda _s: None)
+    catalog_path = tmp_path / "selected.json"
+
+    for mid, titles, fetched, walk in (
+        (1, {}, None, False),  # needs fetch → fail
+        (2, {"1": "A"}, "2026-01-01T00:00:00Z", True),  # fresh → skipped
+        (3, {}, None, False),  # needs fetch → succeed
+    ):
+        payload = {
+            "mal_id": mid,
+            "title": f"Show {mid}",
+            "synopsis": "",
+            "poster_url": None,
+            "genres": [],
+            "num_episodes": 12,
+            "list_status": "completed",
+            "num_episodes_watched": 12,
+            "anime_status": "finished_airing",
+            "score": 0,
+            "mean_score": None,
+            "episode_titles": titles,
+        }
+        if fetched:
+            payload["episode_titles_fetched_at"] = fetched
+        if walk:
+            payload["episode_titles_walk_complete"] = True
+        (tmp_path / f"{mid}.json").write_text(
+            __import__("json").dumps(payload), encoding="utf-8"
+        )
+
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(id=f"mal-{mid}", enabled=True, source="mal", mal_id=mid, title=f"Show {mid}")
+                for mid in (1, 2, 3)
+            ]
+        ),
+        catalog_path,
+    )
+
+    def fake_ensure(mal_id, *, force=False):
+        return mal_id == 3
+
+    monkeypatch.setattr(mal_mod, "ensure_episode_titles", fake_ensure)
+    # After "fail" for id 1, need_fetch still True (empty titles).
+    result = mal_mod.sync_catalog_episode_titles(catalog_path, limit=10)
+    assert result.updated == 1
+    assert result.failed == 1
+    assert result.skipped == 1
+    assert result.attempted == 2
+    assert result.last_error
 
 def test_sync_catalog_episode_titles_prioritizes_folder_and_short(tmp_path, monkeypatch):
     from kostream import mal as mal_mod

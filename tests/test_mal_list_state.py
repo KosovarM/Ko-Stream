@@ -141,6 +141,42 @@ def test_apply_mal_metadata_uses_overlay(tmp_path, monkeypatch):
     assert show.mean_score == 7.0
 
 
+def test_apply_mal_metadata_without_list_row_is_not_watched(tmp_path, monkeypatch):
+    """Catalog/local titles not on the user's MAL list must not show Plan to Watch."""
+    from kostream import mal as mal_mod
+
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path)
+    write_cached_anime(
+        MalAnimeEntry(
+            mal_id=99,
+            title="Site Only",
+            synopsis="",
+            poster_url=None,
+            genres=[],
+            num_episodes=12,
+            list_status="plan_to_watch",
+            num_episodes_watched=0,
+            anime_status="finished_airing",
+            score=0,
+            mean_score=7.0,
+        )
+    )
+    cached = load_cached_anime(99)
+    assert cached is not None
+    assert cached.list_status == "plan_to_watch"
+
+    show = Show(id="mal-99", title="Site Only", description="", episodes=[])
+    apply_mal_metadata(show, cached, list_row=None)
+    assert show.list_status is None
+    assert show.episodes_watched == 0
+    assert show.user_score is None
+
+    for_user = load_cached_anime_for_user(99, "u_nobody")
+    assert for_user is not None
+    assert for_user.list_status == ""
+    assert for_user.num_episodes_watched == 0
+
+
 def test_manga_cache_strips_list_fields(tmp_path, monkeypatch):
     from kostream import mal as mal_mod
 

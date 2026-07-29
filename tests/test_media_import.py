@@ -335,11 +335,12 @@ def test_summarize_import_message():
     from kostream.media_import import MediaImportResult
 
     msg = summarize_import(
-        MediaImportResult(added=[{"folder": "A"}], mal_synced=[{"folder": "A"}])
+        MediaImportResult(added=[{"folder": "A"}], linked=[{"folder": "B"}])
     )
     assert "added" in msg
-    assert "Plan to Watch" in msg
+    assert "linked" in msg
     assert "Import done" in msg
+    assert "Plan to Watch" not in msg
 
 
 def _test_app(tmp_path: Path):
@@ -764,3 +765,176 @@ def test_resync_folders_api_allows_manager(tmp_path: Path):
     assert body["ok"] is True
     assert "message" in body
     assert "scanned_folders" in body
+
+
+def _folder_bindings(catalog_path: Path) -> dict[str, str | None]:
+    state = load_catalog(catalog_path)
+    return {e.id: e.folder for e in state.shows}
+
+
+def _disk_episode_sum(media_root: Path, catalog_path: Path) -> int:
+    from kostream.library import count_unique_local_episodes
+
+    state = load_catalog(catalog_path)
+    total = 0
+    for entry in state.shows:
+        if not entry.folder:
+            continue
+        total += count_unique_local_episodes(media_root / entry.folder)
+    return total
+
+
+def test_import_does_not_push_plan_to_watch(tmp_path: Path):
+    root = tmp_path / "anime"
+    (root / "Akame ga Kill!").mkdir(parents=True)
+    (root / "Akame ga Kill!" / "S01E01.mp4").write_bytes(b"v")
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(CatalogState(shows=[]), catalog_path)
+
+    with patch(
+        "kostream.media_import._load_folder_mal_map",
+        return_value={"Akame ga Kill!": 22199},
+    ):
+        with patch("kostream.media_import.ensure_episode_titles_async"):
+            result = import_media_to_catalog(
+                media_root=root,
+                catalog_path=catalog_path,
+                user_id="u_master",
+                mal_cfg=None,
+                sync_mal=True,
+            )
+
+    assert result.mal_synced == []
+    assert any(row["mal_id"] == 22199 for row in result.added)
+    assert "Plan to Watch" not in summarize_import(result)
+    # Import must not call into MAL list-status APIs anymore.
+    import kostream.media_import as mi
+
+    assert not hasattr(mi, "update_anime_list_status")
+
+
+def test_resync_keeps_unique_soft_english_japanese_binding(tmp_path: Path, monkeypatch):
+    """English folder + Japanese catalog title stays when MAL cache has matching title_en."""
+    from kostream.media_import import resync_catalog_folders
+    from kostream.mal import MalAnimeEntry, write_cached_anime
+    from kostream import mal as mal_mod
+
+    monkeypatch.setattr(mal_mod, "CACHE_DIR", tmp_path / "mal_cache")
+    write_cached_anime(
+        MalAnimeEntry(
+            mal_id=99901,
+            title="完全に別の日本語タイトル",
+            synopsis="",
+            poster_url=None,
+            genres=[],
+            num_episodes=2,
+            list_status="plan_to_watch",
+            num_episodes_watched=0,
+            anime_status="finished_airing",
+            score=0,
+            mean_score=None,
+            title_en="Obscure English Title",
+        )
+    )
+
+    root = tmp_path / "anime"
+    (root / "Obscure English Title").mkdir(parents=True)
+    (root / "Obscure English Title" / "S01E01.mp4").write_bytes(b"v")
+    (root / "Obscure English Title" / "S01E02.mp4").write_bytes(b"v")
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-99901",
+                    enabled=True,
+                    source="mal",
+                    folder="Obscure English Title",
+                    mal_id=99901,
+                    title="完全に別の日本語タイトル",
+                )
+            ]
+        ),
+        catalog_path,
+    )
+
+    with patch("kostream.media_import._load_folder_mal_map", return_value={}):
+        resync_catalog_folders(media_root=root, catalog_path=catalog_path)
+        resync_catalog_folders(media_root=root, catalog_path=catalog_path)
+
+    state = load_catalog(catalog_path)
+    assert state.get("mal-99901").folder == "Obscure English Title"
+    assert _disk_episode_sum(root, catalog_path) == 2
+
+
+def test_import_resync_idempotent_bindings_and_episode_sum(tmp_path: Path):
+    """Import → Resync → Import → Resync must keep stable folders and episode totals."""
+    from kostream.media_import import resync_catalog_folders
+
+    root = tmp_path / "anime"
+    for name, n in (
+        ("KonoSuba Season 1", 3),
+        ("Your Name", 1),
+        ("Mystery Local Show", 4),
+    ):
+        (root / name).mkdir(parents=True)
+        for i in range(1, n + 1):
+            (root / name / f"S01E{i:02d}.mp4").write_bytes(b"v")
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-30831",
+                    enabled=True,
+                    source="mal",
+                    mal_id=30831,
+                    title="Kono Subarashii Sekai ni Shukufuku wo!",
+                ),
+                CatalogEntry(
+                    id="mal-32281",
+                    enabled=True,
+                    source="mal",
+                    mal_id=32281,
+                    title="Kimi no Na wa.",
+                ),
+            ]
+        ),
+        catalog_path,
+    )
+
+    folder_map = {
+        "KonoSuba Season 1": 30831,
+        "Your Name": 32281,
+    }
+
+    with patch("kostream.media_import._load_folder_mal_map", return_value=folder_map):
+        with patch("kostream.media_import.ensure_episode_titles_async"):
+            with patch("kostream.media_import.search_anime", return_value=[]):
+                import_media_to_catalog(
+                    media_root=root, catalog_path=catalog_path, sync_mal=False
+                )
+                resync_catalog_folders(media_root=root, catalog_path=catalog_path)
+                bindings_a = _folder_bindings(catalog_path)
+                sum_a = _disk_episode_sum(root, catalog_path)
+
+                import_media_to_catalog(
+                    media_root=root, catalog_path=catalog_path, sync_mal=False
+                )
+                resync_catalog_folders(media_root=root, catalog_path=catalog_path)
+                bindings_b = _folder_bindings(catalog_path)
+                sum_b = _disk_episode_sum(root, catalog_path)
+
+                resync_catalog_folders(media_root=root, catalog_path=catalog_path)
+                bindings_c = _folder_bindings(catalog_path)
+                sum_c = _disk_episode_sum(root, catalog_path)
+
+    assert bindings_a == bindings_b == bindings_c
+    assert sum_a == sum_b == sum_c == 8
+    assert bindings_a["mal-30831"] == "KonoSuba Season 1"
+    assert bindings_a["mal-32281"] == "Your Name"
+    # Local-only mystery folder stays bound to its local catalog row.
+    local_ids = [eid for eid, folder in bindings_a.items() if folder == "Mystery Local Show"]
+    assert len(local_ids) == 1

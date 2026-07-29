@@ -829,7 +829,7 @@ anilistForm.addEventListener('submit', async (event) => {
     };
     catalogImportMedia.addEventListener('click', async () => {
       if (importBusy) return;
-      if (!confirm('Import all uncataloged anime folders from your media library?\n\nTitles will be added to the catalog and linked to MAL where possible (Plan to Watch when connected).')) return;
+      if (!confirm('Import all uncataloged anime folders from your media library?\n\nTitles will be added to the catalog and linked to MAL metadata where possible. They are not added to your MAL list (status stays Not watched until you set it).')) return;
       setImportBusy(true);
       try {
         const resp = await fetch('{{ url_for("api_catalog_import_media") }}', {

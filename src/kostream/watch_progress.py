@@ -258,13 +258,16 @@ def apply_mal_metadata(show: Show, cached, list_row: dict | None = None) -> None
     """Copy MAL list progress, ratings, and relations onto a Show.
 
     Progress is merged upward: local ``episodes_watched`` is never lowered.
-    When ``list_row`` is provided (per-user overlay), it supplies watched/score/list_status.
+    Personal list fields (status / watched / score) come only from the per-user
+    overlay ``list_row``. Shared cache placeholders (e.g. default
+    ``plan_to_watch``) must not imply the title is on the user's MAL list —
+    missing overlay → unset status ("Not watched" in the UI).
     """
     from kostream.browse import format_type_label
 
-    watched = int(getattr(cached, "num_episodes_watched", 0) or 0)
-    score = int(getattr(cached, "score", 0) or 0)
-    list_status = getattr(cached, "list_status", None)
+    watched = 0
+    score = 0
+    list_status = None
     if list_row:
         if "num_episodes_watched" in list_row:
             watched = int(list_row.get("num_episodes_watched") or 0)

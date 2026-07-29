@@ -27,7 +27,6 @@ from kostream.mal import (
     get_valid_access_token,
     is_connected as mal_is_connected,
     merge_anime_details_into_cache,
-    update_anime_list_status,
 )
 from kostream.manga_catalog import _manga_tokens
 from kostream.media_title_aliases import (
@@ -42,6 +41,7 @@ from kostream.media_title_aliases import (
 )
 from kostream.models import slugify
 
+# Legacy constant — import no longer auto-pushes plan_to_watch to MAL.
 PLAN_TO_WATCH = "plan_to_watch"
 
 
@@ -165,9 +165,15 @@ def import_media_to_catalog(
     catalog_path: Path | None = None,
     user_id: str | None = None,
     mal_cfg: MalConfig | None = None,
-    sync_mal: bool = True,
+    sync_mal: bool = False,
 ) -> MediaImportResult:
-    """Add or link uncataloged media folders; optionally set MAL status plan_to_watch."""
+    """Add or link uncataloged media folders into the catalog.
+
+    Does **not** add titles to the user's MAL list. Local/catalog availability
+    alone is not Plan to Watch — status stays unset ("Not watched") until the
+    user sets it. ``sync_mal`` only controls whether MAL *metadata* cache is
+    enriched when connected (optional; default off for list side-effects).
+    """
     root = media_root or MEDIA_ROOT
     state = load_catalog(catalog_path)
     folder_map = _load_folder_mal_map()
@@ -254,19 +260,6 @@ def import_media_to_catalog(
 
         if mal_id:
             _enrich_mal_cache(mal_cfg, user_id, mal_id, title or folder, mal_ready)
-            if mal_ready and mal_cfg and user_id:
-                try:
-                    update_anime_list_status(
-                        mal_cfg,
-                        int(mal_id),
-                        PLAN_TO_WATCH,
-                        user_id=user_id,
-                    )
-                    result.mal_synced.append({"folder": folder, "mal_id": mal_id})
-                except MalError as exc:
-                    result.mal_errors.append(
-                        {"folder": folder, "mal_id": mal_id, "error": str(exc)}
-                    )
             ensure_episode_titles_async(int(mal_id))
 
     save_catalog(state, catalog_path)
@@ -294,6 +287,11 @@ def repair_local_mal_links(
         if mal_id is None:
             mal_id, _score = _resolve_mal_from_catalog(state, folder)
         if mal_id is None:
+            continue
+        check_title = resolved_title or _title_for_mal(int(mal_id))
+        if check_title and not folder_plausibly_matches_title(
+            folder, check_title, mal_id=int(mal_id)
+        ):
             continue
 
         target = find_matching_entry(state, mal_id=mal_id)
@@ -443,10 +441,18 @@ def _classify_folder(
         resolved_mal = mal_id
         resolved_title = title
         if resolved_mal is None:
-            resolved_mal, resolved_title = _resolve_mal_from_search(folder)
-        if resolved_mal is None:
+            # Prefer catalog / map over AniList search so Import stays idempotent.
             resolved_mal, _score = _resolve_mal_from_catalog(state, folder)
+            if resolved_mal is not None:
+                resolved_title = _title_for_mal(resolved_mal) or title
+        if resolved_mal is None:
+            resolved_mal, resolved_title = _resolve_mal_from_search(folder)
         if resolved_mal is not None:
+            check_title = resolved_title or _title_for_mal(int(resolved_mal))
+            if check_title and not folder_plausibly_matches_title(
+                folder, check_title, mal_id=int(resolved_mal)
+            ):
+                return "skip", folder_entry, None, folder_entry.title
             existing = find_matching_entry(state, mal_id=resolved_mal)
             if existing and existing.id != folder_entry.id:
                 return "link", existing, resolved_mal, existing.title or resolved_title or folder_entry.title
@@ -636,8 +642,6 @@ def summarize_import(result: MediaImportResult) -> str:
         parts.append(f"{c['skipped']} skipped")
     if c["unmatched"]:
         parts.append(f"{c['unmatched']} local-only")
-    if c["mal_synced"]:
-        parts.append(f"{c['mal_synced']} Plan to Watch")
     if c["mal_errors"]:
         parts.append(f"{c['mal_errors']} MAL errors")
     if not parts:
@@ -676,6 +680,68 @@ def resync_catalog_folders(
         if not title and entry.mal_id is not None:
             title = _title_for_mal(int(entry.mal_id))
         return title
+
+    def _entry_titles(entry: CatalogEntry) -> list[str]:
+        """All known titles for match checks (catalog + MAL cache EN/JA)."""
+        titles: list[str] = []
+        seen: set[str] = set()
+
+        def _add(value: str | None) -> None:
+            text = (value or "").strip()
+            if not text:
+                return
+            key = text.casefold()
+            if key in seen:
+                return
+            seen.add(key)
+            titles.append(text)
+
+        _add(entry.title)
+        if entry.mal_id is not None:
+            from kostream.mal import load_cached_anime
+
+            cached = load_cached_anime(int(entry.mal_id))
+            if cached:
+                _add(cached.title)
+                _add(cached.title_en)
+                _add(cached.title_ja)
+                for syn in cached.title_synonyms or []:
+                    _add(syn)
+            else:
+                _add(_title_for_mal(int(entry.mal_id)))
+        return titles
+
+    def _entry_match_score(entry: CatalogEntry, folder: str) -> float:
+        scores = [
+            folder_title_match_score(folder, title, mal_id=entry.mal_id)
+            for title in _entry_titles(entry)
+        ]
+        if not scores:
+            mapped = folder_mal_id(folder, folder_map)
+            if (
+                mapped is not None
+                and entry.mal_id is not None
+                and int(mapped) == int(entry.mal_id)
+            ):
+                return 1.0
+            return 0.0
+        return max(scores)
+
+    def _entry_plausibly_owns(entry: CatalogEntry, folder: str) -> bool:
+        titles = _entry_titles(entry)
+        if not titles:
+            mapped = folder_mal_id(folder, folder_map)
+            return (
+                mapped is not None
+                and entry.mal_id is not None
+                and int(mapped) == int(entry.mal_id)
+            )
+        return any(
+            folder_plausibly_matches_title(
+                folder, title, min_score=0.45, mal_id=entry.mal_id
+            )
+            for title in titles
+        )
 
     def _clear_folder(entry: CatalogEntry, *, reason: str) -> None:
         nonlocal state
@@ -722,18 +788,14 @@ def resync_catalog_folders(
             _clear_folder(entry, reason="folder alias MAL id conflict")
             continue
         title = _entry_title(entry)
-        if title and not folder_plausibly_matches_title(
-            folder, title, min_score=0.45, mal_id=entry.mal_id
-        ):
-            # Only clear when there is positive evidence of a better owner, or
-            # zero match signal (true cross-wire). Ambiguous unique bindings stay.
-            my_score = folder_title_match_score(folder, title, mal_id=entry.mal_id)
+        if title and not _entry_plausibly_owns(entry, folder):
+            # Clear true cross-wires (near-zero match) or when a clearly better
+            # catalog owner exists. Soft English↔Japanese matches that score via
+            # title_en / synonyms / FOLDER_MAL_IDS stay bound (idempotent).
+            my_score = _entry_match_score(entry, folder)
             better = _best_resync_candidate(state, folder, folder_map, exclude_id=entry.id)
             if better is not None:
-                b_title = _entry_title(better)
-                b_score = folder_title_match_score(
-                    folder, b_title, mal_id=better.mal_id
-                )
+                b_score = _entry_match_score(better, folder)
                 if b_score >= 0.55 and b_score > my_score + 0.12:
                     _clear_folder(entry, reason="better catalog owner exists")
                     continue
@@ -751,15 +813,10 @@ def resync_catalog_folders(
             continue
         ranked = sorted(
             owners,
-            key=lambda e: folder_title_match_score(
-                folder, _entry_title(e), mal_id=e.mal_id
-            ),
-            reverse=True,
+            key=lambda e: (-_entry_match_score(e, folder), e.id),
         )
         keep = ranked[0]
-        keep_score = folder_title_match_score(
-            folder, _entry_title(keep), mal_id=keep.mal_id
-        )
+        keep_score = _entry_match_score(keep, folder)
         if keep_score < 0.45:
             for entry in ranked:
                 _clear_folder(entry, reason="duplicate folder claim unresolved")
@@ -771,10 +828,7 @@ def resync_catalog_folders(
     for entry in state.shows:
         if not entry.folder or entry.folder not in folder_set:
             continue
-        title = _entry_title(entry)
-        if folder_plausibly_matches_title(
-            entry.folder, title, min_score=0.45, mal_id=entry.mal_id
-        ) or (
+        if _entry_plausibly_owns(entry, entry.folder) or (
             # Unique remaining claim with folder on disk — keep even if soft.
             sum(1 for e in state.shows if e.folder == entry.folder) == 1
         ):
@@ -878,6 +932,7 @@ def _best_resync_candidate(
 
     best_entry: CatalogEntry | None = None
     best_score = 0.0
+    best_id = ""
     for entry in state.shows:
         if exclude_id and entry.id == exclude_id:
             continue
@@ -890,9 +945,10 @@ def _best_resync_candidate(
                 titles.append(cached)
         for title in titles:
             score = folder_title_match_score(folder, title, mal_id=entry.mal_id)
-            if score > best_score:
+            if score > best_score or (score == best_score and entry.id < best_id):
                 best_score = score
                 best_entry = entry
+                best_id = entry.id
     if best_entry is not None and best_score >= 0.55:
         return best_entry
     return None
@@ -938,7 +994,8 @@ def _resolve_resync_target(
 
     if not scored:
         return None
-    scored.sort(key=lambda row: row[0], reverse=True)
+    # Deterministic: highest score, then stable catalog id.
+    scored.sort(key=lambda row: (-row[0], row[1].id))
     best_score, best_entry = scored[0]
     # Ambiguous franchise ties (e.g. two Fate titles both weakly matching) → skip
     if len(scored) > 1 and scored[1][0] >= best_score - 0.08:

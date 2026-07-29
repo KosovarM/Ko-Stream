@@ -62,6 +62,29 @@ def test_merge_mal_and_local_overlays_by_number_not_filename_season():
     assert is_stream_only_episode(merged[2])
 
 
+def test_merge_prefers_display_season_files():
+    local = [
+        Episode("x-s01e01", "x", 1, 1, "Old", "S01E01.mp4"),
+        Episode("x-s02e01", "x", 2, 1, "New", "S02E01.mp4"),
+    ]
+    merged = _merge_mal_and_local_episodes(
+        "mal-1", mal_count=2, local=local, display_season=2
+    )
+    assert merged[0].filename == "S02E01.mp4"
+    assert merged[0].season == 2
+
+
+def test_count_unique_local_episodes_counts_seasons(tmp_path: Path):
+    from kostream.library import count_unique_local_episodes
+
+    folder = tmp_path / "Show"
+    folder.mkdir()
+    (folder / "S01E01.mp4").write_bytes(b"v")
+    (folder / "S02E01.mp4").write_bytes(b"v")
+    (folder / "S02E02.mp4").write_bytes(b"v")
+    assert count_unique_local_episodes(folder) == 3
+
+
 def test_mal_show_keeps_full_list_with_local_files(tmp_path: Path, monkeypatch):
     from kostream import library as lib
 

@@ -2929,11 +2929,30 @@ def create_app(
 
 
 def _library_stats(app: Flask) -> dict[str, int]:
-    """Totals shown on the Library (catalog) page."""
-    shows = scan_library(app.config["MEDIA_ROOT"], app.config["CATALOG_PATH"])
-    anime_episodes = sum(
-        1 for show in shows for ep in show.episodes if is_local_file_episode(ep)
-    )
+    """Totals shown on the Library (catalog) page.
+
+    Anime episode totals count distinct ``(season, number)`` video slots under
+    each catalog-bound folder on disk (stable across Import/Resync, and counts
+    S02+ separately from S01). Unbound folders and extras beyond catalog are
+    not included — that gap vs raw ``find … *.mp4`` is expected.
+    """
+    from kostream.library import count_unique_local_episodes
+
+    media_root = Path(app.config["MEDIA_ROOT"])
+    catalog = load_catalog(app.config["CATALOG_PATH"])
+    shows = scan_library(media_root, app.config["CATALOG_PATH"])
+    anime_episodes = 0
+    for show in shows:
+        entry = catalog.get(show.id)
+        folder = (entry.folder if entry else None) or None
+        if folder:
+            counted = count_unique_local_episodes(media_root / folder)
+            if counted:
+                anime_episodes += counted
+                continue
+        anime_episodes += sum(
+            1 for ep in show.episodes if is_local_file_episode(ep)
+        )
     comics = load_manga_library(
         app.config["MANGA_ROOT"], app.config["MANGA_CATALOG_PATH"]
     )

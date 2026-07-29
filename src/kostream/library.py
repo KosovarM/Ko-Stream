@@ -256,9 +256,14 @@ def _mal_show_for_entry(
             local_poster = _find_poster(show_dir)
 
     if cached:
-        status_label = cached.list_status.replace("_", " ").title()
-        score_bit = f" · Your score: {cached.score}/10" if cached.score else ""
-        desc = cached.synopsis[:480] if cached.synopsis else f"From your MyAnimeList ({status_label})."
+        if list_row and list_row.get("list_status"):
+            status_label = str(list_row["list_status"]).replace("_", " ").title()
+            user_score = int(list_row.get("score") or 0)
+            score_bit = f" · Your score: {user_score}/10" if user_score else ""
+        else:
+            status_label = "Not watched"
+            score_bit = ""
+        desc = cached.synopsis[:480] if cached.synopsis else f"From MyAnimeList ({status_label})."
         if len(desc) < 500:
             desc = f"{desc} [{status_label}{score_bit}]".strip()
 
@@ -332,7 +337,12 @@ def _merge_mal_and_local_episodes(
     season = max(1, display_season)
     by_number: dict[int, Episode] = {}
     for ep in local:
-        by_number[ep.number] = ep
+        existing = by_number.get(ep.number)
+        # Prefer files tagged with the show's display season (S02+ after rename).
+        if existing is None:
+            by_number[ep.number] = ep
+        elif ep.season == season and existing.season != season:
+            by_number[ep.number] = ep
 
     total = max(mal_count, max(by_number.keys(), default=0), 0)
     merged: list[Episode] = []
@@ -501,6 +511,17 @@ def _enrich_show(show: Show, show_dir: Path, anilist_id: int | None = None) -> S
     if local_poster:
         show.poster = local_poster
     return show
+
+
+def count_unique_local_episodes(show_dir: Path) -> int:
+    """Count distinct ``(season, number)`` video slots under a show folder."""
+    try:
+        if not show_dir.is_dir():
+            return 0
+        episodes, _mtime = _scan_show_folder(show_dir)
+    except OSError:
+        return 0
+    return len({(ep.season, ep.number) for ep in episodes})
 
 
 def _scan_show_folder(show_dir: Path) -> tuple[list[Episode], float | None]:

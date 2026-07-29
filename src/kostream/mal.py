@@ -7,6 +7,7 @@ import html as html_lib
 import json
 import logging
 import os
+import random
 import re
 import secrets
 import threading
@@ -451,11 +452,21 @@ def apply_list_row_to_manga(entry: MalMangaEntry, list_row: dict[str, Any] | Non
 
 
 def load_cached_anime_for_user(mal_id: int, user_id: str | None) -> MalAnimeEntry | None:
-    """Load shared metadata and merge this user's list overlay when ``user_id`` is set."""
+    """Load shared metadata and merge this user's list overlay when ``user_id`` is set.
+
+    Titles not on the user's list keep empty personal status (not the cache
+    placeholder ``plan_to_watch``).
+    """
     entry = load_cached_anime(mal_id)
     if entry is None or not user_id:
         return entry
-    return apply_list_row_to_anime(entry, get_anime_list_row(user_id, mal_id))
+    row = get_anime_list_row(user_id, mal_id)
+    if not row:
+        entry.list_status = ""
+        entry.num_episodes_watched = 0
+        entry.score = 0
+        return entry
+    return apply_list_row_to_anime(entry, row)
 
 
 def load_cached_manga_for_user(mal_id: int, user_id: str | None) -> MalMangaEntry | None:
@@ -800,10 +811,18 @@ ENRICH_BATCH_SIZE = 25
 # Keep batches modest: Jikan free tier rate-limits hard; long series eat the budget.
 EPISODE_TITLE_BATCH_SIZE = 30
 ENRICH_REQUEST_TIMEOUT = 12
-JIKAN_PAGE_SLEEP = 0.75
-JIKAN_SHOW_SLEEP = 1.0
-# Keep low so Sync can fall back to MAL HTML without waiting minutes on 504s.
-JIKAN_MAX_RETRIES = 2
+JIKAN_PAGE_SLEEP = 0.85
+JIKAN_SHOW_SLEEP = 1.75
+# Minimum gap between Jikan GETs (shared across sync + background threads).
+JIKAN_MIN_INTERVAL = 0.4
+JIKAN_REQUEST_TIMEOUT = 20
+# Attempts per page (transient 429/5xx/timeouts). Enough for short 504 blips; not endless.
+JIKAN_MAX_RETRIES = 5
+# Extra pause after consecutive show-level failures during a 504 storm.
+JIKAN_FAIL_BACKOFF_CAP = 12.0
+
+_jikan_gate = threading.Lock()
+_jikan_next_ok_at = 0.0
 
 
 @dataclass
@@ -813,6 +832,7 @@ class EpisodeTitleSyncResult:
     updated: int = 0
     attempted: int = 0
     failed: int = 0
+    skipped: int = 0
     remaining: int = 0
     last_error: str | None = None
 
@@ -863,20 +883,27 @@ def sync_catalog_episode_titles(
 
     Skips ids whose cache is fresh (``episode_titles_need_fetch`` is False).
     Prioritizes folder-linked / shorter shows. Rate-limits between shows.
+    Continues through per-show failures; reports updated / failed / skipped / remaining.
     """
     catalog = load_catalog(catalog_path)
     entries = catalog.enabled if enabled_only else catalog.shows
     skip = {int(x) for x in skip_mal_ids} if skip_mal_ids else set()
-    pending_entries = [
-        entry
-        for entry in entries
-        if entry.mal_id
-        and int(entry.mal_id) not in skip
-        and episode_titles_need_fetch(entry.mal_id)
-    ]
+    eligible: list[CatalogEntry] = []
+    skipped_fresh = 0
+    for entry in entries:
+        if not entry.mal_id:
+            continue
+        mid = int(entry.mal_id)
+        if mid in skip:
+            skipped_fresh += 1
+            continue
+        if episode_titles_need_fetch(mid):
+            eligible.append(entry)
+        else:
+            skipped_fresh += 1
     # Dedupe by mal_id, keeping the highest-priority catalog row.
     best: dict[int, CatalogEntry] = {}
-    for entry in pending_entries:
+    for entry in eligible:
         mid = int(entry.mal_id)
         prev = best.get(mid)
         if prev is None or _episode_title_sync_priority(entry) < _episode_title_sync_priority(prev):
@@ -890,17 +917,38 @@ def sync_catalog_episode_titles(
         remaining_after = max(0, len(pending) - max(0, limit))
         pending = pending[: max(0, limit)]
 
-    result = EpisodeTitleSyncResult(attempted=len(pending), remaining=remaining_after)
+    result = EpisodeTitleSyncResult(
+        attempted=len(pending),
+        skipped=skipped_fresh,
+        remaining=remaining_after,
+    )
+    consecutive_failures = 0
     for mal_id in pending:
         try:
             if ensure_episode_titles(mal_id):
                 result.updated += 1
+                consecutive_failures = 0
             elif episode_titles_need_fetch(mal_id):
                 result.failed += 1
-            time.sleep(JIKAN_SHOW_SLEEP)
+                consecutive_failures += 1
+                result.last_error = result.last_error or "episode titles still missing after fetch"
+            else:
+                # Became fresh without new writes (race / concurrent fill).
+                result.skipped += 1
+                consecutive_failures = 0
+            pause = JIKAN_SHOW_SLEEP
+            if consecutive_failures:
+                pause += min(JIKAN_FAIL_BACKOFF_CAP, consecutive_failures * 1.5)
+            time.sleep(pause)
         except (TimeoutError, OSError, URLError, HTTPError, ValueError, json.JSONDecodeError) as exc:
             result.failed += 1
+            consecutive_failures += 1
             result.last_error = str(exc)
+            _mark_episode_titles_retryable(mal_id)
+            time.sleep(
+                JIKAN_SHOW_SLEEP
+                + min(JIKAN_FAIL_BACKOFF_CAP, consecutive_failures * 1.5)
+            )
             continue
     return result
 
@@ -1049,17 +1097,20 @@ def ensure_episode_titles(mal_id: int, *, force: bool = False) -> bool:
                 mal_id,
                 exc,
             )
+            _mark_episode_titles_retryable(mal_id)
             return False
     elif not titles and jikan_failed:
         log.info(
             "Episode titles incomplete for mal_id=%s (Jikan failed; HTML scrape disabled)",
             mal_id,
         )
+        _mark_episode_titles_retryable(mal_id)
         return False
 
     if not titles and not force:
         # Soft-fail: do not mark complete=True with an empty wipe — leave incomplete for retry.
         if jikan_failed:
+            _mark_episode_titles_retryable(mal_id)
             return False
         _store_episode_titles(mal_id, {}, complete=False)
         return False
@@ -1073,8 +1124,20 @@ def mal_html_scrape_enabled() -> bool:
     return raw in ("1", "true", "yes", "on")
 
 
+def _jikan_throttle() -> None:
+    """Space Jikan requests so sync + async fetchers do not stampede the free tier."""
+    global _jikan_next_ok_at
+    with _jikan_gate:
+        now = time.monotonic()
+        wait = _jikan_next_ok_at - now
+        if wait > 0:
+            time.sleep(wait)
+        _jikan_next_ok_at = time.monotonic() + JIKAN_MIN_INTERVAL
+
+
 def _jikan_retry_after_seconds(exc: BaseException, attempt: int) -> float:
-    """Backoff for transient Jikan failures (429 / 5xx / timeouts)."""
+    """Backoff for transient Jikan failures (429 / 5xx / timeouts) with jitter."""
+    base: float
     if isinstance(exc, HTTPError):
         header = ""
         try:
@@ -1082,36 +1145,57 @@ def _jikan_retry_after_seconds(exc: BaseException, attempt: int) -> float:
         except Exception:
             header = ""
         if header.strip().isdigit():
-            return float(header.strip()) + 0.25
-        if exc.code == 429:
-            return min(60.0, 5.0 * (2 ** attempt))
-        if exc.code in (500, 502, 503, 504):
-            return min(45.0, 2.0 * (2 ** attempt))
-    return min(30.0, 1.5 * (2 ** attempt))
+            base = float(header.strip()) + 0.25
+        elif exc.code == 429:
+            base = min(60.0, 4.0 * (2 ** attempt))
+        elif exc.code in (500, 502, 503, 504):
+            base = min(45.0, 2.5 * (2 ** attempt))
+        else:
+            base = min(30.0, 1.5 * (2 ** attempt))
+    else:
+        base = min(30.0, 1.5 * (2 ** attempt))
+    return base + random.uniform(0.15, 0.85)
 
 
 def _jikan_get_json(url: str) -> dict[str, Any]:
     """GET JSON from Jikan with retries on rate limits and gateway errors."""
     last_exc: BaseException | None = None
     for attempt in range(JIKAN_MAX_RETRIES):
+        _jikan_throttle()
         req = Request(
             url,
             headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
             method="GET",
         )
         try:
-            with urlopen(req, timeout=25) as resp:
+            with urlopen(req, timeout=JIKAN_REQUEST_TIMEOUT) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as exc:
             last_exc = exc
             if exc.code not in (429, 500, 502, 503, 504) or attempt + 1 >= JIKAN_MAX_RETRIES:
                 raise
-            time.sleep(_jikan_retry_after_seconds(exc, attempt))
+            delay = _jikan_retry_after_seconds(exc, attempt)
+            log.info(
+                "Jikan transient HTTP %s (attempt %s/%s); sleeping %.1fs",
+                exc.code,
+                attempt + 1,
+                JIKAN_MAX_RETRIES,
+                delay,
+            )
+            time.sleep(delay)
         except (TimeoutError, URLError, OSError) as exc:
             last_exc = exc
             if attempt + 1 >= JIKAN_MAX_RETRIES:
                 raise
-            time.sleep(_jikan_retry_after_seconds(exc, attempt))
+            delay = _jikan_retry_after_seconds(exc, attempt)
+            log.info(
+                "Jikan request error %s (attempt %s/%s); sleeping %.1fs",
+                type(exc).__name__,
+                attempt + 1,
+                JIKAN_MAX_RETRIES,
+                delay,
+            )
+            time.sleep(delay)
     assert last_exc is not None
     raise last_exc
 
@@ -1185,6 +1269,22 @@ def fetch_episode_titles_from_mal_site(mal_id: int) -> tuple[dict[int, str], boo
         offset += 100
         time.sleep(0.5)
     return titles, bool(titles)
+
+
+def _mark_episode_titles_retryable(mal_id: int) -> None:
+    """Flag cache for retry without wiping any existing episode titles."""
+    path = CACHE_DIR / f"{mal_id}.json"
+    if not path.exists():
+        return
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return
+    data["episode_titles_incomplete"] = True
+    data.pop("episode_titles_walk_complete", None)
+    for key in ANIME_LIST_FIELD_KEYS:
+        data.pop(key, None)
+    atomic_write_json(path, data, ensure_ascii=False, trailing_newline=False)
 
 
 def _store_episode_titles(
