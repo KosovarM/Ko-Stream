@@ -20,6 +20,21 @@ FOLDER_MAL_IDS: dict[str, int] = {
     "JoJos Bizarre Adventure Stone Ocean Part 2": 51367,
     "JoJos Bizarre Adventure Stone Ocean Part 3": 53273,
     "Steel Ball Run JoJos Bizarre Adventure": 61469,
+    # Fate — keep franchise siblings from soft-matching each other
+    "Fate strange Fake": 55830,
+    "Fate kaleid liner Prisma Illya Vow in the Snow": 34100,
+    "Fate Grand Carnival": 44248,
+    # English library folders ↔ Japanese MAL titles
+    "Your Name": 32281,
+    "Nausicaa of the Valley of the Wind": 572,
+    "Castle in the Sky": 513,
+    "KonoSuba Season 1": 30831,
+    "KonoSuba Season 2": 32937,
+    "KonoSuba Season 3": 49458,
+    "KonoSuba Legend of Crimson": 38040,
+    "Demon Slayer Entertainment District Arc": 47778,
+    "Demon Slayer Swordsmith Village Arc": 51019,
+    "Demon Slayer Infinity Castle": 59192,
 }
 
 # English arc/series phrases -> extra match tokens (incl. romanized MAL fragments).
@@ -38,7 +53,7 @@ TITLE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "hashira training": ("hashira geiko", "55701"),
     "mugen train arc tv": ("mugen ressha hen", "49926"),
     "mugen train movie": ("mugen train", "40456"),
-    "infinity castle": ("infinity castle", "59192"),
+    "infinity castle": ("infinity castle", "mugenjou", "59192"),
     "kabaneri of the iron fortress the battle of unato": ("unato kessen", "34544"),
     "kabaneri of the iron fortress": ("koutetsujou no kabaneri", "28623"),
     "kabaneri movie 1 tsudou hikari": ("tsudou hikari", "33519"),
@@ -46,10 +61,43 @@ TITLE_SYNONYMS: dict[str, tuple[str, ...]] = {
     "overlord movie 2 the dark hero": ("dark hero", "34428"),
     "overlord iii": ("overlord iii", "37675"),
     "overlord ii": ("overlord ii", "35073"),
+    "vow in the snow": ("sekka no chikai", "34100"),
+    "strange fake": ("strange fake", "55830"),
+    "grand carnival": ("grand carnival", "44248"),
+    "konosuba": ("kono subarashii sekai ni shukufuku", "30831"),
+    "legend of crimson": ("kurenai densetsu", "38040"),
+    "your name": ("kimi no na wa", "32281"),
+    "nausicaa": ("kaze no tani no nausicaa", "572"),
+    "castle in the sky": ("tenkuu no shiro laputa", "513"),
 }
 
 _APOSTROPHE_RE = re.compile(r"[''`´]")
 _JOJO_RE = re.compile(r"\bjojos\b", re.IGNORECASE)
+
+# Tokens that are too generic to count as distinctive franchise matches alone.
+_STOP_TOKENS = {
+    "movie",
+    "movies",
+    "season",
+    "part",
+    "the",
+    "and",
+    "of",
+    "ova",
+    "ona",
+    "special",
+    "film",
+    "arc",
+    "hen",
+    "2nd",
+    "3rd",
+    "4th",
+    "no",
+    "wo",
+    "ni",
+    "to",
+    "wa",
+}
 
 
 def normalize_title_for_match(value: str) -> str:
@@ -119,29 +167,49 @@ def entry_match_keys(title: str | None, *, mal_id: int | None = None) -> set[str
                 for syn in synonyms:
                     keys.add(_manga_match_key(syn))
                     keys.update(_manga_tokens(syn))
+            # Reverse: Japanese/romanized title contains a synonym → add English phrase
+            for syn in synonyms:
+                syn_norm = normalize_title_for_match(syn)
+                if syn_norm and (syn_norm in norm or _manga_match_key(syn) in norm_key):
+                    keys.update(_manga_tokens(phrase))
+                    keys.add(_manga_match_key(phrase))
+                    break
     if mal_id is not None:
-        keys.add(str(int(mal_id)))
+        mid = str(int(mal_id))
+        keys.add(mid)
+        for phrase, synonyms in TITLE_SYNONYMS.items():
+            if mid in synonyms or mid in {t for t in _manga_tokens(" ".join(synonyms))}:
+                keys.update(_manga_tokens(phrase))
+                keys.add(_manga_match_key(phrase))
+                for syn in synonyms:
+                    keys.add(_manga_match_key(syn))
+                    keys.update(_manga_tokens(syn))
     return {k for k in keys if k}
 
 
 def match_score(folder_keys: set[str], entry_keys: set[str]) -> float:
-    """Token overlap score in [0, 1]; mal-id token match is instant win."""
+    """Token overlap score in [0, 1]; MAL id or full collapsed-title key is an instant win."""
     if not folder_keys or not entry_keys:
         return 0.0
-    if folder_keys & entry_keys:
-        # Direct mal-id or exact key hit
-        if any(k.isdigit() and len(k) >= 4 for k in folder_keys & entry_keys):
-            return 1.0
-        overlap = folder_keys & entry_keys
-        if _manga_match_key(next(iter(overlap))) == next(iter(overlap)):
-            return 1.0
     overlap = folder_keys & entry_keys
     if not overlap:
         return 0.0
+    # Direct MAL id hit
+    if any(k.isdigit() and len(k) >= 4 for k in overlap):
+        return 1.0
+    # Full collapsed title key (longer than a single word token)
+    if any(len(k) >= 12 for k in overlap):
+        return 1.0
     return len(overlap) / min(len(folder_keys), len(entry_keys))
 
 
-def folder_plausibly_matches_title(folder: str, title: str | None, *, min_score: float = 0.5) -> bool:
+def folder_plausibly_matches_title(
+    folder: str,
+    title: str | None,
+    *,
+    min_score: float = 0.5,
+    mal_id: int | None = None,
+) -> bool:
     """True when a library folder name reasonably belongs to this anime title.
 
     Used to reject cross-wired catalog ``folder`` fields (e.g. Ginpachi folder on
@@ -153,44 +221,63 @@ def folder_plausibly_matches_title(folder: str, title: str | None, *, min_score:
     title_norm = normalize_title_for_match(title)
     if not folder_norm or not title_norm:
         return False
-    if folder_norm == title_norm:
-        return True
-    if folder_norm in title_norm or title_norm in folder_norm:
-        return True
-    score = match_score(folder_match_keys(folder), entry_match_keys(title))
-    # Generic tokens like "movie"/"season" inflate overlap — require a higher bar
-    # when the only shared keys are weak.
-    stop = {
-        "movie",
-        "movies",
-        "season",
-        "part",
-        "the",
-        "and",
-        "of",
-        "ova",
-        "ona",
-        "special",
-        "film",
-        "arc",
-        "hen",
-        "2nd",
-        "3rd",
-        "4th",
+
+    # Punctuation-insensitive near-equality / tight containment.
+    # Reject loose containment like TV title inside a longer movie folder name.
+    folder_key = _manga_match_key(folder_norm)
+    title_key = _manga_match_key(title_norm)
+    if folder_key and title_key:
+        if folder_key == title_key:
+            return True
+        shorter, longer = (
+            (folder_key, title_key)
+            if len(folder_key) <= len(title_key)
+            else (title_key, folder_key)
+        )
+        if shorter in longer and len(shorter) / max(len(longer), 1) >= 0.85:
+            return True
+
+    mapped = folder_mal_id(folder)
+    if mapped is not None and mal_id is not None:
+        return int(mapped) == int(mal_id)
+
+    f_keys = folder_match_keys(folder)
+    e_keys = entry_match_keys(title, mal_id=mal_id)
+    score = match_score(f_keys, e_keys)
+
+    folder_tokens = {t for t in _manga_tokens(folder_norm) if t not in _STOP_TOKENS}
+    title_tokens = {t for t in _manga_tokens(title_norm) if t not in _STOP_TOKENS}
+    raw_overlap = folder_tokens & title_tokens
+    # Synonym / alias expanded overlap (still ignore stopwords)
+    expanded_overlap = {
+        t
+        for t in (f_keys & e_keys)
+        if t not in _STOP_TOKENS and not (t.isdigit() and len(t) < 4)
     }
-    folder_tokens = {t for t in _manga_tokens(folder_norm) if t not in stop}
-    title_tokens = {t for t in _manga_tokens(title_norm) if t not in stop}
-    strong_overlap = folder_tokens & title_tokens
-    # Never accept a high match_score that is only stopword noise (e.g. "movie").
-    if not strong_overlap:
+
+    # Folder-only distinctive tokens (e.g. vow/snow on a TV-series title) mean
+    # this is likely a sibling movie/arc, not the same catalog row.
+    folder_only = {t for t in folder_tokens if len(t) >= 4} - title_tokens
+    unexplained = {t for t in folder_only if t not in e_keys}
+    if len(unexplained) >= 2 and score < 0.95:
         return False
-    if score >= min_score:
+
+    if any(k.isdigit() and len(k) >= 4 for k in f_keys & e_keys):
         return True
-    # Shared significant tokens (length ≥ 4), ignoring stopwords.
-    significant = {t for t in strong_overlap if len(t) >= 4}
-    if len(significant) >= 2:
-        return True
-    if len(significant) == 1 and len(next(iter(significant))) >= 8:
+
+    significant_raw = {t for t in raw_overlap if len(t) >= 4}
+    significant_exp = {t for t in expanded_overlap if len(t) >= 4 or (t.isdigit() and len(t) >= 4)}
+
+    # Require real signal — a lone franchise token like "fate" must not pass.
+    if len(significant_raw) >= 2 or (len(significant_raw) == 1 and len(next(iter(significant_raw))) >= 8):
+        if score >= min_score or len(significant_raw) >= 2:
+            return True
+    if len(significant_exp) >= 2 or (
+        len(significant_exp) == 1 and len(next(iter(significant_exp))) >= 8
+    ):
+        if score >= min_score or len(significant_exp) >= 2:
+            return True
+    if score >= max(min_score, 0.75) and significant_exp:
         return True
     return False
 
@@ -217,3 +304,21 @@ def best_catalog_match(
     if best < min_score:
         return None, best
     return best_mal, best
+
+
+def folder_title_match_score(
+    folder: str,
+    title: str | None,
+    *,
+    mal_id: int | None = None,
+) -> float:
+    """Numeric match strength for ranking candidate catalog owners of a folder."""
+    if not folder or not title:
+        mapped = folder_mal_id(folder)
+        if mapped is not None and mal_id is not None and int(mapped) == int(mal_id):
+            return 1.0
+        return 0.0
+    if folder_mal_id(folder) is not None and mal_id is not None:
+        if int(folder_mal_id(folder)) == int(mal_id):
+            return 1.0
+    return match_score(folder_match_keys(folder), entry_match_keys(title, mal_id=mal_id))

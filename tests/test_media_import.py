@@ -339,6 +339,7 @@ def test_summarize_import_message():
     )
     assert "added" in msg
     assert "Plan to Watch" in msg
+    assert "Import done" in msg
 
 
 def _test_app(tmp_path: Path):
@@ -462,7 +463,27 @@ def test_folder_plausibly_matches_title():
     from kostream.media_title_aliases import folder_plausibly_matches_title
 
     assert folder_plausibly_matches_title(
-        "Fate strange Fake", "Fate/strange Fake"
+        "Fate strange Fake", "Fate/strange Fake", mal_id=55830
+    )
+    assert not folder_plausibly_matches_title(
+        "Fate strange Fake",
+        "Fate/kaleid liner Prisma Illya",
+        mal_id=14829,
+    )
+    assert not folder_plausibly_matches_title(
+        "Fate kaleid liner Prisma Illya Vow in the Snow",
+        "Fate/strange Fake",
+        mal_id=55830,
+    )
+    assert folder_plausibly_matches_title(
+        "Fate kaleid liner Prisma Illya Vow in the Snow",
+        "Fate/kaleid liner Prisma Illya Movie: Sekka no Chikai",
+        mal_id=34100,
+    )
+    assert not folder_plausibly_matches_title(
+        "Fate kaleid liner Prisma Illya Vow in the Snow",
+        "Fate/kaleid liner Prisma Illya",
+        mal_id=14829,
     )
     assert not folder_plausibly_matches_title(
         "Gintama 3-Z Ginpachi-sensei",
@@ -476,6 +497,26 @@ def test_folder_plausibly_matches_title():
         "Jujutsu Kaisen 0 Movie",
         "Jujutsu Kaisen 0 Movie",
     )
+    assert folder_plausibly_matches_title(
+        "KonoSuba Season 1",
+        "Kono Subarashii Sekai ni Shukufuku wo!",
+        mal_id=30831,
+    )
+    assert folder_plausibly_matches_title(
+        "Demon Slayer Swordsmith Village Arc",
+        "Kimetsu no Yaiba: Katanakaji no Sato-hen",
+        mal_id=51019,
+    )
+
+
+def test_match_score_does_not_treat_single_token_as_perfect():
+    from kostream.media_title_aliases import entry_match_keys, folder_match_keys, match_score
+
+    score = match_score(
+        folder_match_keys("Fate strange Fake"),
+        entry_match_keys("Fate/kaleid liner Prisma Illya", mal_id=14829),
+    )
+    assert score < 0.5
 
 
 def test_resync_clears_crosswired_and_relinks(tmp_path: Path):
@@ -543,6 +584,132 @@ def test_resync_clears_crosswired_and_relinks(tmp_path: Path):
     assert state.get("mal-55830").folder == "Fate strange Fake"
     assert result.cleared >= 1
     assert result.refreshed + result.remapped >= 1
+
+
+def test_resync_keeps_good_english_japanese_bindings(tmp_path: Path):
+    from kostream.media_import import resync_catalog_folders
+
+    root = tmp_path / "anime"
+    for name in (
+        "KonoSuba Season 1",
+        "Your Name",
+        "Fate strange Fake",
+        "Fate kaleid liner Prisma Illya Vow in the Snow",
+    ):
+        (root / name).mkdir(parents=True)
+        (root / name / "S01E01.mp4").write_bytes(b"v")
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-30831",
+                    enabled=True,
+                    source="mal",
+                    folder="KonoSuba Season 1",
+                    mal_id=30831,
+                    title="Kono Subarashii Sekai ni Shukufuku wo!",
+                ),
+                CatalogEntry(
+                    id="mal-32281",
+                    enabled=True,
+                    source="mal",
+                    folder="Your Name",
+                    mal_id=32281,
+                    title="Kimi no Na wa.",
+                ),
+                CatalogEntry(
+                    id="mal-14829",
+                    enabled=True,
+                    source="mal",
+                    folder="Fate kaleid liner Prisma Illya Vow in the Snow",
+                    mal_id=14829,
+                    title="Fate/kaleid liner Prisma Illya",
+                ),
+                CatalogEntry(
+                    id="mal-34100",
+                    enabled=True,
+                    source="mal",
+                    mal_id=34100,
+                    title="Fate/kaleid liner Prisma Illya Movie: Sekka no Chikai",
+                ),
+                CatalogEntry(
+                    id="mal-55830",
+                    enabled=True,
+                    source="mal",
+                    folder="Fate strange Fake",
+                    mal_id=55830,
+                    title="Fate/strange Fake",
+                ),
+            ]
+        ),
+        catalog_path,
+    )
+
+    with patch("kostream.media_import._load_folder_mal_map", return_value={}):
+        resync_catalog_folders(media_root=root, catalog_path=catalog_path)
+
+    state = load_catalog(catalog_path)
+    assert state.get("mal-30831").folder == "KonoSuba Season 1"
+    assert state.get("mal-32281").folder == "Your Name"
+    assert state.get("mal-55830").folder == "Fate strange Fake"
+    # Vow in the Snow belongs to Sekka movie, not the TV series.
+    assert state.get("mal-14829").folder is None
+    assert state.get("mal-34100").folder == "Fate kaleid liner Prisma Illya Vow in the Snow"
+
+
+def test_resync_does_not_crosswire_fate_siblings(tmp_path: Path):
+    from kostream.media_import import resync_catalog_folders
+
+    root = tmp_path / "anime"
+    (root / "Fate strange Fake").mkdir(parents=True)
+    (root / "Fate strange Fake" / "S01E01.mp4").write_bytes(b"v")
+    (root / "Fate kaleid liner Prisma Illya Vow in the Snow").mkdir()
+    (root / "Fate kaleid liner Prisma Illya Vow in the Snow" / "S01E01.mp4").write_bytes(
+        b"v"
+    )
+
+    catalog_path = tmp_path / "selected.json"
+    save_catalog(
+        CatalogState(
+            shows=[
+                CatalogEntry(
+                    id="mal-14829",
+                    enabled=True,
+                    source="mal",
+                    folder="Fate strange Fake",
+                    mal_id=14829,
+                    title="Fate/kaleid liner Prisma Illya",
+                ),
+                CatalogEntry(
+                    id="mal-55830",
+                    enabled=True,
+                    source="mal",
+                    mal_id=55830,
+                    title="Fate/strange Fake",
+                ),
+                CatalogEntry(
+                    id="mal-34100",
+                    enabled=True,
+                    source="mal",
+                    mal_id=34100,
+                    title="Fate/kaleid liner Prisma Illya Movie: Sekka no Chikai",
+                ),
+            ]
+        ),
+        catalog_path,
+    )
+
+    with patch("kostream.media_import._load_folder_mal_map", return_value={}):
+        resync_catalog_folders(media_root=root, catalog_path=catalog_path)
+
+    state = load_catalog(catalog_path)
+    assert state.get("mal-55830").folder == "Fate strange Fake"
+    assert state.get("mal-14829").folder is None
+    assert state.get("mal-34100").folder == (
+        "Fate kaleid liner Prisma Illya Vow in the Snow"
+    )
 
 
 def test_resolve_mal_from_search_rejects_weak_first_hit():

@@ -36,6 +36,7 @@ from kostream.media_title_aliases import (
     folder_mal_id,
     folder_match_keys,
     folder_plausibly_matches_title,
+    folder_title_match_score,
     match_score,
     normalize_search_query,
 )
@@ -427,7 +428,9 @@ def _classify_folder(
         mapped_title = _title_for_mal(int(mal_id))
         existing_mapped = find_matching_entry(state, mal_id=int(mal_id))
         check_title = (existing_mapped.title if existing_mapped else None) or mapped_title
-        if check_title and not folder_plausibly_matches_title(folder, check_title):
+        if check_title and not folder_plausibly_matches_title(
+            folder, check_title, mal_id=int(mal_id)
+        ):
             mal_id = None
         elif not check_title:
             # No title to validate — keep map id only when folder aliases declare it.
@@ -512,7 +515,9 @@ def _find_entry_by_folder_title(state: CatalogState, folder: str) -> CatalogEntr
         for candidate in (entry.title, entry.id.replace("mal-", "").replace("-", " ")):
             if not candidate:
                 continue
-            if not folder_plausibly_matches_title(folder, str(candidate), min_score=0.55):
+            if not folder_plausibly_matches_title(
+                folder, str(candidate), min_score=0.55, mal_id=entry.mal_id
+            ):
                 continue
             tokens = set(_manga_tokens(str(candidate)))
             if not tokens:
@@ -630,14 +635,14 @@ def summarize_import(result: MediaImportResult) -> str:
     if c["skipped"]:
         parts.append(f"{c['skipped']} skipped")
     if c["unmatched"]:
-        parts.append(f"{c['unmatched']} local-only (no MAL match)")
+        parts.append(f"{c['unmatched']} local-only")
     if c["mal_synced"]:
-        parts.append(f"{c['mal_synced']} set to Plan to Watch on MAL")
+        parts.append(f"{c['mal_synced']} Plan to Watch")
     if c["mal_errors"]:
-        parts.append(f"{c['mal_errors']} MAL sync errors")
+        parts.append(f"{c['mal_errors']} MAL errors")
     if not parts:
         return "No new media folders to import."
-    return "Import from media: " + ", ".join(parts) + "."
+    return "Import done. " + ". ".join(parts) + "."
 
 
 def resync_catalog_folders(
@@ -646,15 +651,13 @@ def resync_catalog_folders(
 ) -> FolderResyncResult:
     """Rebuild catalog ``folder`` bindings from on-disk anime folders.
 
-    Clears cross-wired folders (folder name does not match the show title) and
-    reassigns each video folder under the anime root to at most one catalog
-    entry using:
+    Conservative policy (avoid mass-unlinking good English↔Japanese bindings):
 
-    1. Validated FOLDER_MAP / alias MAL id (title must plausibly match)
-    2. Strong title match against catalog / MAL cache titles
-    3. Exact existing folder field only when it still matches the title
-
-    Never invents MAL ids via AniList search. Paths stay under ``media_root``.
+    - Clear only when the folder is missing on disk, an alias MAL id conflicts,
+      the title clearly mismatches, or multiple shows claim the same folder.
+    - Keep unique on-disk bindings that still plausibly match (incl. synonyms).
+    - Reassign free folders to at most one catalog entry via validated aliases
+      and strong title match. Never invent MAL ids via AniList search.
     """
     root = (media_root or MEDIA_ROOT).resolve()
     result = FolderResyncResult()
@@ -668,19 +671,15 @@ def resync_catalog_folders(
     folder_set = set(folders)
     folder_map = _load_folder_mal_map()
 
-    # Drop folder fields that are missing on disk or clearly mismatched titles.
-    for entry in list(state.shows):
-        if not entry.folder:
-            continue
-        folder = entry.folder
+    def _entry_title(entry: CatalogEntry) -> str | None:
         title = entry.title
         if not title and entry.mal_id is not None:
             title = _title_for_mal(int(entry.mal_id))
-        bad = folder not in folder_set or not folder_plausibly_matches_title(
-            folder, title, min_score=0.5
-        )
-        if not bad:
-            continue
+        return title
+
+    def _clear_folder(entry: CatalogEntry, *, reason: str) -> None:
+        nonlocal state
+        folder = entry.folder
         state = upsert_entry(
             state,
             CatalogEntry(
@@ -702,22 +701,88 @@ def resync_catalog_folders(
                 "catalog_id": entry.id,
                 "folder": folder,
                 "title": entry.title,
-                "reason": "missing on disk or title mismatch",
+                "reason": reason,
             }
         )
 
+    # --- Pass 1: drop missing / alias-conflict / clearly wrong bindings ---
+    for entry in list(state.shows):
+        if not entry.folder:
+            continue
+        folder = entry.folder
+        if folder not in folder_set:
+            _clear_folder(entry, reason="missing on disk")
+            continue
+        mapped = folder_mal_id(folder, folder_map)
+        if (
+            mapped is not None
+            and entry.mal_id is not None
+            and int(mapped) != int(entry.mal_id)
+        ):
+            _clear_folder(entry, reason="folder alias MAL id conflict")
+            continue
+        title = _entry_title(entry)
+        if title and not folder_plausibly_matches_title(
+            folder, title, min_score=0.45, mal_id=entry.mal_id
+        ):
+            # Only clear when there is positive evidence of a better owner, or
+            # zero match signal (true cross-wire). Ambiguous unique bindings stay.
+            my_score = folder_title_match_score(folder, title, mal_id=entry.mal_id)
+            better = _best_resync_candidate(state, folder, folder_map, exclude_id=entry.id)
+            if better is not None:
+                b_title = _entry_title(better)
+                b_score = folder_title_match_score(
+                    folder, b_title, mal_id=better.mal_id
+                )
+                if b_score >= 0.55 and b_score > my_score + 0.12:
+                    _clear_folder(entry, reason="better catalog owner exists")
+                    continue
+            if my_score < 0.2:
+                _clear_folder(entry, reason="title mismatch")
+                continue
+
+    # --- Pass 2: enforce one folder → one catalog id (keep best match) ---
+    claims: dict[str, list[CatalogEntry]] = {}
+    for entry in state.shows:
+        if entry.folder and entry.folder in folder_set:
+            claims.setdefault(entry.folder, []).append(entry)
+    for folder, owners in claims.items():
+        if len(owners) < 2:
+            continue
+        ranked = sorted(
+            owners,
+            key=lambda e: folder_title_match_score(
+                folder, _entry_title(e), mal_id=e.mal_id
+            ),
+            reverse=True,
+        )
+        keep = ranked[0]
+        keep_score = folder_title_match_score(
+            folder, _entry_title(keep), mal_id=keep.mal_id
+        )
+        if keep_score < 0.45:
+            for entry in ranked:
+                _clear_folder(entry, reason="duplicate folder claim unresolved")
+            continue
+        for entry in ranked[1:]:
+            _clear_folder(entry, reason="duplicate folder claim")
+
     claimed: set[str] = set()
-    # Keep plausible existing bindings first so remaps don't steal correct ones.
     for entry in state.shows:
         if not entry.folder or entry.folder not in folder_set:
             continue
-        title = entry.title
-        if not title and entry.mal_id is not None:
-            title = _title_for_mal(int(entry.mal_id))
-        if folder_plausibly_matches_title(entry.folder, title, min_score=0.5):
-            claimed.add(entry.folder)
-            result.unchanged += 1
+        title = _entry_title(entry)
+        if folder_plausibly_matches_title(
+            entry.folder, title, min_score=0.45, mal_id=entry.mal_id
+        ) or (
+            # Unique remaining claim with folder on disk — keep even if soft.
+            sum(1 for e in state.shows if e.folder == entry.folder) == 1
+        ):
+            if entry.folder not in claimed:
+                claimed.add(entry.folder)
+                result.unchanged += 1
 
+    # --- Pass 3: assign free folders ---
     for folder in folders:
         if folder in claimed:
             continue
@@ -754,21 +819,7 @@ def resync_catalog_folders(
         for other in list(state.shows):
             if other.id == target.id or other.folder != folder:
                 continue
-            state = upsert_entry(
-                state,
-                CatalogEntry(
-                    id=other.id,
-                    enabled=other.enabled,
-                    source=other.source,
-                    folder=None,
-                    jellyfin_id=other.jellyfin_id,
-                    anilist_id=other.anilist_id,
-                    mal_id=other.mal_id,
-                    title=other.title,
-                    added_at=other.added_at,
-                ),
-            )
-            result.cleared += 1
+            _clear_folder(other, reason="reassigned to another show")
 
         state = upsert_entry(
             state,
@@ -805,24 +856,31 @@ def resync_catalog_folders(
     return result
 
 
-def _resolve_resync_target(
+def _best_resync_candidate(
     state: CatalogState,
     folder: str,
     folder_map: dict[str, int],
+    *,
+    exclude_id: str | None = None,
 ) -> CatalogEntry | None:
-    """Pick the catalog entry that should own ``folder`` (title-safe)."""
+    """Best alternate catalog owner for ``folder``, or None."""
     mapped = folder_map.get(folder)
     if mapped is None:
         mapped = folder_mal_id(folder, folder_map)
     if mapped is not None:
         entry = find_matching_entry(state, mal_id=int(mapped))
-        title = (entry.title if entry else None) or _title_for_mal(int(mapped))
-        if entry and folder_plausibly_matches_title(folder, title, min_score=0.5):
-            return entry
+        if entry and entry.id != exclude_id:
+            title = entry.title or _title_for_mal(int(mapped))
+            if folder_plausibly_matches_title(
+                folder, title, min_score=0.45, mal_id=entry.mal_id
+            ):
+                return entry
 
     best_entry: CatalogEntry | None = None
     best_score = 0.0
     for entry in state.shows:
+        if exclude_id and entry.id == exclude_id:
+            continue
         titles: list[str] = []
         if entry.title:
             titles.append(entry.title)
@@ -831,18 +889,58 @@ def _resolve_resync_target(
             if cached and cached not in titles:
                 titles.append(cached)
         for title in titles:
-            if not folder_plausibly_matches_title(folder, title, min_score=0.5):
-                continue
-            score = match_score(
-                folder_match_keys(folder),
-                entry_match_keys(title, mal_id=entry.mal_id),
-            )
-            bonus = 0.05 if not entry.folder else 0.0
-            total = score + bonus
-            if total > best_score:
-                best_score = total
+            score = folder_title_match_score(folder, title, mal_id=entry.mal_id)
+            if score > best_score:
+                best_score = score
                 best_entry = entry
-
     if best_entry is not None and best_score >= 0.55:
         return best_entry
     return None
+
+
+def _resolve_resync_target(
+    state: CatalogState,
+    folder: str,
+    folder_map: dict[str, int],
+) -> CatalogEntry | None:
+    """Pick the catalog entry that should own ``folder`` (title-safe, unique)."""
+    mapped = folder_map.get(folder)
+    if mapped is None:
+        mapped = folder_mal_id(folder, folder_map)
+    if mapped is not None:
+        entry = find_matching_entry(state, mal_id=int(mapped))
+        title = (entry.title if entry else None) or _title_for_mal(int(mapped))
+        if entry and folder_plausibly_matches_title(
+            folder, title, min_score=0.45, mal_id=entry.mal_id
+        ):
+            return entry
+
+    scored: list[tuple[float, CatalogEntry]] = []
+    for entry in state.shows:
+        titles: list[str] = []
+        if entry.title:
+            titles.append(entry.title)
+        if entry.mal_id is not None:
+            cached = _title_for_mal(int(entry.mal_id))
+            if cached and cached not in titles:
+                titles.append(cached)
+        best_for_entry = 0.0
+        for title in titles:
+            if not folder_plausibly_matches_title(
+                folder, title, min_score=0.5, mal_id=entry.mal_id
+            ):
+                continue
+            score = folder_title_match_score(folder, title, mal_id=entry.mal_id)
+            bonus = 0.05 if not entry.folder else 0.0
+            best_for_entry = max(best_for_entry, score + bonus)
+        if best_for_entry >= 0.55:
+            scored.append((best_for_entry, entry))
+
+    if not scored:
+        return None
+    scored.sort(key=lambda row: row[0], reverse=True)
+    best_score, best_entry = scored[0]
+    # Ambiguous franchise ties (e.g. two Fate titles both weakly matching) → skip
+    if len(scored) > 1 and scored[1][0] >= best_score - 0.08:
+        return None
+    return best_entry

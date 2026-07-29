@@ -317,12 +317,12 @@ FOLDER_MAP: dict[str, tuple[str, str | None, int]] = {
         None,
     ),
     "Fate_Extra__Last_Encore_sub": ("Fate Extra Last Encore", None),
-    "Fate_Grand_Carnival_sub": ("Fate Grand Carnival", None),
     "Fate_kaleid_liner_Prisma_Illya__Vow_in_the_Snow_sub": (
         "Fate kaleid liner Prisma Illya Vow in the Snow",
-        None,
+        "mal-34100",
     ),
-    "Fate_strange_Fake_sub": ("Fate strange Fake", None),
+    "Fate_strange_Fake_sub": ("Fate strange Fake", "mal-55830"),
+    "Fate_Grand_Carnival_sub": ("Fate Grand Carnival", "mal-44248"),
     "JoJo_s_Bizarre_Adventure_sub": ("JoJos Bizarre Adventure", "mal-14719"),
     "JoJo_s_Bizarre_Adventure_Part_2__Stardust_Crusaders_sub": (
         "JoJos Bizarre Adventure Stardust Crusaders",

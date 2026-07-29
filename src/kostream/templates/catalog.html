@@ -46,10 +46,19 @@
     </ul>
     {% endif %}
     {% if mal_message %}
-    <p class="catalog-success">{{ mal_message }}</p>
+    <div class="catalog-flash catalog-flash--ok" role="status">
+      {% for part in mal_message.split('. ') %}
+        {% set bit = part.rstrip('.') %}
+        {% if bit %}
+        <span class="catalog-flash-chip">{{ bit }}</span>
+        {% endif %}
+      {% endfor %}
+    </div>
     {% endif %}
     {% if mal_error %}
-    <p class="catalog-error">{{ mal_error }}</p>
+    <div class="catalog-flash catalog-flash--err" role="alert">
+      <span class="catalog-flash-chip">{{ mal_error }}</span>
+    </div>
     {% endif %}
   </header>
 
@@ -151,22 +160,26 @@
   </section>
 
   <section class="catalog-section">
-    <h2>{{ _('Import from media library') }}</h2>
+    <h2>{{ _('Media library') }}</h2>
     <p class="catalog-meta">
-      {{ _('Scan your anime media folder for titles with video files that are not in the catalog yet. Matches MAL where possible and sets Plan to Watch when connected.') }}
+      {{ _('Scan anime folders for titles not yet in the catalog, upload missing episodes, or repair folder bindings.') }}
     </p>
     {% if can_import_media %}
-    <div class="mal-actions">
-      <button type="button" class="btn-watch" id="catalog-import-media">{{ _('Import from media') }}</button>
-      <button type="button" class="btn-watch" id="catalog-upload-open">{{ _('Upload') }}</button>
-      <button
-        type="button"
-        class="btn-detail"
-        id="catalog-resync-folders"
-        title="{{ _('Re-bind on-disk episode folders to the correct catalog titles') }}"
-      >{{ _('Resync local episodes') }}</button>
-      <span class="catalog-meta" id="catalog-import-preview" hidden></span>
-      <span class="catalog-meta" id="catalog-resync-status" hidden></span>
+    <div class="catalog-admin-actions">
+      <div class="catalog-admin-actions-row">
+        <button type="button" class="btn-watch" id="catalog-import-media" title="{{ _('Import uncataloged folders from the anime media root') }}">{{ _('Import') }}</button>
+        <button type="button" class="btn-watch" id="catalog-upload-open">{{ _('Upload') }}</button>
+        <button
+          type="button"
+          class="btn-detail"
+          id="catalog-resync-folders"
+          title="{{ _('Re-bind on-disk episode folders to the correct catalog titles') }}"
+        >{{ _('Resync') }}</button>
+      </div>
+      <div class="catalog-admin-status" id="catalog-admin-status">
+        <span class="catalog-meta" id="catalog-import-preview" hidden></span>
+        <span class="catalog-meta" id="catalog-resync-status" hidden></span>
+      </div>
     </div>
     {% else %}
     <p class="catalog-meta">{{ _('Admin or Manager account required to import from media.') }}</p>
@@ -804,13 +817,13 @@ anilistForm.addEventListener('submit', async (event) => {
       importBusy = !!busy;
       catalogImportMedia.setAttribute('aria-busy', importBusy ? 'true' : 'false');
       if (importBusy) {
-        importMediaLabel = catalogImportMedia.textContent || 'Import from media';
+        importMediaLabel = catalogImportMedia.textContent || 'Import';
         catalogImportMedia.disabled = true;
-        catalogImportMedia.textContent = 'Importing…';
+        catalogImportMedia.textContent = '…';
         catalogImportMedia.classList.add('is-uploading');
       } else {
         catalogImportMedia.disabled = false;
-        catalogImportMedia.textContent = importMediaLabel || 'Import from media';
+        catalogImportMedia.textContent = importMediaLabel || 'Import';
         catalogImportMedia.classList.remove('is-uploading');
       }
     };
