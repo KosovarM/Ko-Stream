@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ _('Releases') }} — {{ site_name }}{% endblock %}
+{% block content %}
+<section class="catalog-page releases-page">
+  <header class="catalog-header">
+    <h1>{{ _('Releases') }}</h1>
+    <p class="catalog-meta">{{ _('Product changelog — features shipped on Ko-Stream.') }}</p>
+  </header>
+
+  {% if releases %}
+  {% for rel in releases %}
+  <article class="catalog-section releases-entry">
+    <h2 class="releases-entry-title">{{ rel.title or ('Update - ' ~ rel.date) }}</h2>
+    {% set sections = rel.sections or {} %}
+    {% if sections.general %}
+    <h3 class="releases-section-heading">{{ _('General update') }}</h3>
+    <ul class="releases-list">
+      {% for item in sections.general %}
+      <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if sections.anime %}
+    <h3 class="releases-section-heading">{{ _('Anime update') }}</h3>
+    <ul class="releases-list">
+      {% for item in sections.anime %}
+      <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if sections.manga %}
+    <h3 class="releases-section-heading">{{ _('Manga/Manhwa update') }}</h3>
+    <ul class="releases-list">
+      {% for item in sections.manga %}
+      <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </article>
+  {% endfor %}
+  {% else %}
+  <p class="empty">{{ _('No releases published yet.') }}</p>
+  {% endif %}
+</section>
+{% endblock %}

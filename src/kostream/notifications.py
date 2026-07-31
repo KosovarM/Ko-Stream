@@ -147,6 +147,26 @@ def mark_all_read(user_id: str, *, base: Path | None = None) -> int:
     return mark_read(user_id, base=base, all=True)
 
 
+def dismiss_notification(
+    user_id: str,
+    notification_id: str,
+    *,
+    base: Path | None = None,
+) -> bool:
+    """Remove one notification by id. Returns True when something was removed."""
+    uid = (user_id or "").strip()
+    nid = (notification_id or "").strip()
+    if not uid or not nid:
+        return False
+    path = notifications_path(uid, base)
+    items = load_notifications(path)
+    kept = [n for n in items if str(n.get("id") or "") != nid]
+    if len(kept) == len(items):
+        return False
+    save_notifications(kept, path)
+    return True
+
+
 def href_for_request(kind: str | None, media_id: str | None) -> str | None:
     """Build an in-app path for a fulfilled media request."""
     mid = (media_id or "").strip()

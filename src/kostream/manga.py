@@ -64,9 +64,10 @@ class MangaChapter:
     id: str
     title: str
     page_count: int
-    kind: str  # "dir" | "cbz"
+    kind: str  # "dir" | "cbz" | "meta"
     # Relative path under manga title folder (or "." for title-root images)
     relative: str
+    available: bool = True
 
 
 def chapter_list_parts(
@@ -112,6 +113,7 @@ def chapter_payload_row(chapter: MangaChapter) -> dict:
         "number": number,
         "name": name,
         "page_count": chapter.page_count,
+        "available": bool(chapter.available),
     }
 
 
@@ -134,18 +136,20 @@ class MangaTitle:
     genres: list[str] = field(default_factory=list)
     release_year: int | None = None
     title_aliases: list[str] = field(default_factory=list)
+    added_at: str | None = None
+    latest_chapter_mtime: float | None = None
 
     @property
     def chapter_count(self) -> int:
-        return len(self.chapters)
+        return sum(1 for c in self.chapters if c.available)
 
     @property
     def page_count(self) -> int:
-        return sum(c.page_count for c in self.chapters)
+        return sum(c.page_count for c in self.chapters if c.available)
 
     @property
     def has_local(self) -> bool:
-        return bool(self.chapters)
+        return any(c.available for c in self.chapters)
 
     @property
     def is_manhwa(self) -> bool:
@@ -160,6 +164,11 @@ class MangaTitle:
         page_progress: dict | None = None,
     ) -> list[dict]:
         from kostream.manga_progress import chapter_completed
+        from kostream.mangadex import (
+            load_cached_chapter_titles,
+            load_cached_known_chapters,
+            normalize_chapter_key,
+        )
 
         pages_map: dict = {}
         if page_progress and isinstance(page_progress, dict):
@@ -168,7 +177,14 @@ class MangaTitle:
                 pages_map = entry.get("pages") or {}
 
         payload = []
+        local_keys: set[str] = set()
         for c in self.chapters:
+            if not c.available:
+                continue
+            number, _name = chapter_list_parts(c.title, relative=c.relative)
+            key = normalize_chapter_key(number) if number else None
+            if key:
+                local_keys.add(key)
             done = chapter_completed(
                 self, c.id, completed, self.num_chapters_read
             )
@@ -182,6 +198,36 @@ class MangaTitle:
                 if idx > 0:
                     row["page_index"] = idx
             payload.append(row)
+
+        # Known MangaDex chapters without local files → unclickable placeholders
+        if self.mal_id:
+            titles = load_cached_chapter_titles(self.mal_id)
+            known = load_cached_known_chapters(self.mal_id)
+            for key in known:
+                if key in local_keys:
+                    continue
+                name = (titles.get(key) or "").strip()
+                title = f"Chapter {key}" + (f": {name}" if name else "")
+                payload.append(
+                    {
+                        "id": f"meta-{key}",
+                        "title": title,
+                        "number": key,
+                        "name": name,
+                        "page_count": 0,
+                        "available": False,
+                        "done": False,
+                    }
+                )
+
+            def _sort_key(row: dict) -> tuple:
+                num = str(row.get("number") or "")
+                try:
+                    return (0, float(num), num)
+                except ValueError:
+                    return (1, 0.0, str(row.get("title") or ""))
+
+            payload.sort(key=_sort_key)
         return payload
 
 
@@ -488,13 +534,14 @@ def scan_manga_library(root: Path | None = None) -> list[MangaTitle]:
                     folder=path.name,
                     chapters=[chapter],
                     cover_chapter_id="main",
+                    latest_chapter_mtime=path.stat().st_mtime,
                 )
             )
 
     for folder in sorted(base.iterdir(), key=lambda p: _natural_key(p.name)):
         if not folder.is_dir() or folder.name.startswith("."):
             continue
-        chapters = _scan_title_folder(folder)
+        chapters, latest_mtime = _scan_title_folder(folder)
         if not chapters:
             continue
         title_id = f"dir-{_slugify(folder.name)}"
@@ -505,6 +552,7 @@ def scan_manga_library(root: Path | None = None) -> list[MangaTitle]:
                 folder=folder.name,
                 chapters=chapters,
                 cover_chapter_id=chapters[0].id,
+                latest_chapter_mtime=latest_mtime,
             )
         )
 
@@ -669,6 +717,10 @@ def load_manga_library(
                 media_type=media_type,
                 genres=genres,
                 release_year=cached.release_year if cached else None,
+                added_at=entry.added_at,
+                latest_chapter_mtime=(
+                    local_title.latest_chapter_mtime if local_title else None
+                ),
             )
         )
 
@@ -712,12 +764,22 @@ def title_matches_genre(title: MangaTitle, genre: str | None) -> bool:
     return g in (title.genres or [])
 
 
-def _scan_title_folder(folder: Path) -> list[MangaChapter]:
+def _scan_title_folder(folder: Path) -> tuple[list[MangaChapter], float | None]:
     chapters: list[MangaChapter] = []
+    latest_mtime: float | None = None
+
+    def _touch(path: Path) -> None:
+        nonlocal latest_mtime
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return
+        latest_mtime = mtime if latest_mtime is None else max(latest_mtime, mtime)
 
     # Images directly in title folder → single chapter
     root_images = _list_images_in_dir(folder)
     if root_images:
+        _touch(folder)
         chapters.append(
             MangaChapter(
                 id="root",
@@ -735,6 +797,7 @@ def _scan_title_folder(folder: Path) -> list[MangaChapter]:
         images = _list_images_in_dir(sub)
         if not images:
             continue
+        _touch(sub)
         chapters.append(
             MangaChapter(
                 id=f"dir-{_slugify(sub.name)}",
@@ -749,6 +812,7 @@ def _scan_title_folder(folder: Path) -> list[MangaChapter]:
     for path in sorted(folder.iterdir(), key=lambda p: _natural_key(p.name)):
         if not path.is_file() or path.suffix.lower() not in CBZ_EXTENSIONS:
             continue
+        _touch(path)
         chapters.append(
             MangaChapter(
                 id=f"cbz-{_slugify(path.stem)}",
@@ -761,7 +825,7 @@ def _scan_title_folder(folder: Path) -> list[MangaChapter]:
 
     # Interleave dirs + CBZs by chapter number (6 < 7 < 7.5 < 8).
     chapters.sort(key=_chapter_sort_key)
-    return chapters
+    return chapters, latest_mtime
 
 
 def find_manga_in_library(

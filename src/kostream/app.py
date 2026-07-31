@@ -128,6 +128,7 @@ from kostream.manga_progress import (
     get_chapter_page_index,
     load_manga_completed,
     load_manga_page_progress,
+    manga_complete_list_status,
     manga_reading_status,
     mark_chapter_read,
     mark_chapters_read_through,
@@ -219,6 +220,7 @@ from kostream.requests_store import (
     upsert_request,
 )
 from kostream.notifications import (
+    dismiss_notification,
     list_notifications,
     mark_all_read,
     mark_read,
@@ -274,12 +276,17 @@ from kostream.users import (
     USERS_FILE,
     UsersError,
     create_user,
+    delete_user,
     find_user_by_id,
     load_users,
     reset_password,
     set_restricted,
+    touch_last_seen,
     users_bootstrapped,
 )
+from kostream.aniskip import ensure_skip_times_for_episodes, load_skip_times
+from kostream.manga_activity import recently_updated_manga, sync_chapter_activity
+from kostream.releases import load_releases, seed_patch_release, sort_releases
 
 
 from urllib.parse import urlparse
@@ -420,6 +427,16 @@ def create_app(
     app.config["MANGA_SYNC_INDEX_PATH"] = MANGA_INDEX_FILE
     app.config["CSRF_ENABLED"] = _csrf_enabled()
 
+    try:
+        if not os.environ.get("PYTEST_CURRENT_TEST"):
+            seed_patch_release(
+                notify=True,
+                users_path=app.config["USERS_PATH"],
+                base=app.config["USER_DATA_DIR"],
+            )
+    except OSError:
+        pass
+
     def _safe_next_url(candidate: str | None) -> str:
         """Allow only same-site relative paths (login, locale, theme redirects).
 
@@ -526,6 +543,20 @@ def create_app(
             return redirect(url_for("login"))
         if current_user_id() is None:
             return redirect(url_for("login"))
+        return None
+
+    @app.before_request
+    def _touch_user_activity():
+        if request.endpoint == "static" or request.path.startswith("/static/"):
+            return None
+        uid = current_user_id()
+        if not uid:
+            return None
+        # Skip pure asset endpoints; touch on real app/API traffic.
+        try:
+            touch_last_seen(app.config["USERS_PATH"], uid)
+        except UsersError:
+            pass
         return None
 
     def _require_api_roles(*roles: str):
@@ -652,6 +683,7 @@ def create_app(
                 {
                     "user": user,
                     "mal_connected": mal_is_connected(user.id),
+                    "online": user.is_online(),
                 }
             )
         return render_template(
@@ -697,6 +729,37 @@ def create_app(
         except UsersError as exc:
             return redirect(url_for("admin_users", message=str(exc)))
         return redirect(url_for("admin_users", message="Password reset."))
+
+    @app.route("/admin/users/<user_id>/delete", methods=["POST"])
+    @role_required("master")
+    def admin_users_delete(user_id: str):
+        target = find_user_by_id(load_users(app.config["USERS_PATH"]), user_id)
+        if target is None:
+            return redirect(url_for("admin_users", message="Unknown user."))
+        if target.role == "master":
+            return redirect(
+                url_for("admin_users", message="Cannot delete the master account.")
+            )
+        try:
+            mal_disconnect(user_id)
+            delete_user(app.config["USERS_PATH"], user_id)
+        except UsersError as exc:
+            return redirect(url_for("admin_users", message=str(exc)))
+        # Best-effort clear of per-user data directory
+        try:
+            import shutil
+
+            user_dir = Path(app.config["USER_DATA_DIR"]) / user_id
+            if user_dir.is_dir():
+                shutil.rmtree(user_dir, ignore_errors=True)
+        except OSError:
+            pass
+        return redirect(
+            url_for(
+                "admin_users",
+                message=f"Deleted user {target.username}. MAL connection cleared.",
+            )
+        )
 
     @app.route("/favicon.ico")
     def favicon():
@@ -801,6 +864,16 @@ def create_app(
         # stretched from local card thumbnails / small posters.
         for show in spotlight:
             _hydrate_show_banner(show)
+        try:
+            sync_chapter_activity(
+                manga_titles,
+                users_path=app.config["USERS_PATH"],
+                user_data_base=app.config["USER_DATA_DIR"],
+                notify=True,
+            )
+        except OSError:
+            pass
+        new_chapter_releases = recently_updated_manga(manga_titles, limit=12)
         return render_template(
             "home.html",
             spotlight=spotlight,
@@ -808,6 +881,7 @@ def create_app(
             currently_airing=currently_airing[:12],
             latest=_continue_watching(shows, progress, completed, limit=12),
             new_on_kostream=recently_added(shows, limit=12),
+            new_chapter_releases=new_chapter_releases,
             currently_reading_manga=reading_manga[:12],
             currently_reading_manhwa=reading_manhwa[:12],
             family_recommendations=family_recommendations,
@@ -837,6 +911,11 @@ def create_app(
             today_key=today_key,
             manga_releasing=manga_releasing,
         )
+
+    @app.route("/releases")
+    def releases_page():
+        items = sort_releases(load_releases())
+        return render_template("releases.html", releases=items)
 
     @app.route("/manga")
     def manga_page():
@@ -1050,11 +1129,7 @@ def create_app(
         if cfg and manga.mal_id and uid and mal_is_connected(uid):
             try:
                 total = manga.num_chapters_mal or manga.chapter_count
-                status = (
-                    "completed"
-                    if total and chapters_read >= total
-                    else "reading"
-                )
+                status = manga_complete_list_status(manga, chapters_read)
                 update_chapters_read(
                     cfg, manga.mal_id, chapters_read, status=status, user_id=uid
                 )
@@ -1223,11 +1298,7 @@ def create_app(
         if cfg and manga.mal_id and uid and mal_is_connected(uid):
             try:
                 total = manga.num_chapters_mal or manga.chapter_count
-                status = (
-                    "completed"
-                    if total and chapters_read >= total
-                    else "reading"
-                )
+                status = manga_complete_list_status(manga, chapters_read)
                 update_chapters_read(
                     cfg, manga.mal_id, chapters_read, status=status, user_id=uid
                 )
@@ -1779,6 +1850,13 @@ def create_app(
                 )
         except LocalMediaError as exc:
             return {"ok": False, "error": str(exc)}, 400
+        if show.mal_id and episode.number > 0:
+            try:
+                ensure_skip_times_for_episodes(
+                    show.mal_id, [episode.number], network=True, force=True
+                )
+            except (OSError, ValueError, TypeError):
+                pass
         refreshed = _get_show(show_id) or show
         local_info = build_local_info(
             refreshed,
@@ -2173,6 +2251,24 @@ def create_app(
         )
         return {"ok": True, "marked": changed, "unread_count": unread}
 
+    @app.route("/api/notifications/dismiss", methods=["POST"])
+    def api_notifications_dismiss():
+        user = current_user()
+        if user is None:
+            return {"ok": False, "error": "Login required"}, 401
+        payload = request.get_json(silent=True) or {}
+        nid = str(payload.get("id") or "").strip()
+        if not nid:
+            return {"ok": False, "error": "Provide id"}, 400
+        removed = dismiss_notification(
+            user.id, nid, base=app.config["USER_DATA_DIR"]
+        )
+        _, unread = list_notifications(
+            user.id,
+            base=app.config["USER_DATA_DIR"],
+        )
+        return {"ok": True, "removed": removed, "unread_count": unread}
+
     @app.route("/api/requests/<path:request_id>", methods=["DELETE"])
     def api_requests_delete(request_id: str):
         denied = _require_api_roles("master", "manager")
@@ -2397,6 +2493,7 @@ def create_app(
             next_episode_completed_flag=next_done,
             show_list_completed=show.list_status == "completed",
             subtitle_tracks=subtitle_tracks,
+            aniskip=load_skip_times(show.mal_id, episode.number) if show.mal_id else None,
         )
 
     @app.route("/media/<show_id>/<path:filename>")

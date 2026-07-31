@@ -55,6 +55,10 @@
           <path class="player-fs-path" fill="currentColor" d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
         </svg>
       </button>
+      <div class="player-skip-stack" id="player-skip-stack" hidden>
+        <button type="button" class="player-skip-btn" id="player-skip-op" hidden>{{ _('Skip Opening') }}</button>
+        <button type="button" class="player-skip-btn" id="player-skip-ed" hidden>{{ _('Skip Ending') }}</button>
+      </div>
       {% endif %}
     </div>
     {% if not is_demo and (is_grab or is_external) %}
@@ -345,6 +349,14 @@
 
   async function toggleShellFullscreen() {
     if (!shell || !video) return;
+    // AirPlay / wireless target: Safari rejects element fullscreen ("unsupported streaming service").
+    const wireless =
+      !!(video.webkitCurrentPlaybackTargetIsWireless) ||
+      (video.remote && video.remote.state && video.remote.state !== 'disconnected');
+    if (wireless && !isPlayerFullscreen()) {
+      fsBtn && (fsBtn.title = 'Fullscreen unavailable while AirPlaying');
+      return;
+    }
     try {
       if (isPlayerFullscreen()) {
         if (document.exitFullscreen) await document.exitFullscreen();
@@ -364,6 +376,49 @@
     showControls();
     updateFsButton();
   }
+
+  const aniskipData = {{ (aniskip or {}) | tojson }};
+  const skipStack = document.getElementById('player-skip-stack');
+  const skipOpBtn = document.getElementById('player-skip-op');
+  const skipEdBtn = document.getElementById('player-skip-ed');
+
+  function skipSegment(kind) {
+    const seg = aniskipData && aniskipData[kind];
+    if (!seg || !video || !isFinite(seg.end)) return;
+    try {
+      video.currentTime = Math.max(0, Number(seg.end) + 0.05);
+    } catch (_) {}
+  }
+
+  function syncSkipButtons() {
+    if (!video || !skipStack) return;
+    const t = video.currentTime || 0;
+    let showOp = false;
+    let showEd = false;
+    const op = aniskipData && aniskipData.op;
+    const ed = aniskipData && aniskipData.ed;
+    if (op && t >= Number(op.start) && t < Number(op.end)) showOp = true;
+    if (ed && t >= Number(ed.start) && t < Number(ed.end)) showEd = true;
+    if (skipOpBtn) {
+      skipOpBtn.hidden = !showOp;
+    }
+    if (skipEdBtn) {
+      skipEdBtn.hidden = !showEd;
+    }
+    skipStack.hidden = !(showOp || showEd);
+  }
+
+  skipOpBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    skipSegment('op');
+  });
+  skipEdBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    skipSegment('ed');
+  });
+  video?.addEventListener('timeupdate', syncSkipButtons);
 
   function applyResume() {
     if (resumeApplied || episodeAlreadyComplete || !resumeSeconds || resumeSeconds <= 0) return;

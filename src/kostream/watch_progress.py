@@ -246,12 +246,23 @@ def filter_currently_airing(shows: list[Show]) -> list[Show]:
 
 
 def recently_added(shows: list[Show], limit: int = 12) -> list[Show]:
-    """Shows that most recently gained local episode files (by filesystem mtime)."""
-    with_local = [
-        s for s in shows if s.has_local_files and s.latest_local_mtime is not None
-    ]
-    with_local.sort(key=lambda s: s.latest_local_mtime or 0.0, reverse=True)
-    return with_local[:limit]
+    """Shows that most recently gained local episode files (or catalog add time)."""
+    from datetime import datetime
+
+    def score(show: Show) -> float:
+        best = float(show.latest_local_mtime or 0.0)
+        added = (show.added_at or "").strip()
+        if added:
+            try:
+                iso = added.replace("Z", "+00:00")
+                best = max(best, datetime.fromisoformat(iso).timestamp())
+            except ValueError:
+                pass
+        return best
+
+    ranked = [s for s in shows if score(s) > 0]
+    ranked.sort(key=score, reverse=True)
+    return ranked[:limit]
 
 
 def apply_mal_metadata(show: Show, cached, list_row: dict | None = None) -> None:

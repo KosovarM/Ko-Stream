@@ -9,7 +9,9 @@
   </div>
   <div class="card-scroll">
     {% for m in section_manga %}
-    <a href="{{ url_for(library_endpoint, tab=section_tab|default('reading'), open=m.id) }}" class="anime-card">
+    {% set card_library = 'manhwa_page' if m.is_manhwa else (library_endpoint) %}
+    {% set card_type = 'Manhwa' if m.is_manhwa else type_label %}
+    <a href="{{ url_for(card_library, tab=section_tab|default('reading'), open=m.id) }}" class="anime-card">
       <div class="card-poster">
         {% if m.poster_url %}
         <img src="{{ m.poster_url }}" alt="" class="card-poster-img" loading="lazy" referrerpolicy="no-referrer">
@@ -28,7 +30,7 @@
         {% elif m.num_chapters_mal %}
         <span class="card-ep-badge">{{ m.num_chapters_mal }} ch</span>
         {% endif %}
-        <span class="card-type">{{ type_label }}</span>
+        <span class="card-type">{{ card_type }}</span>
         <div class="card-shade"></div>
       </div>
       <h3 class="card-title">{{ m.title }}</h3>

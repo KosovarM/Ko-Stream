@@ -18,7 +18,7 @@ MangaReadingStatus = Literal["reading", "completed", "new"]
 
 
 def sorted_chapters(manga: MangaTitle) -> list[MangaChapter]:
-    return list(manga.chapters)
+    return [c for c in manga.chapters if getattr(c, "available", True)]
 
 
 def chapter_position(manga: MangaTitle, chapter_id: str) -> int:
@@ -209,16 +209,30 @@ def manga_reading_status(
     manga: MangaTitle,
     completed: dict[str, int] | None = None,
 ) -> MangaReadingStatus:
-    """Classify as reading | completed | new."""
+    """Classify as reading | completed | new.
+
+    Still-publishing titles stay ``reading`` at 100% so more chapters can arrive.
+    Explicit MAL/local ``list_status == completed`` still counts as completed.
+    """
     if manga.list_status == "completed":
         return "completed"
     read = chapters_read_count(manga, completed)
     total = total_chapters_target(manga)
     if total and read >= total:
+        if is_currently_publishing(manga):
+            return "reading"
         return "completed"
     if read >= 1 or manga.list_status in {"reading", "on_hold"}:
         return "reading"
     return "new"
+
+
+def manga_complete_list_status(manga: MangaTitle, chapters_read: int) -> str:
+    """MAL/local list status after marking chapters read through ``chapters_read``."""
+    total = total_chapters_target(manga)
+    if total and chapters_read >= total and not is_currently_publishing(manga):
+        return "completed"
+    return "reading"
 
 
 def chapter_completed(

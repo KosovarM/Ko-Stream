@@ -38,6 +38,8 @@
   --accent-hover: #be185d;
   --accent-muted: #9d174d;
   --accent-glow: rgba(219, 39, 119, 0.18);
+  --purple: #60a5fa;
+  --purple-dark: #93c5fd;
   --text: #1c1418;
   --muted: #6b5660;
   --border: #ebd0dc;
@@ -580,6 +582,41 @@ a.header-notify-item:hover {
   color: var(--muted);
 }
 
+.header-notify-item--row {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.header-notify-item-link {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1 1 auto;
+  min-width: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+.header-notify-dismiss {
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+
+.header-notify-dismiss:hover {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
 .header-notify-item-time {
   font-size: 0.7rem;
   color: var(--accent-muted);
@@ -1089,7 +1126,19 @@ a.header-notify-item:hover {
   font-weight: 700;
 }
 
+[data-theme="pink-light"] .btn-detail,
+[data-theme="red-light"] .btn-detail {
+  color: #0f172a;
+  border-color: color-mix(in srgb, var(--purple) 55%, transparent);
+}
+
 .btn-detail:hover { background: var(--purple); }
+
+[data-theme="pink-light"] .btn-detail:hover,
+[data-theme="red-light"] .btn-detail:hover {
+  background: #3b82f6;
+  color: #fff;
+}
 
 .mal-list-status {
   display: flex;
@@ -2736,6 +2785,32 @@ a.header-notify-item:hover {
   min-width: 18rem;
 }
 
+.admin-users-actions-row td {
+  border-top: 0;
+  padding-top: 0.15rem;
+  padding-bottom: 0.85rem;
+}
+
+.admin-user-presence {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  margin-right: 0.4rem;
+  background: #6b7280;
+  vertical-align: middle;
+}
+
+.admin-user-presence.is-online {
+  background: #22c55e;
+  box-shadow: 0 0 0 2px color-mix(in srgb, #22c55e 28%, transparent);
+}
+
+.admin-users-delete-btn {
+  border-color: color-mix(in srgb, var(--danger) 45%, transparent) !important;
+  color: var(--danger) !important;
+}
+
 .admin-users-actions-spacer {
   flex: 1 1 auto;
   min-width: 0.5rem;
@@ -3721,10 +3796,31 @@ body.manga-reader-open {
 
 .manga-reader-panel.chrome-hidden .manga-reader-bar,
 .manga-reader-panel.chrome-hidden .manga-reader-footer {
-  transform: translateY(0);
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 0;
   opacity: 0;
   pointer-events: none;
   visibility: hidden;
+}
+
+.manga-reader-panel.chrome-hidden .manga-reader-bar {
+  top: 0;
+}
+
+.manga-reader-panel.chrome-hidden .manga-reader-footer {
+  bottom: 0;
+}
+
+.manga-reader-panel.chrome-hidden .manga-reader-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
 }
 
 .manga-reader-bar,
@@ -4847,19 +4943,20 @@ body.login-view .site-main {
   display: none !important;
 }
 
-/* Custom fullscreen — overlays native FS slot (bottom-right of control bar). */
+/* Custom fullscreen — top-right overlay (not native bottom-right slot). */
 .player-fs-btn {
   position: absolute;
-  right: 0;
-  bottom: 0;
+  right: 0.35rem;
+  top: 0.35rem;
+  bottom: auto;
   z-index: 4;
   width: 40px;
-  height: var(--player-control-h, 40px);
+  height: 40px;
   margin: 0;
   padding: 0;
   border: 0;
-  border-radius: 0;
-  background: transparent;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.45);
   color: #fff;
   cursor: pointer;
   display: flex;
@@ -4917,8 +5014,9 @@ body.login-view .site-main {
 
 .player-wrap.has-native-chrome:fullscreen .player-fs-btn,
 .player-wrap.has-native-chrome:-webkit-full-screen .player-fs-btn {
-  right: env(safe-area-inset-right, 0);
-  bottom: env(safe-area-inset-bottom, 0);
+  right: max(0.35rem, env(safe-area-inset-right, 0));
+  top: max(0.35rem, env(safe-area-inset-top, 0));
+  bottom: auto;
 }
 
 .player-wrap.has-native-chrome:fullscreen video,
@@ -4930,10 +5028,39 @@ body.login-view .site-main {
 
 .player-wrap.has-native-chrome video::cue {
   background: rgba(7, 8, 16, 0.72);
-  color: var(--text);
+  /* Keep cue text readable in light themes — do not follow --text. */
+  color: #f5f6fa;
   font-size: 1.05em;
   line-height: 1.35;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.player-skip-stack {
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  align-items: flex-end;
+}
+
+.player-skip-btn {
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  background: rgba(0, 0, 0, 0.62);
+  color: #fff;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.45rem 0.75rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.player-skip-btn:hover {
+  background: rgba(0, 0, 0, 0.82);
 }
 
 /* Progress / synopsis / theme / skeletons */
@@ -5137,3 +5264,23 @@ body.login-view .site-main {
   }
 }
 
+
+/* Releases + unavailable manga chapters */
+.releases-entry-title { margin: 0 0 0.75rem; font-size: 1.25rem; }
+.releases-section-heading { margin: 1rem 0 0.4rem; font-size: 0.95rem; color: var(--accent); }
+.releases-list { margin: 0; padding-left: 1.2rem; color: var(--muted); }
+.releases-list li { margin: 0.25rem 0; }
+.manga-overview-chapter-btn.is-unavailable {
+  opacity: 0.72;
+  cursor: default;
+  pointer-events: none;
+}
+.manga-overview-ch-na {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: lowercase;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.1rem 0.45rem;
+}

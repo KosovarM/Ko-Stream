@@ -106,6 +106,7 @@
             <a href="{{ url_for('admin_users') }}" class="header-user-menu-link{% if request.endpoint and request.endpoint.startswith('admin_') %} is-active{% endif %}" role="menuitem">{{ _('Admin') }}</a>
             {% endif %}
             <a href="{{ url_for('catalog_page') }}" class="header-user-menu-link{% if request.endpoint == 'catalog_page' %} is-active{% endif %}" role="menuitem">{{ _('Catalog') }}</a>
+            <a href="{{ url_for('releases_page') }}" class="header-user-menu-link{% if request.endpoint == 'releases_page' %} is-active{% endif %}" role="menuitem">{{ _('Releases') }}</a>
             <form method="post" action="{{ url_for('logout') }}" class="header-logout-form">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button type="submit" class="header-user-menu-link header-user-menu-logout" role="menuitem">{{ _('Log out') }}</button>
@@ -284,17 +285,38 @@
           const body = escapeHtml(n.body || '');
           const when = escapeHtml(formatWhen(n.created_at));
           const href = n.href ? escapeHtml(n.href) : '';
-          const cls = 'header-notify-item' + (unread ? ' is-unread' : '');
-          const inner = `
+          const id = escapeHtml(n.id || '');
+          const cls = 'header-notify-item header-notify-item--row' + (unread ? ' is-unread' : '');
+          const text = `
             <span class="header-notify-item-title">${title}</span>
             <span class="header-notify-item-body">${body}</span>
             <span class="header-notify-item-time">${when}</span>
           `;
-          if (href) {
-            return `<a class="${cls}" href="${href}" data-id="${escapeHtml(n.id || '')}">${inner}</a>`;
-          }
-          return `<div class="${cls}" data-id="${escapeHtml(n.id || '')}">${inner}</div>`;
+          const main = href
+            ? `<a class="header-notify-item-link" href="${href}">${text}</a>`
+            : `<div class="header-notify-item-link">${text}</div>`;
+          return `<div class="${cls}" data-id="${id}">${main}<button type="button" class="header-notify-dismiss" data-dismiss-id="${id}" aria-label="Dismiss" title="Dismiss">×</button></div>`;
         }).join('');
+        notifyList.querySelectorAll('[data-dismiss-id]').forEach((btn) => {
+          btn.addEventListener('click', async (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const id = btn.getAttribute('data-dismiss-id');
+            if (!id) return;
+            try {
+              const resp = await fetch('/api/notifications/dismiss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id }),
+              });
+              const data = await resp.json().catch(() => ({}));
+              if (resp.ok && data.ok) {
+                updateBadge(data.unread_count || 0);
+                await loadNotifications({ markOnOpen: false });
+              }
+            } catch (_) {}
+          });
+        });
       }
 
       async function markNotifications({ all = false, ids = [] } = {}) {

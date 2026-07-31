@@ -21,7 +21,7 @@
         <span class="tag tag-icon">▶ {{ show.type_label }}</span>
         <span class="tag">{{ show.episode_count }} EP</span>
         {% if show.is_metadata_only and grab_enabled %}
-        <span class="tag tag-meta">{{ _('Test stream') }}</span>
+        <span class="tag tag-meta">{{ _('Stream only') }}</span>
         {% elif show.is_metadata_only %}
         <span class="tag tag-meta">{{ _('Metadata only') }}</span>
         {% endif %}

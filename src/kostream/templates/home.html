@@ -89,6 +89,14 @@
     {% set section_shows = new_on_kostream %}
     {% set section_ranked = false %}
     {% include "partials/section_row.html" %}
+
+    {% if new_chapter_releases %}
+    {% set section_title = _('New Chapter releases') %}
+    {% set section_manga = new_chapter_releases %}
+    {% set section_tab = 'new' %}
+    {% set section_library = 'manga' %}
+    {% include "partials/section_manga_row.html" %}
+    {% endif %}
   </div>
 </div>
 {% endblock %}

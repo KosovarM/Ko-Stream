@@ -123,6 +123,32 @@ def manga_is_locally_complete(manga: MangaTitle) -> bool:
 
 
 def manga_needs_request(manga: MangaTitle) -> bool:
+    """True when files are incomplete vs known/MAL totals.
+
+    When MangaDex known chapters are cached, hide the button once every known
+    chapter is available locally (even if MAL total is higher/unknown).
+    """
+    if manga.mal_id:
+        try:
+            from kostream.mangadex import (
+                load_cached_known_chapters,
+                normalize_chapter_key,
+            )
+            from kostream.manga import chapter_list_parts
+
+            known = load_cached_known_chapters(manga.mal_id)
+            if known:
+                local_keys: set[str] = set()
+                for ch in manga.chapters:
+                    if not getattr(ch, "available", True):
+                        continue
+                    number, _ = chapter_list_parts(ch.title, relative=ch.relative)
+                    key = normalize_chapter_key(number) if number else None
+                    if key:
+                        local_keys.add(key)
+                return any(k not in local_keys for k in known)
+        except Exception:
+            pass
     local_count, expected = manga_local_counts(manga)
     if expected <= 0:
         return not manga.has_local

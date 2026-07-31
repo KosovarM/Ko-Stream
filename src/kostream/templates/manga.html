@@ -455,10 +455,6 @@
   let pageSaveTimer = null;
   let lastSavedPageKey = '';
 
-  function chapterFullyRead() {
-    return pages.length > 0 && viewedPages.size >= pages.length;
-  }
-
   function clearPageSaveTimer() {
     if (pageSaveTimer) {
       clearTimeout(pageSaveTimer);
@@ -505,7 +501,7 @@
   }
 
   function adjacentChapters() {
-    const list = chapterMap[activeMangaId] || [];
+    const list = (chapterMap[activeMangaId] || []).filter((c) => c.available !== false);
     if (!activeChapterId || !list.length) return { prev: null, next: null };
     const idx = list.findIndex((c) => c.id === activeChapterId);
     if (idx < 0) return { prev: null, next: null };
@@ -641,6 +637,19 @@
     }
   }
 
+  function chapterFullyRead() {
+    if (!pages.length) return false;
+    // Require the last page specifically (vertical: not first-page short-viewport false positives).
+    if (!viewedPages.has(pages.length - 1)) return false;
+    if (isWebtoon() && readerStage) {
+      const el = readerStage;
+      const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 48;
+      const fits = el.scrollHeight <= el.clientHeight + 8;
+      return nearBottom || (fits && viewedPages.has(pages.length - 1) && index >= pages.length - 1);
+    }
+    return index >= pages.length - 1;
+  }
+
   function isWebtoon() {
     return !!(webtoonToggle && webtoonToggle.checked);
   }
@@ -700,8 +709,6 @@
     if (!pages.length) return;
     index = Math.max(0, Math.min(pageIndex, pages.length - 1));
     viewedPages.add(index);
-    // Mark earlier pages as viewed when scrolling down past them
-    for (let i = 0; i <= index; i++) viewedPages.add(i);
     if (progressEl) progressEl.textContent = (index + 1) + ' / ' + pages.length;
     savePageProgress();
     maybeAutoComplete();
@@ -1151,6 +1158,23 @@
       chapters.forEach((ch) => {
         const li = document.createElement('li');
         li.className = 'manga-overview-chapter-row';
+        const available = ch.available !== false;
+        if (!available) {
+          const b = document.createElement('div');
+          b.className = 'manga-overview-chapter-btn is-unavailable';
+          b.setAttribute('aria-disabled', 'true');
+          const numLabel = (ch.number || '').trim();
+          const nameLabel = (ch.name || '').trim() || (!numLabel ? (ch.title || '') : '');
+          b.innerHTML =
+            (numLabel ? '<span class="manga-overview-ch-num"></span>' : '') +
+            '<span class="manga-overview-ch-title"></span>' +
+            '<span class="manga-overview-ch-meta"><span class="manga-overview-ch-na">not available</span></span>';
+          if (numLabel) b.querySelector('.manga-overview-ch-num').textContent = numLabel;
+          b.querySelector('.manga-overview-ch-title').textContent = nameLabel;
+          li.appendChild(b);
+          overviewChapters.appendChild(li);
+          return;
+        }
         const b = document.createElement('button');
         b.type = 'button';
         b.className = 'manga-overview-chapter-btn' + (ch.done ? ' is-done' : '');
@@ -1389,13 +1413,25 @@
       if (webtoonScrollTimer) clearTimeout(webtoonScrollTimer);
       webtoonScrollTimer = setTimeout(() => {
         webtoonScrollTimer = null;
-        // Near bottom of last page → ensure final page counted for autocomplete
         const el = readerStage;
-        if (!el) return;
+        if (!el || !pages.length) return;
         const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 48;
-        if (nearBottom && pages.length) {
+        // Only treat as last-page complete after the user has scrolled (avoid first-page false complete).
+        if (nearBottom && (el.scrollTop > 8 || pages.length === 1)) {
           viewedPages.add(pages.length - 1);
           updateWebtoonProgress(pages.length - 1);
+          const adj = adjacentChapters();
+          // Past end of last page → open next chapter when still scrolling down.
+          if (adj.next && el.scrollTop + el.clientHeight >= el.scrollHeight - 8) {
+            if (!stepping && el.dataset.chapterAdvance !== '1') {
+              el.dataset.chapterAdvance = '1';
+              stepping = true;
+              openReader(activeMangaId, adj.next.id, activeMangaTitle, adj.next.title).finally(() => {
+                stepping = false;
+                if (readerStage) delete readerStage.dataset.chapterAdvance;
+              });
+            }
+          }
         }
       }, 120);
     },

@@ -1,0 +1,32 @@
+{
+  "releases": [
+    {
+      "id": "31.07.2026",
+      "date": "31.07.2026",
+      "title": "Update - 31.07.2026",
+      "sections": {
+        "general": [
+          "Admin: delete user (with MAL disconnect) and online activity indicator",
+          "Admin accounts panel layout and light-theme button polish",
+          "Notifications: dismiss individual items; product Releases page under Catalog",
+          "Releases changelog with per-update General / Anime / Manga sections"
+        ],
+        "anime": [
+          "Tag rename: Stream only (was Test stream)",
+          "Search pagination: First / Last plus nearby page buttons",
+          "Recently added reflects newly added local episodes",
+          "Player: fullscreen control top-right; light theme keeps subtitle cue colors readable",
+          "AniSkip: cache OP/ED on sync/add; Skip Opening / Skip Ending on the player"
+        ],
+        "manga": [
+          "Home: New Chapter releases row after Recently added",
+          "Notify readers when a completed title gains a new chapter",
+          "Still-publishing titles stay Reading at 100% (not auto-Completed)",
+          "Chapter list shows known-but-unavailable chapters; hide Request missing when all known are local",
+          "Vertical reader: next chapter at end; auto-complete only on last page; chrome-hidden expands stage"
+        ]
+      },
+      "updated_at": "2026-07-31T11:40:40+00:00"
+    }
+  ]
+}

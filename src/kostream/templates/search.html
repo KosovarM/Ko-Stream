@@ -116,31 +116,31 @@
   </div>
 
   {% if total_pages > 1 %}
-  {% set page_window_end = [page + 4, total_pages] | min %}
   <nav class="browse-pagination" aria-label="{{ _(browse_label) }} pages">
     {% if page > 1 %}
+    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=1, scope=scope_arg) }}">{{ _('First') }}</a>
     <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=page - 1, scope=scope_arg) }}">‹ {{ _('Previous') }}</a>
     {% else %}
+    <span class="browse-page-btn disabled">{{ _('First') }}</span>
     <span class="browse-page-btn disabled">‹ {{ _('Previous') }}</span>
     {% endif %}
 
     <div class="browse-page-nums" role="list">
-      {% for p in range(page, page_window_end + 1) %}
+      {% for p in range(1, total_pages + 1) %}
       {% if p == page %}
       <span class="browse-page-num is-active" role="listitem" aria-current="page">{{ p }}</span>
-      {% else %}
+      {% elif (p >= page - 2 and p < page) or (p > page and p <= page + 2) %}
       <a class="browse-page-num" role="listitem" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=p, scope=scope_arg) }}">{{ p }}</a>
       {% endif %}
       {% endfor %}
-      {% if page_window_end < total_pages %}
-      <span class="browse-page-ellipsis" aria-hidden="true">…</span>
-      {% endif %}
     </div>
 
     {% if page < total_pages %}
     <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=page + 1, scope=scope_arg) }}">{{ _('Next') }} ›</a>
+    <a class="browse-page-btn" href="{{ url_for(browse_endpoint, q=query, genre=selected_genre, studio=selected_studio, avail=selected_avail, page=total_pages, scope=scope_arg) }}">{{ _('Last') }}</a>
     {% else %}
     <span class="browse-page-btn disabled">{{ _('Next') }} ›</span>
+    <span class="browse-page-btn disabled">{{ _('Last') }}</span>
     {% endif %}
   </nav>
   {% endif %}

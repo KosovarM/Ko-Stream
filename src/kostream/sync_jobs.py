@@ -372,6 +372,18 @@ def start_anime_title_sync(catalog_path, *, anime_index_path=None) -> SyncJob:
             with _lock:
                 job.episode_titles = titles_updated
             try:
+                from kostream.aniskip import ensure_skip_times_for_episodes
+                from kostream.library import scan_library
+
+                for show in scan_library(catalog_path=catalog_path):
+                    if not show.mal_id:
+                        continue
+                    nums = [ep.number for ep in show.episodes if ep.number > 0]
+                    if nums:
+                        ensure_skip_times_for_episodes(show.mal_id, nums, network=True)
+            except (OSError, ValueError, TypeError):
+                pass
+            try:
                 refresh_anime_index(
                     catalog_path=catalog_path,
                     index_path=anime_index_path,

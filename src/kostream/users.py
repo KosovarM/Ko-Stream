@@ -23,6 +23,9 @@ class UsersError(Exception):
     """User account operation failed."""
 
 
+ONLINE_WINDOW_SECONDS = 15 * 60
+
+
 @dataclass
 class User:
     id: str
@@ -33,9 +36,10 @@ class User:
     created_at: str
     restricted: bool = False
     failed_login_attempts: int = 0
+    last_seen: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        payload = {
             "id": self.id,
             "username": self.username,
             "password_hash": self.password_hash,
@@ -45,6 +49,9 @@ class User:
             "restricted": self.restricted,
             "failed_login_attempts": self.failed_login_attempts,
         }
+        if self.last_seen:
+            payload["last_seen"] = self.last_seen
+        return payload
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> User:
@@ -57,7 +64,21 @@ class User:
             created_at=str(data.get("created_at") or ""),
             restricted=bool(data.get("restricted", data.get("disabled", False))),
             failed_login_attempts=int(data.get("failed_login_attempts", 0)),
+            last_seen=(str(data["last_seen"]) if data.get("last_seen") else None),
         )
+
+    def is_online(self, *, now: datetime | None = None, window_s: int = ONLINE_WINDOW_SECONDS) -> bool:
+        if not self.last_seen:
+            return False
+        try:
+            raw = self.last_seen.replace("Z", "+00:00")
+            seen = datetime.fromisoformat(raw)
+            if seen.tzinfo is None:
+                seen = seen.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return False
+        current = now or datetime.now(timezone.utc)
+        return (current - seen).total_seconds() <= window_s
 
 
 def _user_id(username: str) -> str:
@@ -201,6 +222,49 @@ def reset_password(path: Path, user_id: str, new_password: str) -> User:
     user.password_hash = hash_password(new_password)
     _replace_user(users, user)
     save_users(users, path)
+    return user
+
+
+def touch_last_seen(
+    path: Path,
+    user_id: str,
+    *,
+    min_interval_s: int = 60,
+) -> User | None:
+    """Update ``last_seen`` for activity / online indicator. Returns user or None.
+
+    Skips rewrite when last touch was within ``min_interval_s`` to limit JSON churn.
+    """
+    users = load_users(path)
+    user = find_user_by_id(users, user_id)
+    if user is None:
+        return None
+    now = datetime.now(timezone.utc)
+    if user.last_seen and min_interval_s > 0:
+        try:
+            raw = user.last_seen.replace("Z", "+00:00")
+            seen = datetime.fromisoformat(raw)
+            if seen.tzinfo is None:
+                seen = seen.replace(tzinfo=timezone.utc)
+            if (now - seen).total_seconds() < min_interval_s:
+                return user
+        except ValueError:
+            pass
+    user.last_seen = _now_iso()
+    _replace_user(users, user)
+    save_users(users, path)
+    return user
+
+
+def delete_user(path: Path, user_id: str) -> User:
+    """Remove a non-master user account from users.json."""
+    users = load_users(path)
+    user = find_user_by_id(users, user_id)
+    if user is None:
+        raise UsersError(f"Unknown user: {user_id}")
+    if user.role == "master":
+        raise UsersError("Cannot delete the master account")
+    save_users([u for u in users if u.id != user_id], path)
     return user
 
 

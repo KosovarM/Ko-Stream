@@ -175,6 +175,33 @@ def load_cached_chapter_titles(mal_id: int, *, root: Path | None = None) -> dict
     return out
 
 
+def load_cached_known_chapters(mal_id: int, *, root: Path | None = None) -> list[str]:
+    """Return sorted known chapter keys from MangaDex cache (may be empty)."""
+    base = root or CHAPTERS_DIR
+    path = base / f"{int(mal_id)}.json"
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, ValueError):
+        return []
+    known_raw = data.get("known_chapters") or []
+    keys: list[str] = []
+    if isinstance(known_raw, list):
+        for item in known_raw:
+            key = normalize_chapter_key(item)
+            if key:
+                keys.append(key)
+    # Titles keys are also known chapters
+    titles = data.get("titles") or {}
+    if isinstance(titles, dict):
+        for k in titles.keys():
+            key = normalize_chapter_key(k)
+            if key and key not in keys:
+                keys.append(key)
+    return _sorted_chapter_keys(keys)
+
+
 def chapter_titles_need_fetch(
     mal_id: int,
     *,
