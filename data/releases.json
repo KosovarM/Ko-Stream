@@ -9,24 +9,27 @@
           "Admin: delete user (with MAL disconnect) and online activity indicator",
           "Admin accounts panel layout and light-theme button polish",
           "Notifications: dismiss individual items; product Releases page under Catalog",
-          "Releases changelog with per-update General / Anime / Manga sections"
+          "Releases changelog with per-update General / Anime / Manga / Bugfixes sections"
         ],
         "anime": [
           "Tag rename: Stream only (was Test stream)",
           "Search pagination: First / Last plus nearby page buttons",
           "Recently added reflects newly added local episodes",
-          "Player: fullscreen control top-right; light theme keeps subtitle cue colors readable",
-          "AniSkip: cache OP/ED on sync/add; Skip Opening / Skip Ending on the player"
+          "AniSkip: separate Sync AniSkip OP/ED control; Skip Opening / Skip Ending on the player"
         ],
         "manga": [
           "Home: New Chapter releases row after Recently added",
           "Notify readers when a completed title gains a new chapter",
+          "Chapter list shows known-but-unavailable chapters; hide Request missing when all known are local"
+        ],
+        "bugfixes": [
+          "Player: fullscreen control top-right; light theme keeps subtitle cue colors readable",
           "Still-publishing titles stay Reading at 100% (not auto-Completed)",
-          "Chapter list shows known-but-unavailable chapters; hide Request missing when all known are local",
-          "Vertical reader: next chapter at end; auto-complete only on last page; chrome-hidden expands stage"
+          "Vertical reader: next chapter at end; auto-complete only on last page; chrome-hidden expands stage",
+          "MAL episode-title HTML scrape uses /episodes (fixes 404 fallback for some mal_ids)"
         ]
       },
-      "updated_at": "2026-07-31T11:40:40+00:00"
+      "updated_at": "2026-07-31T12:50:00+00:00"
     }
   ]
 }

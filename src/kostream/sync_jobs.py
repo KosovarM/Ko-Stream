@@ -1,10 +1,11 @@
 """Background MAL / MangaDex sync jobs so the UI is not blocked.
 
-Four job kinds share one global lock (only one sync at a time):
+Five job kinds share one global lock (only one sync at a time):
 
 - ``animes`` — animelist, anime progress reconcile, anime request clear, enrich
 - ``mangas`` — mangalist + manga request clear
 - ``anime_titles`` — episode titles only (Jikan/MAL cache)
+- ``aniskip`` — AniSkip OP/ED skip times only
 - ``chapter_titles`` — MangaDex chapter titles only
 """
 
@@ -36,7 +37,7 @@ from kostream.sync_index import (
     skipped_mal_ids,
 )
 
-JobKind = Literal["animes", "mangas", "anime_titles", "chapter_titles"]
+JobKind = Literal["animes", "mangas", "anime_titles", "aniskip", "chapter_titles"]
 
 _lock = threading.Lock()
 _job: SyncJob | None = None
@@ -45,12 +46,13 @@ _job: SyncJob | None = None
 @dataclass
 class SyncJob:
     status: str = "idle"  # idle | running | done | error
-    kind: str = ""  # animes | mangas | anime_titles | chapter_titles | ""
-    phase: str = ""  # list | progress | enrich | manga | episode_titles | chapter_titles | done
+    kind: str = ""  # animes | mangas | anime_titles | aniskip | chapter_titles | ""
+    phase: str = ""  # list | progress | enrich | manga | episode_titles | aniskip | chapter_titles | done
     synced: int = 0
     manga_synced: int = 0
     enriched: int = 0
     episode_titles: int = 0
+    aniskip: int = 0
     chapter_titles: int = 0
     message: str = ""
     error: str | None = None
@@ -66,6 +68,7 @@ class SyncJob:
             "manga_synced": self.manga_synced,
             "enriched": self.enriched,
             "episode_titles": self.episode_titles,
+            "aniskip": self.aniskip,
             "chapter_titles": self.chapter_titles,
             "message": self.message,
             "error": self.error,
@@ -372,18 +375,6 @@ def start_anime_title_sync(catalog_path, *, anime_index_path=None) -> SyncJob:
             with _lock:
                 job.episode_titles = titles_updated
             try:
-                from kostream.aniskip import ensure_skip_times_for_episodes
-                from kostream.library import scan_library
-
-                for show in scan_library(catalog_path=catalog_path):
-                    if not show.mal_id:
-                        continue
-                    nums = [ep.number for ep in show.episodes if ep.number > 0]
-                    if nums:
-                        ensure_skip_times_for_episodes(show.mal_id, nums, network=True)
-            except (OSError, ValueError, TypeError):
-                pass
-            try:
                 refresh_anime_index(
                     catalog_path=catalog_path,
                     index_path=anime_index_path,
@@ -422,6 +413,50 @@ def start_anime_title_sync(catalog_path, *, anime_index_path=None) -> SyncJob:
             _finish_error(job, f"Anime title sync failed: {exc}", exc)
 
     threading.Thread(target=runner, daemon=True, name="mal-sync-anime-titles").start()
+    return job
+
+
+def start_aniskip_sync(catalog_path) -> SyncJob:
+    """Fetch AniSkip OP/ED skip times for catalog episodes (no title sync)."""
+    job = _begin_job("aniskip", "aniskip", "Fetching AniSkip OP/ED…")
+    if job is None:
+        return get_sync_job()
+
+    def runner() -> None:
+        nonlocal job
+        try:
+            from kostream.aniskip import ensure_skip_times_for_episodes
+            from kostream.library import scan_library
+
+            fetched = 0
+            shows_touched = 0
+            for show in scan_library(catalog_path=catalog_path):
+                if not show.mal_id:
+                    continue
+                nums = [ep.number for ep in show.episodes if ep.number > 0]
+                if not nums:
+                    continue
+                n = ensure_skip_times_for_episodes(show.mal_id, nums, network=True)
+                if n:
+                    fetched += n
+                    shows_touched += 1
+                with _lock:
+                    job.aniskip = fetched
+                    job.message = (
+                        f"AniSkip: {fetched} episode fetch(es)"
+                        f" across {shows_touched} title(s)…"
+                    )
+            with _lock:
+                job.aniskip = fetched
+            _finish_ok(
+                job,
+                f"AniSkip synced: {fetched} episode fetch(es)"
+                f" across {shows_touched} title(s).",
+            )
+        except (TimeoutError, OSError, ValueError, TypeError) as exc:
+            _finish_error(job, f"AniSkip sync failed: {exc}", exc)
+
+    threading.Thread(target=runner, daemon=True, name="mal-sync-aniskip").start()
     return job
 
 

@@ -5040,11 +5040,17 @@ body.login-view .site-main {
   right: 0.5rem;
   top: 50%;
   transform: translateY(-50%);
-  z-index: 5;
+  z-index: 6;
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
   align-items: flex-end;
+  pointer-events: auto;
+}
+
+.player-wrap.has-native-chrome.is-idle .player-skip-stack:not([hidden]) {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .player-skip-btn {
@@ -5057,6 +5063,7 @@ body.login-view .site-main {
   padding: 0.45rem 0.75rem;
   border-radius: 8px;
   cursor: pointer;
+  pointer-events: auto;
 }
 
 .player-skip-btn:hover {

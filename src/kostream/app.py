@@ -190,6 +190,7 @@ from kostream.sync_jobs import (
     get_sync_job,
     start_anime_sync,
     start_anime_title_sync,
+    start_aniskip_sync,
     start_chapter_title_sync,
     start_manga_sync,
 )
@@ -284,7 +285,7 @@ from kostream.users import (
     touch_last_seen,
     users_bootstrapped,
 )
-from kostream.aniskip import ensure_skip_times_for_episodes, load_skip_times
+from kostream.aniskip import ensure_skip_times_for_episodes, fetch_skip_times, load_skip_times
 from kostream.manga_activity import recently_updated_manga, sync_chapter_activity
 from kostream.releases import load_releases, seed_patch_release, sort_releases
 
@@ -292,6 +293,19 @@ from kostream.releases import load_releases, seed_patch_release, sort_releases
 from urllib.parse import urlparse
 
 _SECRET_FILE = Path(__file__).resolve().parents[2] / "data" / ".flask_secret"
+
+
+def _watch_aniskip(mal_id: int | None, episode_number: int) -> dict | None:
+    """Load cached OP/ED; one network fetch only when this episode was never cached."""
+    if not mal_id or episode_number <= 0:
+        return None
+    cached = load_skip_times(int(mal_id), int(episode_number))
+    if cached is not None:
+        return cached
+    try:
+        return fetch_skip_times(int(mal_id), int(episode_number), network=True) or None
+    except (OSError, ValueError, TypeError):
+        return None
 
 
 def _csrf_enabled() -> bool:
@@ -1510,6 +1524,15 @@ def create_app(
         )
         return {"ok": True, "started": True, **job.to_dict()}
 
+    @app.route("/api/mal/sync/aniskip", methods=["POST"])
+    def api_mal_sync_aniskip():
+        """Sync AniSkip OP/ED skip times only (no episode-title sync)."""
+        uid = _current_mal_user_id()
+        if not uid:
+            return {"ok": False, "error": "Login required"}, 401
+        job = start_aniskip_sync(app.config["CATALOG_PATH"])
+        return {"ok": True, "started": True, **job.to_dict()}
+
     @app.route("/api/mal/sync/chapter-titles", methods=["POST"])
     def api_mal_sync_chapter_titles():
         """Sync MangaDex chapter titles only (metadata, no images)."""
@@ -2493,7 +2516,7 @@ def create_app(
             next_episode_completed_flag=next_done,
             show_list_completed=show.list_status == "completed",
             subtitle_tracks=subtitle_tracks,
-            aniskip=load_skip_times(show.mal_id, episode.number) if show.mal_id else None,
+            aniskip=_watch_aniskip(show.mal_id, episode.number),
         )
 
     @app.route("/media/<show_id>/<path:filename>")

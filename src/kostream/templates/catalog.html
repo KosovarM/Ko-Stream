@@ -139,6 +139,7 @@
         <button type="button" class="btn-watch btn-sync" id="mal-sync-animes" title="Update animelist, watch progress, and anime metadata (not episode titles)">{{ _('Sync animes') }}</button>
         <button type="button" class="btn-watch btn-sync" id="mal-sync-mangas" title="Update mangalist and clear fulfilled manga requests (not chapter titles)">{{ _('Sync mangas') }}</button>
         <button type="button" class="btn-watch btn-sync" id="mal-sync-anime-titles" title="Fetch anime episode titles for available media">Sync anime titles</button>
+        <button type="button" class="btn-watch btn-sync" id="mal-sync-aniskip" title="Fetch AniSkip OP/ED skip times (separate from episode titles)">Sync AniSkip OP/ED</button>
         <button type="button" class="btn-watch btn-sync" id="mal-sync-chapter-titles" title="Fetch MangaDex chapter titles for available manga">Sync chapter titles</button>
       </div>
       <div class="mal-actions-row mal-actions-secondary">
@@ -429,10 +430,11 @@ anilistForm.addEventListener('submit', async (event) => {
   const malSyncAnimes = document.getElementById('mal-sync-animes');
   const malSyncMangas = document.getElementById('mal-sync-mangas');
   const malSyncAnimeTitles = document.getElementById('mal-sync-anime-titles');
+  const malSyncAniskip = document.getElementById('mal-sync-aniskip');
   const malSyncChapterTitles = document.getElementById('mal-sync-chapter-titles');
   const malSyncStatus = document.getElementById('mal-sync-status');
   const syncButtons = [
-    malSyncAnimes, malSyncMangas, malSyncAnimeTitles, malSyncChapterTitles,
+    malSyncAnimes, malSyncMangas, malSyncAnimeTitles, malSyncAniskip, malSyncChapterTitles,
   ].filter(Boolean);
 
   if (syncButtons.length) {
@@ -440,6 +442,7 @@ anilistForm.addEventListener('submit', async (event) => {
       animes: 'Sync animes',
       mangas: 'Sync mangas',
       anime_titles: 'Sync anime titles',
+      aniskip: 'Sync AniSkip OP/ED',
       chapter_titles: 'Sync chapter titles',
     };
     const BUSY = {
@@ -451,6 +454,7 @@ anilistForm.addEventListener('submit', async (event) => {
       },
       mangas: { default: 'Syncing mangas…' },
       anime_titles: { default: 'Syncing anime titles…' },
+      aniskip: { default: 'Syncing AniSkip OP/ED…' },
       chapter_titles: { default: 'Syncing chapter titles…' },
     };
 
@@ -490,6 +494,10 @@ anilistForm.addEventListener('submit', async (event) => {
         malSyncAnimeTitles.disabled = false;
         malSyncAnimeTitles.textContent = LABELS.anime_titles;
       }
+      if (malSyncAniskip) {
+        malSyncAniskip.disabled = false;
+        malSyncAniskip.textContent = LABELS.aniskip;
+      }
       if (malSyncChapterTitles) {
         malSyncChapterTitles.disabled = false;
         malSyncChapterTitles.textContent = LABELS.chapter_titles;
@@ -500,6 +508,7 @@ anilistForm.addEventListener('submit', async (event) => {
       if (kind === 'animes') return malSyncAnimes;
       if (kind === 'mangas') return malSyncMangas;
       if (kind === 'anime_titles') return malSyncAnimeTitles;
+      if (kind === 'aniskip') return malSyncAniskip;
       if (kind === 'chapter_titles') return malSyncChapterTitles;
       return null;
     };
@@ -511,6 +520,7 @@ anilistForm.addEventListener('submit', async (event) => {
       if (malSyncAnimes) malSyncAnimes.textContent = LABELS.animes;
       if (malSyncMangas) malSyncMangas.textContent = LABELS.mangas;
       if (malSyncAnimeTitles) malSyncAnimeTitles.textContent = LABELS.anime_titles;
+      if (malSyncAniskip) malSyncAniskip.textContent = LABELS.aniskip;
       if (malSyncChapterTitles) malSyncChapterTitles.textContent = LABELS.chapter_titles;
       const active = activeButtonForKind(kind);
       const labels = BUSY[kind] || {};
@@ -569,6 +579,9 @@ anilistForm.addEventListener('submit', async (event) => {
     });
     malSyncAnimeTitles?.addEventListener('click', () => {
       startSync('{{ url_for("api_mal_sync_anime_titles") }}', 'anime_titles', 'Starting anime titles…');
+    });
+    malSyncAniskip?.addEventListener('click', () => {
+      startSync('{{ url_for("api_mal_sync_aniskip") }}', 'aniskip', 'Starting AniSkip…');
     });
     malSyncChapterTitles?.addEventListener('click', () => {
       startSync('{{ url_for("api_mal_sync_chapter_titles") }}', 'chapter_titles', 'Starting chapter titles…');

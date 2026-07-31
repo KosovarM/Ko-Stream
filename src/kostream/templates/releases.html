@@ -36,6 +36,14 @@
       {% endfor %}
     </ul>
     {% endif %}
+    {% if sections.bugfixes %}
+    <h3 class="releases-section-heading">{{ _('Bugfixes') }}</h3>
+    <ul class="releases-list">
+      {% for item in sections.bugfixes %}
+      <li>{{ item }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
   </article>
   {% endfor %}
   {% else %}

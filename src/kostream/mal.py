@@ -41,11 +41,16 @@ ANIME_LIST_STATUSES = frozenset(
 )
 USER_AGENT = "Ko-Stream/0.2 (+https://github.com/KosovarM/Ko-Stream; local MAL sync)"
 JIKAN_EPISODES_URL = "https://api.jikan.moe/v4/anime/{mal_id}/episodes"
-# Dummy slug works; MAL serves the canonical episode list page.
-MAL_EPISODES_PAGE_URL = "https://myanimelist.net/anime/{mal_id}/_/episode"
+# Canonical list page is /episodes (plural). Old /_/episode and /_/episodes 404.
+MAL_EPISODES_PAGE_URL = "https://myanimelist.net/anime/{mal_id}/episodes"
 MAL_EPISODE_TITLE_RE = re.compile(
     r'<td[^>]*class="[^"]*episode-title[^"]*"[^>]*>\s*'
     r'<a[^>]+href="[^"]*/episode/(\d+)"[^>]*>\s*([^<]+?)\s*</a>',
+    re.IGNORECASE,
+)
+# Fallback when MAL markup drops the episode-title td class.
+MAL_EPISODE_TITLE_RE_ALT = re.compile(
+    r'<a[^>]+href="[^"]*/anime/\d+/episode/(\d+)[^"]*"[^>]*>\s*([^<]+?)\s*</a>',
     re.IGNORECASE,
 )
 
@@ -1325,9 +1330,12 @@ def fetch_episode_titles_from_mal_site(mal_id: int) -> tuple[dict[int, str], boo
         with urlopen(req, timeout=30) as resp:
             page_html = resp.read().decode("utf-8", errors="replace")
         page_hits = 0
-        for num_s, raw_title in MAL_EPISODE_TITLE_RE.findall(page_html):
+        pairs = MAL_EPISODE_TITLE_RE.findall(page_html)
+        if not pairs:
+            pairs = MAL_EPISODE_TITLE_RE_ALT.findall(page_html)
+        for num_s, raw_title in pairs:
             title = html_lib.unescape(raw_title).strip()
-            if not title:
+            if not title or title.casefold() in {"watch", "edit", "add"}:
                 continue
             titles[int(num_s)] = title
             page_hits += 1

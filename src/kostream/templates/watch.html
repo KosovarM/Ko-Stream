@@ -419,6 +419,10 @@
     skipSegment('ed');
   });
   video?.addEventListener('timeupdate', syncSkipButtons);
+  video?.addEventListener('seeked', syncSkipButtons);
+  video?.addEventListener('play', syncSkipButtons);
+  video?.addEventListener('loadedmetadata', syncSkipButtons);
+  syncSkipButtons();
 
   function applyResume() {
     if (resumeApplied || episodeAlreadyComplete || !resumeSeconds || resumeSeconds <= 0) return;

@@ -6,6 +6,7 @@ from pathlib import Path
 
 from kostream.aniskip import _parse_results, _store_episode, load_skip_times
 from kostream.app import create_app
+from kostream.mal import MAL_EPISODES_PAGE_URL
 from kostream.manga import MangaChapter, MangaTitle
 from kostream.manga_progress import is_currently_publishing, manga_complete_list_status, manga_reading_status
 from kostream.notifications import add_notification, dismiss_notification, load_notifications, notifications_path
@@ -31,6 +32,12 @@ def _app(tmp_path: Path):
         user_data_base=user_data,
     )
     return app, users, user_data
+
+
+def test_mal_episodes_scrape_url_uses_plural():
+    assert "/episodes" in MAL_EPISODES_PAGE_URL
+    assert "/_/" not in MAL_EPISODES_PAGE_URL
+    assert MAL_EPISODES_PAGE_URL.format(mal_id=25805).endswith("/anime/25805/episodes")
 
 
 def test_delete_user_master_only(tmp_path: Path):
@@ -114,6 +121,9 @@ def test_releases_seed_and_page(tmp_path: Path):
     items = sort_releases(load_releases(path))
     assert items
     assert items[0]["date"] == PATCH_2026_07_31["date"]
+    sections = items[0]["sections"]
+    assert "bugfixes" in sections
+    assert sections["bugfixes"]
     notes = load_notifications(notifications_path("u_testuser", base))
     assert any(n.get("title") == "New update released" for n in notes)
 
@@ -125,6 +135,18 @@ def test_releases_seed_and_page(tmp_path: Path):
     resp = client.get("/releases")
     assert resp.status_code == 200
     assert b"Update -" in resp.data or b"Releases" in resp.data
+    assert b"Bugfixes" in resp.data
+
+
+def test_aniskip_sync_endpoint(tmp_path: Path):
+    app, _, _ = _app(tmp_path)
+    client = app.test_client()
+    login_client(client)
+    resp = client.post("/api/mal/sync/aniskip")
+    assert resp.status_code == 200
+    data = resp.get_json()
+    assert data["ok"] is True
+    assert data.get("kind") in ("aniskip", "") or data.get("started") is True
 
 
 def test_stream_only_tag(tmp_path: Path):
