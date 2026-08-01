@@ -25,6 +25,7 @@ def _cfg() -> MalConfig:
 
 def _reset_job(monkeypatch):
     monkeypatch.setattr(sync_jobs, "_job", None)
+    monkeypatch.setattr(sync_jobs, "_queue", [])
 
 
 def _wait_done(timeout: float = 2.0):

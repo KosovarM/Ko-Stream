@@ -14,13 +14,14 @@ SYNC_INDEX_DIR = Path(__file__).resolve().parents[2] / "data" / "sync_index"
 ANIME_INDEX_FILE = SYNC_INDEX_DIR / "animes.json"
 MANGA_INDEX_FILE = SYNC_INDEX_DIR / "mangas.json"
 
-AnimeSection = Literal["anime_sync", "episode_titles"]
+AnimeSection = Literal["anime_sync", "episode_titles", "aniskip"]
 MangaSection = Literal["manga_sync", "chapter_titles"]
 IndexSection = AnimeSection | MangaSection
 
 _SKIP_FIELD = {
     "anime_sync": "skip_anime_sync",
     "episode_titles": "skip_episode_titles",
+    "aniskip": "skip_aniskip",
     "manga_sync": "skip_manga_sync",
     "chapter_titles": "skip_chapter_titles",
 }
@@ -28,6 +29,7 @@ _SKIP_FIELD = {
 _HINT_FIELD = {
     "anime_sync": "anime_sync_hint",
     "episode_titles": "episode_titles_hint",
+    "aniskip": "aniskip_hint",
     "manga_sync": "manga_sync_hint",
     "chapter_titles": "chapter_titles_hint",
 }
@@ -84,7 +86,7 @@ def save_manga_index(entries: dict[str, dict[str, Any]], path: Path | None = Non
 
 def should_skip(mal_id: int, section: IndexSection, *, index_path: Path | None = None) -> bool:
     """True when the index marks this mal_id as checked (skip sync). Missing file → False."""
-    if section in ("anime_sync", "episode_titles"):
+    if section in ("anime_sync", "episode_titles", "aniskip"):
         entries = load_anime_index(index_path)
     else:
         entries = load_manga_index(index_path)
@@ -93,7 +95,7 @@ def should_skip(mal_id: int, section: IndexSection, *, index_path: Path | None =
 
 
 def skipped_mal_ids(section: IndexSection, *, index_path: Path | None = None) -> set[int]:
-    if section in ("anime_sync", "episode_titles"):
+    if section in ("anime_sync", "episode_titles", "aniskip"):
         entries = load_anime_index(index_path)
     else:
         entries = load_manga_index(index_path)
@@ -126,7 +128,7 @@ def set_skip_bulk(
     index_path: Path | None = None,
 ) -> int:
     """Update skip flags for many mal_ids in one read/write. Returns count updated."""
-    if section in ("anime_sync", "episode_titles"):
+    if section in ("anime_sync", "episode_titles", "aniskip"):
         entries = load_anime_index(index_path)
         save = save_anime_index
     else:
@@ -173,6 +175,19 @@ def episode_titles_status(mal_id: int) -> tuple[bool, str]:
         return False, "No cache"
     if episode_titles_need_fetch(mal_id):
         return False, "Titles missing"
+    return True, "Complete"
+
+
+def aniskip_status(show: Show, mal_id: int) -> tuple[bool, str]:
+    """Complete when every local episode number has an AniSkip cache row (may be empty)."""
+    from kostream.aniskip import load_skip_times
+
+    nums = [ep.number for ep in show.episodes if ep.number > 0]
+    if not nums:
+        return False, "No episodes"
+    have = sum(1 for n in nums if load_skip_times(mal_id, n) is not None)
+    if have < len(nums):
+        return False, f"Missing skip cache ({have}/{len(nums)})"
     return True, "Complete"
 
 
@@ -242,6 +257,13 @@ def refresh_anime_index(
             et_complete, et_hint = False, "No local media"
         rec["skip_episode_titles"] = et_complete
         rec[_HINT_FIELD["episode_titles"]] = et_hint
+
+        if show and show.has_local_files:
+            as_complete, as_hint = aniskip_status(show, mid)
+        else:
+            as_complete, as_hint = False, "No local media"
+        rec["skip_aniskip"] = as_complete
+        rec[_HINT_FIELD["aniskip"]] = as_hint
 
         rec["updated_at"] = _now_iso()
         updated += 1
@@ -315,7 +337,7 @@ def list_index_entries(
     skip_field = _SKIP_FIELD[section]
     rows: list[dict[str, Any]] = []
 
-    if section in ("anime_sync", "episode_titles"):
+    if section in ("anime_sync", "episode_titles", "aniskip"):
         from kostream.catalog import load_catalog
         from kostream.library import MEDIA_ROOT, scan_library
 
@@ -335,6 +357,11 @@ def list_index_entries(
             if section == "anime_sync":
                 if show:
                     _, hint = anime_sync_status(show, mid)
+                else:
+                    hint = "No local media"
+            elif section == "aniskip":
+                if show and show.has_local_files:
+                    _, hint = aniskip_status(show, mid)
                 else:
                     hint = "No local media"
             elif show and show.has_local_files:

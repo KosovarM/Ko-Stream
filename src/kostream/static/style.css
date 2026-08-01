@@ -5038,19 +5038,22 @@ body.login-view .site-main {
 .player-skip-stack {
   position: absolute;
   right: 0.5rem;
-  top: 50%;
-  transform: translateY(-50%);
+  bottom: 25%;
+  top: auto;
+  transform: none;
   z-index: 6;
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
   align-items: flex-end;
   pointer-events: auto;
+  opacity: 1;
+  transition: opacity 0.2s ease;
 }
 
 .player-wrap.has-native-chrome.is-idle .player-skip-stack:not([hidden]) {
-  opacity: 1;
-  pointer-events: auto;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .player-skip-btn {

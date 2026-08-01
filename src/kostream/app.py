@@ -187,6 +187,7 @@ from kostream.watch_progress import (
     unmark_episode_watched,
 )
 from kostream.sync_jobs import (
+    enqueue_sync,
     get_sync_job,
     start_anime_sync,
     start_anime_title_sync,
@@ -202,6 +203,7 @@ from kostream.sync_index import (
     set_skip_bulk,
 )
 from kostream.schedule import WEEKDAY_KEYS, build_weekly_schedule
+from kostream.weekly_sync import start_weekly_sync_scheduler
 from kostream.streaming import stream_file_with_range
 from kostream.requests_store import (
     KIND_LABELS as REQUEST_KIND_LABELS,
@@ -813,6 +815,7 @@ def create_app(
             "is_master": user_has_role("master"),
             "can_manage_requests": user_has_role("master", "manager"),
             "can_import_media": user_has_role("master", "manager"),
+            "can_run_sync": user_has_role("master", "manager"),
             "users_bootstrapped": users_bootstrapped(app.config["USERS_PATH"]),
             "jellyfin_connected": jellyfin is not None,
             "mal_connected": bool(uid and mal_is_connected(uid)),
@@ -1416,25 +1419,29 @@ def create_app(
             return redirect(url_for("catalog_page", mal_error="Missing OAuth code."))
         try:
             complete_oauth(cfg, code, state, uid)
-            count = sync_animelist_to_catalog(
-                cfg, app.config["CATALOG_PATH"], user_id=uid
-            )
-            manga_count = sync_mangalist_to_catalog(
-                cfg,
-                user_id=uid,
-                manga_catalog_path=app.config["MANGA_CATALOG_PATH"],
-                manga_media_root=app.config["MANGA_ROOT"],
-            )
         except MalError as exc:
             return redirect(url_for("catalog_page", mal_error=str(exc)))
-        return redirect(
-            url_for(
-                "catalog_page",
-                mal_message=(
-                    f"Connected — synced {count} anime · {manga_count} manga to catalog."
-                ),
+        paths = _paths_for_user()
+
+        def _start_anime():
+            return start_anime_sync(
+                cfg,
+                app.config["CATALOG_PATH"],
+                user_id=uid,
+                media_root=app.config["MEDIA_ROOT"],
+                requests_path=app.config["REQUESTS_PATH"],
+                anime_index_path=app.config["ANIME_SYNC_INDEX_PATH"],
+                completed_path=paths["completed"] if paths else None,
             )
+
+        job, queued = enqueue_sync(_start_anime)
+        msg = (
+            "Connected — Sync animes queued (another sync is running)."
+            if queued
+            else "Connected — Sync animes started."
         )
+        return redirect(url_for("catalog_page", mal_message=msg))
+
     @app.route("/auth/mal/complete", methods=["POST"])
     def mal_complete_manual():
         uid = _current_mal_user_id()
@@ -1448,28 +1455,35 @@ def create_app(
             return redirect(url_for("catalog_page", mal_error="Paste the authorization code or callback URL."))
         try:
             complete_oauth_with_code(cfg, raw_code, uid)
-            count = sync_animelist_to_catalog(
-                cfg, app.config["CATALOG_PATH"], user_id=uid
-            )
-            manga_count = sync_mangalist_to_catalog(
-                cfg,
-                user_id=uid,
-                manga_catalog_path=app.config["MANGA_CATALOG_PATH"],
-                manga_media_root=app.config["MANGA_ROOT"],
-            )
         except MalError as exc:
             return redirect(url_for("catalog_page", mal_error=str(exc)))
-        return redirect(
-            url_for(
-                "catalog_page",
-                mal_message=(
-                    f"Connected — synced {count} anime · {manga_count} manga to catalog."
-                ),
+        paths = _paths_for_user()
+
+        def _start_anime():
+            return start_anime_sync(
+                cfg,
+                app.config["CATALOG_PATH"],
+                user_id=uid,
+                media_root=app.config["MEDIA_ROOT"],
+                requests_path=app.config["REQUESTS_PATH"],
+                anime_index_path=app.config["ANIME_SYNC_INDEX_PATH"],
+                completed_path=paths["completed"] if paths else None,
             )
+
+        job, queued = enqueue_sync(_start_anime)
+        msg = (
+            "Connected — Sync animes queued (another sync is running)."
+            if queued
+            else "Connected — Sync animes started."
         )
+        return redirect(url_for("catalog_page", mal_message=msg))
+
     @app.route("/api/mal/sync/animes", methods=["POST"])
     def api_mal_sync_animes():
         """Sync animelist + progress + anime request clear + enrich (not titles)."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         uid = _current_mal_user_id()
         if not uid:
             return {"ok": False, "error": "Login required"}, 401
@@ -1493,6 +1507,9 @@ def create_app(
     @app.route("/api/mal/sync/mangas", methods=["POST"])
     def api_mal_sync_mangas():
         """Sync mangalist + manga request clear (not chapter titles)."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         uid = _current_mal_user_id()
         if not uid:
             return {"ok": False, "error": "Login required"}, 401
@@ -1514,6 +1531,9 @@ def create_app(
     @app.route("/api/mal/sync/anime-titles", methods=["POST"])
     def api_mal_sync_anime_titles():
         """Sync anime episode titles only (Jikan/MAL HTML — no OAuth required)."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         uid = _current_mal_user_id()
         if not uid:
             return {"ok": False, "error": "Login required"}, 401
@@ -1527,15 +1547,25 @@ def create_app(
     @app.route("/api/mal/sync/aniskip", methods=["POST"])
     def api_mal_sync_aniskip():
         """Sync AniSkip OP/ED skip times only (no episode-title sync)."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         uid = _current_mal_user_id()
         if not uid:
             return {"ok": False, "error": "Login required"}, 401
-        job = start_aniskip_sync(app.config["CATALOG_PATH"])
+        job = start_aniskip_sync(
+            app.config["CATALOG_PATH"],
+            media_root=app.config["MEDIA_ROOT"],
+            anime_index_path=app.config["ANIME_SYNC_INDEX_PATH"],
+        )
         return {"ok": True, "started": True, **job.to_dict()}
 
     @app.route("/api/mal/sync/chapter-titles", methods=["POST"])
     def api_mal_sync_chapter_titles():
         """Sync MangaDex chapter titles only (metadata, no images)."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         uid = _current_mal_user_id()
         if not uid:
             return {"ok": False, "error": "Login required"}, 401
@@ -1557,8 +1587,17 @@ def create_app(
 
     @app.route("/api/sync-index")
     def api_sync_index_list():
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         section = (request.args.get("section") or "anime_sync").strip()
-        valid = {"anime_sync", "episode_titles", "manga_sync", "chapter_titles"}
+        valid = {
+            "anime_sync",
+            "episode_titles",
+            "aniskip",
+            "manga_sync",
+            "chapter_titles",
+        }
         if section not in valid:
             return {"ok": False, "error": f"Invalid section (use one of {sorted(valid)})"}, 400
         entries = list_index_entries(
@@ -1574,9 +1613,18 @@ def create_app(
 
     @app.route("/api/sync-index", methods=["POST"])
     def api_sync_index_update():
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
         payload = request.get_json(silent=True) or {}
         section = (payload.get("section") or "").strip()
-        valid = {"anime_sync", "episode_titles", "manga_sync", "chapter_titles"}
+        valid = {
+            "anime_sync",
+            "episode_titles",
+            "aniskip",
+            "manga_sync",
+            "chapter_titles",
+        }
         if section not in valid:
             return {"ok": False, "error": f"Invalid section (use one of {sorted(valid)})"}, 400
         if "skip" not in payload:
@@ -1584,7 +1632,7 @@ def create_app(
         skip = bool(payload.get("skip"))
         index_path = (
             app.config["ANIME_SYNC_INDEX_PATH"]
-            if section in ("anime_sync", "episode_titles")
+            if section in ("anime_sync", "episode_titles", "aniskip")
             else app.config["MANGA_SYNC_INDEX_PATH"]
         )
         mal_ids_raw = payload.get("mal_ids")
@@ -3040,6 +3088,11 @@ def create_app(
                 secure=bool(app.config.get("SESSION_COOKIE_SECURE")),
             )
         return resp
+
+    try:
+        start_weekly_sync_scheduler(app)
+    except OSError:
+        pass
 
     return app
 

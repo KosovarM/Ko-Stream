@@ -7,12 +7,16 @@ Five job kinds share one global lock (only one sync at a time):
 - ``anime_titles`` — episode titles only (Jikan/MAL cache)
 - ``aniskip`` — AniSkip OP/ED skip times only
 - ``chapter_titles`` — MangaDex chapter titles only
+
+When a sync is already running, callers may ``enqueue_sync`` so the next job
+starts automatically after the current one finishes.
 """
 
 from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -41,6 +45,7 @@ JobKind = Literal["animes", "mangas", "anime_titles", "aniskip", "chapter_titles
 
 _lock = threading.Lock()
 _job: SyncJob | None = None
+_queue: list[Callable[[], SyncJob]] = []
 
 
 @dataclass
@@ -56,6 +61,7 @@ class SyncJob:
     chapter_titles: int = 0
     message: str = ""
     error: str | None = None
+    queued: int = 0
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
 
@@ -72,6 +78,7 @@ class SyncJob:
             "chapter_titles": self.chapter_titles,
             "message": self.message,
             "error": self.error,
+            "queued": self.queued,
             "running": self.status == "running",
         }
 
@@ -79,7 +86,45 @@ class SyncJob:
 def get_sync_job() -> SyncJob:
     global _job
     with _lock:
-        return _job or SyncJob(status="idle", message="No sync yet.")
+        job = _job or SyncJob(status="idle", message="No sync yet.")
+        job.queued = len(_queue)
+        return job
+
+
+def queue_depth() -> int:
+    with _lock:
+        return len(_queue)
+
+
+def enqueue_sync(starter: Callable[[], SyncJob]) -> tuple[SyncJob, bool]:
+    """Start ``starter`` now if idle; otherwise queue it.
+
+    Returns ``(job, queued)`` where ``queued`` is True when the starter was
+    appended behind the currently running job.
+    """
+    with _lock:
+        busy = _job is not None and _job.status == "running"
+        if busy:
+            _queue.append(starter)
+            assert _job is not None
+            _job.queued = len(_queue)
+            if "queued" not in (_job.message or "").casefold():
+                _job.message = f"{_job.message} ({len(_queue)} queued)".strip()
+            return _job, True
+    return starter(), False
+
+
+def _drain_queue() -> None:
+    with _lock:
+        if _job is not None and _job.status == "running":
+            return
+        if not _queue:
+            return
+        starter = _queue.pop(0)
+    try:
+        starter()
+    except Exception:
+        _drain_queue()
 
 
 def _begin_job(kind: JobKind, phase: str, message: str) -> SyncJob | None:
@@ -93,6 +138,7 @@ def _begin_job(kind: JobKind, phase: str, message: str) -> SyncJob | None:
             kind=kind,
             phase=phase,
             message=message,
+            queued=len(_queue),
         )
         _job = job
         return job
@@ -104,6 +150,8 @@ def _finish_ok(job: SyncJob, message: str) -> None:
         job.phase = "done"
         job.finished_at = time.time()
         job.message = message
+        job.queued = len(_queue)
+    _drain_queue()
 
 
 def _finish_error(job: SyncJob, message: str, exc: BaseException | None = None) -> None:
@@ -113,6 +161,8 @@ def _finish_error(job: SyncJob, message: str, exc: BaseException | None = None) 
         job.error = str(exc) if exc is not None else message
         job.finished_at = time.time()
         job.message = message
+        job.queued = len(_queue)
+    _drain_queue()
 
 
 def start_anime_sync(
@@ -416,9 +466,14 @@ def start_anime_title_sync(catalog_path, *, anime_index_path=None) -> SyncJob:
     return job
 
 
-def start_aniskip_sync(catalog_path) -> SyncJob:
+def start_aniskip_sync(
+    catalog_path,
+    *,
+    media_root=None,
+    anime_index_path=None,
+) -> SyncJob:
     """Fetch AniSkip OP/ED skip times for catalog episodes (no title sync)."""
-    job = _begin_job("aniskip", "aniskip", "Fetching AniSkip OP/ED…")
+    job = _begin_job("aniskip", "aniskip", "Fetching AniSkip…")
     if job is None:
         return get_sync_job()
 
@@ -428,15 +483,19 @@ def start_aniskip_sync(catalog_path) -> SyncJob:
             from kostream.aniskip import ensure_skip_times_for_episodes
             from kostream.library import scan_library
 
+            skip_ids = skipped_mal_ids("aniskip", index_path=anime_index_path)
             fetched = 0
             shows_touched = 0
-            for show in scan_library(catalog_path=catalog_path):
+            for show in scan_library(media_root, catalog_path):
                 if not show.mal_id:
+                    continue
+                mid = int(show.mal_id)
+                if mid in skip_ids:
                     continue
                 nums = [ep.number for ep in show.episodes if ep.number > 0]
                 if not nums:
                     continue
-                n = ensure_skip_times_for_episodes(show.mal_id, nums, network=True)
+                n = ensure_skip_times_for_episodes(mid, nums, network=True)
                 if n:
                     fetched += n
                     shows_touched += 1
@@ -448,6 +507,14 @@ def start_aniskip_sync(catalog_path) -> SyncJob:
                     )
             with _lock:
                 job.aniskip = fetched
+            try:
+                refresh_anime_index(
+                    catalog_path=catalog_path,
+                    media_root=media_root,
+                    index_path=anime_index_path,
+                )
+            except (OSError, ValueError):
+                pass
             _finish_ok(
                 job,
                 f"AniSkip synced: {fetched} episode fetch(es)"

@@ -168,7 +168,7 @@ PATCH_2026_07_31: dict[str, Any] = {
             "Tag rename: Stream only (was Test stream)",
             "Search pagination: First / Last plus nearby page buttons",
             "Recently added reflects newly added local episodes",
-            "AniSkip: separate Sync AniSkip OP/ED control; Skip Opening / Skip Ending on the player",
+            "AniSkip: Sync AniSkip control; Skip Opening / Skip Ending on the player (auto-hide)",
         ],
         "manga": [
             "Home: New Chapter releases row after Recently added",

@@ -19,6 +19,8 @@ ExecStart=/home/kosovar/Ko-Stream/.venv/bin/gunicorn \
 Restart=on-failure
 RestartSec=5
 
+# Weekly sync (Sunday 08:00 local) runs in-app; set KOSTREAM_WEEKLY_SYNC=0 to disable.
+
 # Hardening (adjust if media mounts need broader access)
 NoNewPrivileges=true
 PrivateTmp=true
