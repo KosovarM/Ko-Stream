@@ -112,8 +112,25 @@ def _local_chapter_keys(manga: MangaTitle) -> set[str]:
     return keys
 
 
+def suggest_next_chapter_key(manga: MangaTitle) -> str:
+    """Next chapter number after the highest local chapter (or ``1``)."""
+    nums: list[float] = []
+    for key in _local_chapter_keys(manga):
+        try:
+            nums.append(float(key))
+        except ValueError:
+            continue
+    if not nums:
+        return "1"
+    mx = max(nums)
+    nxt = int(mx) + 1 if mx == int(mx) else mx + 1
+    if isinstance(nxt, float) and nxt == int(nxt):
+        nxt = int(nxt)
+    return normalize_chapter_key(str(nxt)) or str(nxt)
+
+
 def list_missing_chapters(manga: MangaTitle) -> list[dict[str, Any]]:
-    """Known-but-unavailable chapter slots for upload dropdown."""
+    """Known-but-unavailable chapter slots for upload suggestions."""
     local = _local_chapter_keys(manga)
     missing: list[dict[str, Any]] = []
     known: list[str] = []
@@ -145,11 +162,10 @@ def list_missing_chapters(manga: MangaTitle) -> list[dict[str, Any]]:
 
 
 def list_incomplete_manga(titles: list[MangaTitle]) -> list[dict[str, Any]]:
+    """Catalog manga/manhwa available for chapter upload (including zero-missing)."""
     rows: list[dict[str, Any]] = []
     for manga in titles:
         missing = list_missing_chapters(manga)
-        if not missing:
-            continue
         rows.append(
             {
                 "id": manga.id,
@@ -157,10 +173,47 @@ def list_incomplete_manga(titles: list[MangaTitle]) -> list[dict[str, Any]]:
                 "missing_count": len(missing),
                 "local_count": sum(1 for c in manga.chapters if c.available),
                 "media_type": manga.media_type,
+                "next_chapter_key": suggest_next_chapter_key(manga),
             }
         )
     rows.sort(key=lambda row: str(row.get("title") or "").casefold())
     return rows
+
+
+def allocate_bulk_chapter_keys(
+    manga: MangaTitle,
+    filenames: list[str],
+) -> list[str | None]:
+    """Map bulk archive names to chapter keys without requiring a missing list."""
+    used = set(_local_chapter_keys(manga))
+    assigned: list[str | None] = []
+    cursor = suggest_next_chapter_key(manga)
+
+    def _bump(from_key: str) -> str:
+        try:
+            val = float(from_key)
+        except ValueError:
+            val = 0.0
+        nxt = int(val) + 1 if val == int(val) else val + 1
+        if isinstance(nxt, float) and nxt == int(nxt):
+            nxt = int(nxt)
+        return normalize_chapter_key(str(nxt)) or str(nxt)
+
+    for name in filenames:
+        if not name:
+            assigned.append(None)
+            continue
+        guessed = guess_chapter_key_from_filename(name)
+        if guessed and guessed not in used:
+            key = guessed
+        else:
+            key = cursor
+            while key in used:
+                key = _bump(key)
+        used.add(key)
+        assigned.append(key)
+        cursor = _bump(key)
+    return assigned
 
 
 def _chapter_already_on_disk(title_dir: Path, chapter_key: str) -> bool:

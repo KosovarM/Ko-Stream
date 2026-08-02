@@ -231,7 +231,7 @@
       <button type="button" class="sync-index-tab" role="tab" data-upload-mode="manga-bulk" aria-selected="false">{{ _('Manga bulk') }}</button>
     </nav>
     <p class="catalog-meta sync-index-help" id="catalog-upload-help">
-      {{ _('Pick an incomplete title, then upload the missing media.') }}
+      {{ _('Pick a catalog title, then upload media. Manga chapter numbers can be entered freely (MAL counts are often incomplete).') }}
     </p>
     <form id="catalog-upload-form" class="catalog-upload-form">
       <div id="catalog-upload-anime-fields">
@@ -268,10 +268,9 @@
           </select>
         </label>
         <label class="catalog-upload-field" id="catalog-upload-chapter-field">
-          <span>{{ _('Missing chapter') }}</span>
-          <select id="catalog-upload-chapter" name="chapter_key" disabled>
-            <option value="">{{ _('Select a title first') }}</option>
-          </select>
+          <span>{{ _('Chapter number') }}</span>
+          <input type="text" id="catalog-upload-chapter" name="chapter_key" list="catalog-upload-chapter-suggestions" placeholder="{{ _('e.g. 12 or next') }}" disabled autocomplete="off">
+          <datalist id="catalog-upload-chapter-suggestions"></datalist>
         </label>
         <label class="catalog-upload-field" id="catalog-upload-chapter-file-field">
           <span>{{ _('Chapter (cbz / zip / image)') }}</span>
@@ -981,6 +980,7 @@ anilistForm.addEventListener('submit', async (event) => {
   const uploadSubtitle = document.getElementById('catalog-upload-subtitle');
   const uploadManga = document.getElementById('catalog-upload-manga');
   const uploadChapter = document.getElementById('catalog-upload-chapter');
+  const uploadChapterSuggestions = document.getElementById('catalog-upload-chapter-suggestions');
   const uploadChapterFile = document.getElementById('catalog-upload-chapter-file');
   const uploadChaptersBulk = document.getElementById('catalog-upload-chapters-bulk');
   const uploadChapterPages = document.getElementById('catalog-upload-chapter-pages');
@@ -1117,30 +1117,46 @@ anilistForm.addEventListener('submit', async (event) => {
       uploadManga.innerHTML = '';
       const placeholder = document.createElement('option');
       placeholder.value = '';
-      placeholder.textContent = titles.length ? 'Select manga…' : 'No titles with missing chapters';
+      placeholder.textContent = titles.length ? 'Select manga…' : 'No catalog manga titles';
       uploadManga.appendChild(placeholder);
       titles.forEach((row) => {
         const opt = document.createElement('option');
         opt.value = String(row.id || '');
-        opt.textContent = `${row.title || row.id} (${row.missing_count || 0} missing)`;
+        const missing = Number(row.missing_count) || 0;
+        const local = Number(row.local_count) || 0;
+        const next = row.next_chapter_key ? `, next ${row.next_chapter_key}` : '';
+        opt.textContent = missing
+          ? `${row.title || row.id} (${local} local, ${missing} missing${next})`
+          : `${row.title || row.id} (${local} local${next})`;
+        if (row.next_chapter_key) opt.dataset.nextChapter = String(row.next_chapter_key);
         uploadManga.appendChild(opt);
       });
       uploadManga.disabled = !titles.length;
     };
-    const fillChapterOptions = (chapters) => {
+    const fillChapterOptions = (chapters, nextKey) => {
       if (!uploadChapter) return;
-      uploadChapter.innerHTML = '';
-      const placeholder = document.createElement('option');
-      placeholder.value = '';
-      placeholder.textContent = chapters.length ? 'Select chapter…' : 'No missing chapters';
-      uploadChapter.appendChild(placeholder);
-      chapters.forEach((ch) => {
-        const opt = document.createElement('option');
-        opt.value = String(ch.chapter_key || '');
-        opt.textContent = ch.label || ch.title || ch.chapter_key;
-        uploadChapter.appendChild(opt);
-      });
-      uploadChapter.disabled = !chapters.length;
+      if (uploadChapterSuggestions) {
+        uploadChapterSuggestions.innerHTML = '';
+        const seen = new Set();
+        const addOpt = (value, label) => {
+          const key = String(value || '').trim();
+          if (!key || seen.has(key)) return;
+          seen.add(key);
+          const opt = document.createElement('option');
+          opt.value = key;
+          if (label) opt.label = label;
+          uploadChapterSuggestions.appendChild(opt);
+        };
+        if (nextKey) addOpt(nextKey, `Next after local (${nextKey})`);
+        (chapters || []).forEach((ch) => {
+          addOpt(ch.chapter_key, ch.label || ch.title || ch.chapter_key);
+        });
+      }
+      uploadChapter.disabled = false;
+      if (nextKey && !uploadChapter.value) uploadChapter.value = String(nextKey);
+      uploadChapter.placeholder = nextKey
+        ? `Next: ${nextKey} (or enter any chapter)`
+        : 'Enter chapter number';
     };
     const loadIncompleteShows = async () => {
       fillShowOptions([]);
@@ -1159,17 +1175,21 @@ anilistForm.addEventListener('submit', async (event) => {
     };
     const loadIncompleteManga = async () => {
       fillMangaOptions([]);
-      fillChapterOptions([]);
+      if (uploadChapter) {
+        uploadChapter.value = '';
+        uploadChapter.disabled = true;
+      }
+      if (uploadChapterSuggestions) uploadChapterSuggestions.innerHTML = '';
       try {
         const resp = await fetch('{{ url_for("api_catalog_incomplete_manga") }}');
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok || !data.ok) {
-          setUploadError(data.error || 'Could not load incomplete manga');
+          setUploadError(data.error || 'Could not load manga catalog');
           return;
         }
         fillMangaOptions(data.titles || []);
       } catch (_) {
-        setUploadError('Could not load incomplete manga');
+        setUploadError('Could not load manga catalog');
       }
     };
     const loadMissingEpisodes = async (showId) => {
@@ -1189,19 +1209,23 @@ anilistForm.addEventListener('submit', async (event) => {
       }
     };
     const loadMissingChapters = async (mangaId) => {
-      fillChapterOptions([]);
+      if (uploadChapter) {
+        uploadChapter.value = '';
+        uploadChapter.disabled = !mangaId;
+      }
+      if (uploadChapterSuggestions) uploadChapterSuggestions.innerHTML = '';
       if (!mangaId || !uploadChapter) return;
       try {
         const resp = await fetch('/api/catalog/manga/' + encodeURIComponent(mangaId) + '/missing-chapters');
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok || !data.ok) {
-          setUploadError(data.error || 'Could not load missing chapters');
+          setUploadError(data.error || 'Could not load chapters');
           return;
         }
         setUploadError('');
-        fillChapterOptions(data.chapters || []);
+        fillChapterOptions(data.chapters || [], data.next_chapter_key || '');
       } catch (_) {
-        setUploadError('Could not load missing chapters');
+        setUploadError('Could not load chapters');
       }
     };
     const openUploadModal = async () => {
@@ -1261,9 +1285,10 @@ anilistForm.addEventListener('submit', async (event) => {
       } else if (uploadMode === 'chapter') {
         endpoint = '{{ url_for("api_catalog_upload_chapter") }}';
         if (!uploadManga?.value) { setUploadError('Select a manga title.'); return; }
-        if (!uploadChapter?.value) { setUploadError('Select a missing chapter.'); return; }
+        const chapterKey = (uploadChapter?.value || '').trim();
+        if (!chapterKey) { setUploadError('Enter a chapter number.'); return; }
         body.append('manga_id', uploadManga.value);
-        body.append('chapter_key', uploadChapter.value);
+        body.append('chapter_key', chapterKey);
         if (uploadChapterPages?.files?.length) {
           Array.from(uploadChapterPages.files).forEach((f) => body.append('images', f));
         } else if (uploadChapterFile?.files?.length) {

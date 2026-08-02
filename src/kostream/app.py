@@ -151,11 +151,12 @@ from kostream.local_media import (
 )
 from kostream.manga_upload import (
     MangaUploadError,
-    guess_chapter_key_from_filename,
+    allocate_bulk_chapter_keys,
     list_incomplete_manga,
     list_missing_chapters,
     save_chapter_images_bulk,
     save_chapter_upload,
+    suggest_next_chapter_key,
 )
 from kostream.media_import import (
     import_media_to_catalog,
@@ -2049,17 +2050,19 @@ def create_app(
         if not manga:
             return {"ok": False, "error": "Manga not found"}, 404
         missing = list_missing_chapters(manga)
+        next_key = suggest_next_chapter_key(manga)
         return {
             "ok": True,
             "manga_id": manga.id,
             "title": manga.title,
             "chapters": missing,
             "count": len(missing),
+            "next_chapter_key": next_key,
         }
 
     @app.route("/api/catalog/upload-chapter", methods=["POST"])
     def api_catalog_upload_chapter():
-        """Upload one missing manga chapter (cbz/zip/image)."""
+        """Upload one manga chapter (cbz/zip/image); chapter_key need not be in missing list."""
         denied = _require_api_roles("master", "manager")
         if denied:
             return denied
@@ -2108,6 +2111,7 @@ def create_app(
             **result,
             "missing_chapters": remaining,
             "missing_count": len(remaining),
+            "next_chapter_key": suggest_next_chapter_key(refreshed),
         }
 
     @app.route("/api/catalog/upload-chapters-bulk", methods=["POST"])
@@ -2127,18 +2131,13 @@ def create_app(
         files = request.files.getlist("files") or request.files.getlist("chapters")
         if not files:
             return {"ok": False, "error": "At least one chapter file required"}, 400
-        missing = list_missing_chapters(manga)
-        missing_keys = [m["chapter_key"] for m in missing]
+        valid = [vf for vf in files if vf and vf.filename]
+        keys = allocate_bulk_chapter_keys(manga, [vf.filename for vf in valid])
         uploaded: list[dict] = []
         errors: list[str] = []
-        key_iter = list(missing_keys)
-        for vf in files:
-            if not vf or not vf.filename:
-                continue
-            guessed = guess_chapter_key_from_filename(vf.filename)
-            key = guessed if guessed in key_iter else (key_iter[0] if key_iter else None)
+        for vf, key in zip(valid, keys):
             if not key:
-                errors.append(f"{vf.filename}: no missing chapter slot left")
+                errors.append(f"{vf.filename}: could not assign chapter number")
                 continue
             try:
                 result = save_chapter_upload(
@@ -2151,8 +2150,6 @@ def create_app(
                     require_missing=True,
                 )
                 uploaded.append(result)
-                if key in key_iter:
-                    key_iter.remove(key)
             except MangaUploadError as exc:
                 errors.append(f"{vf.filename}: {exc}")
         if not uploaded and errors:
@@ -2166,6 +2163,7 @@ def create_app(
             "errors": errors,
             "missing_chapters": remaining,
             "missing_count": len(remaining),
+            "next_chapter_key": suggest_next_chapter_key(refreshed),
         }
 
     @app.route("/api/catalog/remove", methods=["POST", "DELETE"])
