@@ -3052,6 +3052,22 @@ a.header-notify-item:hover {
   margin-top: 0.75rem;
 }
 
+.mal-actions-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.mal-actions-group-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 0.35rem;
+}
+
 .mal-actions-row {
   display: flex;
   gap: 0.75rem;
@@ -5276,7 +5292,32 @@ body.login-view .site-main {
 
 
 /* Releases + unavailable manga chapters */
-.releases-entry-title { margin: 0 0 0.75rem; font-size: 1.25rem; }
+.releases-entry {
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.9rem 0.85rem;
+  margin: 0 0 0.85rem;
+  background: var(--bg-elevated);
+}
+.releases-entry-title {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 650;
+  cursor: pointer;
+  list-style: none;
+}
+.releases-entry-title::-webkit-details-marker { display: none; }
+.releases-entry-title::before {
+  content: "▸";
+  display: inline-block;
+  margin-right: 0.45rem;
+  color: var(--muted);
+  transition: transform 0.15s ease;
+}
+.releases-entry[open] > .releases-entry-title::before {
+  transform: rotate(90deg);
+}
+.releases-entry-body { margin-top: 0.55rem; }
 .releases-section-heading { margin: 1rem 0 0.4rem; font-size: 0.95rem; color: var(--accent); }
 .releases-list { margin: 0; padding-left: 1.2rem; color: var(--muted); }
 .releases-list li { margin: 0.25rem 0; }

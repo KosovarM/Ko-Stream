@@ -1,8 +1,6 @@
-"""Display-title preference helpers (EN / JP / GER) with fallbacks.
+"""Display-title preference helpers (EN / JP) with fallbacks.
 
-German series titles are not provided by MAL or AniList APIs today. The ``ger``
-preference key is supported so the UI can store it; when no German title exists,
-display falls back through English → Japanese → romaji → default → synonyms.
+Leftover ``ger`` preferences (removed from UI) normalize to English.
 """
 
 from __future__ import annotations
@@ -12,13 +10,12 @@ from typing import Iterable
 
 TITLE_LANG_EN = "en"
 TITLE_LANG_JP = "jp"
-TITLE_LANG_GER = "ger"
-SUPPORTED_TITLE_LANGS = frozenset({TITLE_LANG_EN, TITLE_LANG_JP, TITLE_LANG_GER})
+TITLE_LANG_GER = "ger"  # legacy preference key only
+SUPPORTED_TITLE_LANGS = frozenset({TITLE_LANG_EN, TITLE_LANG_JP})
 DEFAULT_TITLE_LANG = TITLE_LANG_EN
 TITLE_LANG_LABELS = {
     TITLE_LANG_JP: "Japanese",
     TITLE_LANG_EN: "English",
-    TITLE_LANG_GER: "German",
 }
 
 
@@ -36,6 +33,8 @@ class TitleVariants:
 
 def normalize_title_lang(value: str | None) -> str:
     v = (value or "").strip().casefold()
+    if v in ("ger", "de", "deu", "deutsch", "german"):
+        return DEFAULT_TITLE_LANG
     if v in SUPPORTED_TITLE_LANGS:
         return v
     return DEFAULT_TITLE_LANG
@@ -55,8 +54,6 @@ def pick_display_title(variants: TitleVariants, pref: str | None = None) -> str:
     elif want == TITLE_LANG_JP:
         preferred_chain.append(variants.jp)
         preferred_chain.append(variants.romaji)
-    elif want == TITLE_LANG_GER:
-        preferred_chain.append(variants.ger)
 
     preferred_chain.extend(
         [

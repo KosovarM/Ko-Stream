@@ -136,12 +136,27 @@
     <p class="catalog-meta" id="mal-sync-status" hidden></p>
     <div class="mal-actions sync-actions" id="mal-sync-actions">
       {% if can_run_sync %}
-      <div class="mal-actions-row">
-        <button type="button" class="btn-watch btn-sync" id="mal-sync-animes" title="Update animelist, watch progress, and anime metadata (not episode titles)">{{ _('Sync animes') }}</button>
-        <button type="button" class="btn-watch btn-sync" id="mal-sync-mangas" title="Update mangalist and clear fulfilled manga requests (not chapter titles)">{{ _('Sync mangas') }}</button>
-        <button type="button" class="btn-watch btn-sync" id="mal-sync-anime-titles" title="Fetch anime episode titles for available media">Sync anime titles</button>
-        <button type="button" class="btn-watch btn-sync" id="mal-sync-aniskip" title="Fetch AniSkip OP/ED skip times (separate from episode titles)">{{ _('Sync AniSkip') }}</button>
-        <button type="button" class="btn-watch btn-sync" id="mal-sync-chapter-titles" title="Fetch MangaDex chapter titles for available manga">Sync chapter titles</button>
+      <div class="mal-actions-groups">
+        <div class="mal-actions-group">
+          <span class="mal-actions-group-label">{{ _('Lists') }}</span>
+          <div class="mal-actions-row">
+            <button type="button" class="btn-watch btn-sync" id="mal-sync-animes" title="Update animelist, watch progress, and anime metadata (not episode titles)">{{ _('Sync animes') }}</button>
+            <button type="button" class="btn-watch btn-sync" id="mal-sync-mangas" title="Update mangalist and clear fulfilled manga requests (not chapter titles)">{{ _('Sync mangas') }}</button>
+          </div>
+        </div>
+        <div class="mal-actions-group">
+          <span class="mal-actions-group-label">{{ _('Titles') }}</span>
+          <div class="mal-actions-row">
+            <button type="button" class="btn-watch btn-sync" id="mal-sync-anime-titles" title="Fetch anime episode titles for available media">{{ _('Sync anime titles') }}</button>
+            <button type="button" class="btn-watch btn-sync" id="mal-sync-chapter-titles" title="Fetch MangaDex chapter titles for available manga">{{ _('Sync chapter titles') }}</button>
+          </div>
+        </div>
+        <div class="mal-actions-group">
+          <span class="mal-actions-group-label">{{ _('Player') }}</span>
+          <div class="mal-actions-row">
+            <button type="button" class="btn-watch btn-sync" id="mal-sync-aniskip" title="Fetch OP/ED skip times (Anime-Skip, AniSkip fallback)">{{ _('Sync skip times') }}</button>
+          </div>
+        </div>
       </div>
       {% endif %}
       <div class="mal-actions-row mal-actions-secondary">
@@ -206,37 +221,75 @@
   <div class="sync-index-backdrop" id="catalog-upload-backdrop" tabindex="-1"></div>
   <div class="sync-index-panel catalog-upload-panel" role="dialog" aria-labelledby="catalog-upload-title" aria-modal="true">
     <header class="sync-index-header">
-      <h2 id="catalog-upload-title">{{ _('Upload missing episode') }}</h2>
+      <h2 id="catalog-upload-title">{{ _('Upload media') }}</h2>
       <button type="button" class="sync-index-close" id="catalog-upload-close" aria-label="{{ _('Close') }}">×</button>
     </header>
-    <p class="catalog-meta sync-index-help">
-      {{ _('Choose a catalog title with missing episodes, then upload the video (subtitle optional).') }}
+    <nav class="sync-index-tabs catalog-upload-tabs" role="tablist" aria-label="{{ _('Upload mode') }}">
+      <button type="button" class="sync-index-tab is-active" role="tab" data-upload-mode="episode" aria-selected="true">{{ _('Anime episode') }}</button>
+      <button type="button" class="sync-index-tab" role="tab" data-upload-mode="anime-bulk" aria-selected="false">{{ _('Anime bulk') }}</button>
+      <button type="button" class="sync-index-tab" role="tab" data-upload-mode="chapter" aria-selected="false">{{ _('Manga chapter') }}</button>
+      <button type="button" class="sync-index-tab" role="tab" data-upload-mode="manga-bulk" aria-selected="false">{{ _('Manga bulk') }}</button>
+    </nav>
+    <p class="catalog-meta sync-index-help" id="catalog-upload-help">
+      {{ _('Pick an incomplete title, then upload the missing media.') }}
     </p>
     <form id="catalog-upload-form" class="catalog-upload-form">
-      <label class="catalog-upload-field">
-        <span>{{ _('Anime') }}</span>
-        <select id="catalog-upload-show" name="show_id" required>
-          <option value="">{{ _('Loading…') }}</option>
-        </select>
-      </label>
-      <label class="catalog-upload-field">
-        <span>{{ _('Missing episode') }}</span>
-        <select id="catalog-upload-episode" name="episode_id" required disabled>
-          <option value="">{{ _('Select an anime first') }}</option>
-        </select>
-      </label>
-      <label class="catalog-upload-field">
-        <span>{{ _('Video file') }}</span>
-        <input type="file" id="catalog-upload-video" name="video" accept=".mp4,.webm,.mkv,video/*" required>
-      </label>
-      <label class="catalog-upload-field">
-        <span>{{ _('Subtitle file (optional)') }}</span>
-        <input type="file" id="catalog-upload-subtitle" name="subtitle" accept=".vtt,text/vtt">
-      </label>
+      <div id="catalog-upload-anime-fields">
+        <label class="catalog-upload-field">
+          <span>{{ _('Anime') }}</span>
+          <select id="catalog-upload-show" name="show_id">
+            <option value="">{{ _('Loading…') }}</option>
+          </select>
+        </label>
+        <label class="catalog-upload-field" id="catalog-upload-episode-field">
+          <span>{{ _('Missing episode') }}</span>
+          <select id="catalog-upload-episode" name="episode_id" disabled>
+            <option value="">{{ _('Select an anime first') }}</option>
+          </select>
+        </label>
+        <label class="catalog-upload-field" id="catalog-upload-video-field">
+          <span>{{ _('Video file') }}</span>
+          <input type="file" id="catalog-upload-video" name="video" accept=".mp4,.webm,.mkv,video/*">
+        </label>
+        <label class="catalog-upload-field" id="catalog-upload-videos-bulk-field" hidden>
+          <span>{{ _('Videos (multi)') }}</span>
+          <input type="file" id="catalog-upload-videos-bulk" name="videos" accept=".mp4,.webm,.mkv,video/*" multiple>
+        </label>
+        <label class="catalog-upload-field">
+          <span>{{ _('Subtitle file (optional)') }}</span>
+          <input type="file" id="catalog-upload-subtitle" name="subtitle" accept=".vtt,text/vtt" multiple>
+        </label>
+      </div>
+      <div id="catalog-upload-manga-fields" hidden>
+        <label class="catalog-upload-field">
+          <span>{{ _('Manga / Manhwa') }}</span>
+          <select id="catalog-upload-manga" name="manga_id">
+            <option value="">{{ _('Loading…') }}</option>
+          </select>
+        </label>
+        <label class="catalog-upload-field" id="catalog-upload-chapter-field">
+          <span>{{ _('Missing chapter') }}</span>
+          <select id="catalog-upload-chapter" name="chapter_key" disabled>
+            <option value="">{{ _('Select a title first') }}</option>
+          </select>
+        </label>
+        <label class="catalog-upload-field" id="catalog-upload-chapter-file-field">
+          <span>{{ _('Chapter (cbz / zip / image)') }}</span>
+          <input type="file" id="catalog-upload-chapter-file" name="file" accept=".cbz,.zip,.jpg,.jpeg,.png,.webp,.gif,.avif,.bmp,image/*">
+        </label>
+        <label class="catalog-upload-field" id="catalog-upload-chapters-bulk-field" hidden>
+          <span>{{ _('Chapters (multi cbz/zip)') }}</span>
+          <input type="file" id="catalog-upload-chapters-bulk" name="files" accept=".cbz,.zip" multiple>
+        </label>
+        <label class="catalog-upload-field" id="catalog-upload-chapter-pages-field">
+          <span>{{ _('Or page images (one chapter)') }}</span>
+          <input type="file" id="catalog-upload-chapter-pages" name="images" accept=".jpg,.jpeg,.png,.webp,.gif,.avif,.bmp,image/*" multiple>
+        </label>
+      </div>
       <p class="catalog-error" id="catalog-upload-error" hidden></p>
       <p class="catalog-success" id="catalog-upload-success" hidden></p>
       <div class="catalog-upload-actions">
-        <button type="submit" class="btn-watch" id="catalog-upload-submit">{{ _('Upload episode') }}</button>
+        <button type="submit" class="btn-watch" id="catalog-upload-submit">{{ _('Upload') }}</button>
         <button type="button" class="btn-detail" id="catalog-upload-cancel">{{ _('Cancel') }}</button>
       </div>
     </form>
@@ -260,7 +313,7 @@
     <nav class="sync-index-tabs" role="tablist" aria-label="Sync index sections">
       <button type="button" class="sync-index-tab is-active" role="tab" data-section="anime_sync" aria-selected="true">Anime sync</button>
       <button type="button" class="sync-index-tab" role="tab" data-section="episode_titles" aria-selected="false">Episode titles</button>
-      <button type="button" class="sync-index-tab" role="tab" data-section="aniskip" aria-selected="false">AniSkip</button>
+      <button type="button" class="sync-index-tab" role="tab" data-section="aniskip" aria-selected="false">{{ _('Skip times') }}</button>
       <button type="button" class="sync-index-tab" role="tab" data-section="manga_sync" aria-selected="false">Manga sync</button>
       <button type="button" class="sync-index-tab" role="tab" data-section="chapter_titles" aria-selected="false">Chapter titles</button>
     </nav>
@@ -447,7 +500,7 @@ anilistForm.addEventListener('submit', async (event) => {
       animes: 'Sync animes',
       mangas: 'Sync mangas',
       anime_titles: 'Sync anime titles',
-      aniskip: 'Sync AniSkip',
+      aniskip: 'Sync skip times',
       chapter_titles: 'Sync chapter titles',
     };
     const BUSY = {
@@ -459,7 +512,7 @@ anilistForm.addEventListener('submit', async (event) => {
       },
       mangas: { default: 'Syncing mangas…' },
       anime_titles: { default: 'Syncing anime titles…' },
-      aniskip: { default: 'Syncing AniSkip…' },
+      aniskip: { default: 'Syncing skip times…' },
       chapter_titles: { default: 'Syncing chapter titles…' },
     };
 
@@ -586,7 +639,7 @@ anilistForm.addEventListener('submit', async (event) => {
       startSync('{{ url_for("api_mal_sync_anime_titles") }}', 'anime_titles', 'Starting anime titles…');
     });
     malSyncAniskip?.addEventListener('click', () => {
-      startSync('{{ url_for("api_mal_sync_aniskip") }}', 'aniskip', 'Starting AniSkip…');
+      startSync('{{ url_for("api_mal_sync_aniskip") }}', 'aniskip', 'Starting skip times…');
     });
     malSyncChapterTitles?.addEventListener('click', () => {
       startSync('{{ url_for("api_mal_sync_chapter_titles") }}', 'chapter_titles', 'Starting chapter titles…');
@@ -924,66 +977,65 @@ anilistForm.addEventListener('submit', async (event) => {
   const uploadShow = document.getElementById('catalog-upload-show');
   const uploadEpisode = document.getElementById('catalog-upload-episode');
   const uploadVideo = document.getElementById('catalog-upload-video');
+  const uploadVideosBulk = document.getElementById('catalog-upload-videos-bulk');
   const uploadSubtitle = document.getElementById('catalog-upload-subtitle');
+  const uploadManga = document.getElementById('catalog-upload-manga');
+  const uploadChapter = document.getElementById('catalog-upload-chapter');
+  const uploadChapterFile = document.getElementById('catalog-upload-chapter-file');
+  const uploadChaptersBulk = document.getElementById('catalog-upload-chapters-bulk');
+  const uploadChapterPages = document.getElementById('catalog-upload-chapter-pages');
+  const uploadAnimeFields = document.getElementById('catalog-upload-anime-fields');
+  const uploadMangaFields = document.getElementById('catalog-upload-manga-fields');
+  const uploadEpisodeField = document.getElementById('catalog-upload-episode-field');
+  const uploadVideoField = document.getElementById('catalog-upload-video-field');
+  const uploadVideosBulkField = document.getElementById('catalog-upload-videos-bulk-field');
+  const uploadChapterField = document.getElementById('catalog-upload-chapter-field');
+  const uploadChapterFileField = document.getElementById('catalog-upload-chapter-file-field');
+  const uploadChaptersBulkField = document.getElementById('catalog-upload-chapters-bulk-field');
+  const uploadChapterPagesField = document.getElementById('catalog-upload-chapter-pages-field');
+  const uploadModeTabs = document.querySelectorAll('[data-upload-mode]');
   const uploadSubmit = document.getElementById('catalog-upload-submit');
   const uploadError = document.getElementById('catalog-upload-error');
   const uploadSuccess = document.getElementById('catalog-upload-success');
   let uploadBusy = false;
   let uploadDisabledSnapshot = null;
   let uploadSubmitLabel = '';
+  let uploadMode = 'episode';
 
   const uploadInteractiveControls = () => [
-    uploadSubmit,
-    uploadCancel,
-    uploadClose,
-    uploadShow,
-    uploadEpisode,
-    uploadVideo,
-    uploadSubtitle,
+    uploadSubmit, uploadCancel, uploadClose, uploadShow, uploadEpisode, uploadVideo,
+    uploadVideosBulk, uploadSubtitle, uploadManga, uploadChapter, uploadChapterFile,
+    uploadChaptersBulk, uploadChapterPages,
   ].filter(Boolean);
 
   const setUploadError = (msg) => {
     if (!uploadError) return;
-    if (msg) {
-      uploadError.hidden = false;
-      uploadError.textContent = msg;
-    } else {
-      uploadError.hidden = true;
-      uploadError.textContent = '';
-    }
+    uploadError.hidden = !msg;
+    uploadError.textContent = msg || '';
   };
   const setUploadSuccess = (msg) => {
     if (!uploadSuccess) return;
-    if (msg) {
-      uploadSuccess.hidden = false;
-      uploadSuccess.textContent = msg;
-    } else {
-      uploadSuccess.hidden = true;
-      uploadSuccess.textContent = '';
-    }
+    uploadSuccess.hidden = !msg;
+    uploadSuccess.textContent = msg || '';
   };
   const setUploadBusy = (busy) => {
     uploadBusy = !!busy;
     if (uploadForm) uploadForm.setAttribute('aria-busy', uploadBusy ? 'true' : 'false');
     if (uploadBusy) {
-      uploadDisabledSnapshot = new Map(
-        uploadInteractiveControls().map((el) => [el, el.disabled])
-      );
+      uploadDisabledSnapshot = new Map(uploadInteractiveControls().map((el) => [el, el.disabled]));
       uploadInteractiveControls().forEach((el) => { el.disabled = true; });
       if (uploadSubmit) {
-        uploadSubmitLabel = uploadSubmit.textContent || 'Upload episode';
+        uploadSubmitLabel = uploadSubmit.textContent || 'Upload';
         uploadSubmit.textContent = 'Uploading…';
         uploadSubmit.classList.add('is-uploading');
       }
     } else {
       if (uploadDisabledSnapshot) {
-        uploadDisabledSnapshot.forEach((wasDisabled, el) => {
-          el.disabled = wasDisabled;
-        });
+        uploadDisabledSnapshot.forEach((wasDisabled, el) => { el.disabled = wasDisabled; });
         uploadDisabledSnapshot = null;
       }
       if (uploadSubmit) {
-        uploadSubmit.textContent = uploadSubmitLabel || 'Upload episode';
+        uploadSubmit.textContent = uploadSubmitLabel || 'Upload';
         uploadSubmit.classList.remove('is-uploading');
       }
     }
@@ -999,15 +1051,33 @@ anilistForm.addEventListener('submit', async (event) => {
 
   document.addEventListener('keydown', (ev) => {
     if (ev.key !== 'Escape') return;
-    if (uploadModal && !uploadModal.hidden) {
-      closeUploadModal();
-      return;
-    }
+    if (uploadModal && !uploadModal.hidden) { closeUploadModal(); return; }
     if (syncIndexModal && !syncIndexModal.hidden) closeSyncIndex();
   });
 
-  if (uploadModal && uploadOpen && uploadForm && uploadShow && uploadEpisode) {
+  if (uploadModal && uploadOpen && uploadForm) {
+    const applyUploadMode = (mode) => {
+      uploadMode = mode || 'episode';
+      const isAnime = uploadMode === 'episode' || uploadMode === 'anime-bulk';
+      const isBulkAnime = uploadMode === 'anime-bulk';
+      const isBulkManga = uploadMode === 'manga-bulk';
+      if (uploadAnimeFields) uploadAnimeFields.hidden = !isAnime;
+      if (uploadMangaFields) uploadMangaFields.hidden = isAnime;
+      if (uploadEpisodeField) uploadEpisodeField.hidden = isBulkAnime;
+      if (uploadVideoField) uploadVideoField.hidden = isBulkAnime;
+      if (uploadVideosBulkField) uploadVideosBulkField.hidden = !isBulkAnime;
+      if (uploadChapterField) uploadChapterField.hidden = isBulkManga;
+      if (uploadChapterFileField) uploadChapterFileField.hidden = isBulkManga;
+      if (uploadChaptersBulkField) uploadChaptersBulkField.hidden = !isBulkManga;
+      if (uploadChapterPagesField) uploadChapterPagesField.hidden = isBulkManga;
+      uploadModeTabs.forEach((tab) => {
+        const active = tab.dataset.uploadMode === uploadMode;
+        tab.classList.toggle('is-active', active);
+        tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      });
+    };
     const fillShowOptions = (shows) => {
+      if (!uploadShow) return;
       uploadShow.innerHTML = '';
       const placeholder = document.createElement('option');
       placeholder.value = '';
@@ -1025,6 +1095,7 @@ anilistForm.addEventListener('submit', async (event) => {
       uploadShow.disabled = !shows.length;
     };
     const fillEpisodeOptions = (episodes) => {
+      if (!uploadEpisode) return;
       uploadEpisode.innerHTML = '';
       const placeholder = document.createElement('option');
       placeholder.value = '';
@@ -1041,37 +1112,69 @@ anilistForm.addEventListener('submit', async (event) => {
       });
       uploadEpisode.disabled = !episodes.length;
     };
+    const fillMangaOptions = (titles) => {
+      if (!uploadManga) return;
+      uploadManga.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = titles.length ? 'Select manga…' : 'No titles with missing chapters';
+      uploadManga.appendChild(placeholder);
+      titles.forEach((row) => {
+        const opt = document.createElement('option');
+        opt.value = String(row.id || '');
+        opt.textContent = `${row.title || row.id} (${row.missing_count || 0} missing)`;
+        uploadManga.appendChild(opt);
+      });
+      uploadManga.disabled = !titles.length;
+    };
+    const fillChapterOptions = (chapters) => {
+      if (!uploadChapter) return;
+      uploadChapter.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = chapters.length ? 'Select chapter…' : 'No missing chapters';
+      uploadChapter.appendChild(placeholder);
+      chapters.forEach((ch) => {
+        const opt = document.createElement('option');
+        opt.value = String(ch.chapter_key || '');
+        opt.textContent = ch.label || ch.title || ch.chapter_key;
+        uploadChapter.appendChild(opt);
+      });
+      uploadChapter.disabled = !chapters.length;
+    };
     const loadIncompleteShows = async () => {
       fillShowOptions([]);
       fillEpisodeOptions([]);
-      uploadEpisode.disabled = true;
-      setUploadError('');
-      setUploadSuccess('');
       try {
         const resp = await fetch('{{ url_for("api_catalog_incomplete_shows") }}');
         const data = await resp.json().catch(() => ({}));
-        if (resp.status === 403) {
-          setUploadError(data.error || 'Permission denied');
-          return;
-        }
         if (!resp.ok || !data.ok) {
-          setUploadError(data.error || 'Could not load incomplete titles');
+          setUploadError(data.error || 'Could not load incomplete anime');
           return;
         }
         fillShowOptions(data.shows || []);
-        if (!(data.shows || []).length) {
-          setUploadError('No catalog titles with missing episodes.');
-        }
       } catch (_) {
-        setUploadError('Could not load incomplete titles');
+        setUploadError('Could not load incomplete anime');
+      }
+    };
+    const loadIncompleteManga = async () => {
+      fillMangaOptions([]);
+      fillChapterOptions([]);
+      try {
+        const resp = await fetch('{{ url_for("api_catalog_incomplete_manga") }}');
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          setUploadError(data.error || 'Could not load incomplete manga');
+          return;
+        }
+        fillMangaOptions(data.titles || []);
+      } catch (_) {
+        setUploadError('Could not load incomplete manga');
       }
     };
     const loadMissingEpisodes = async (showId) => {
       fillEpisodeOptions([]);
-      if (!showId) {
-        uploadEpisode.disabled = true;
-        return;
-      }
+      if (!showId || !uploadEpisode) return;
       try {
         const resp = await fetch('/api/catalog/' + encodeURIComponent(showId) + '/missing-episodes');
         const data = await resp.json().catch(() => ({}));
@@ -1081,77 +1184,128 @@ anilistForm.addEventListener('submit', async (event) => {
         }
         setUploadError('');
         fillEpisodeOptions(data.episodes || []);
-        if (!(data.episodes || []).length) {
-          setUploadError('This title has no missing episodes.');
-        }
       } catch (_) {
         setUploadError('Could not load missing episodes');
+      }
+    };
+    const loadMissingChapters = async (mangaId) => {
+      fillChapterOptions([]);
+      if (!mangaId || !uploadChapter) return;
+      try {
+        const resp = await fetch('/api/catalog/manga/' + encodeURIComponent(mangaId) + '/missing-chapters');
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          setUploadError(data.error || 'Could not load missing chapters');
+          return;
+        }
+        setUploadError('');
+        fillChapterOptions(data.chapters || []);
+      } catch (_) {
+        setUploadError('Could not load missing chapters');
       }
     };
     const openUploadModal = async () => {
       uploadModal.hidden = false;
       uploadModal.setAttribute('aria-hidden', 'false');
       document.body.classList.add('sync-index-open');
-      if (uploadVideo) uploadVideo.value = '';
-      if (uploadSubtitle) uploadSubtitle.value = '';
-      await loadIncompleteShows();
+      setUploadError('');
+      setUploadSuccess('');
+      applyUploadMode(uploadMode);
+      [uploadVideo, uploadVideosBulk, uploadSubtitle, uploadChapterFile, uploadChaptersBulk, uploadChapterPages]
+        .forEach((el) => { if (el) el.value = ''; });
+      await Promise.all([loadIncompleteShows(), loadIncompleteManga()]);
     };
+    uploadModeTabs.forEach((tab) => {
+      tab.addEventListener('click', () => {
+        applyUploadMode(tab.dataset.uploadMode || 'episode');
+        setUploadError('');
+        setUploadSuccess('');
+      });
+    });
     uploadOpen.addEventListener('click', () => { openUploadModal(); });
     uploadClose?.addEventListener('click', closeUploadModal);
     uploadCancel?.addEventListener('click', closeUploadModal);
     uploadBackdrop?.addEventListener('click', closeUploadModal);
-    uploadShow.addEventListener('change', () => {
+    uploadShow?.addEventListener('change', () => {
       setUploadSuccess('');
       loadMissingEpisodes(uploadShow.value);
+    });
+    uploadManga?.addEventListener('change', () => {
+      setUploadSuccess('');
+      loadMissingChapters(uploadManga.value);
     });
     uploadForm.addEventListener('submit', async (event) => {
       event.preventDefault();
       if (uploadBusy) return;
       setUploadError('');
       setUploadSuccess('');
-      const showId = uploadShow.value;
-      const episodeId = uploadEpisode.value;
-      if (!showId) {
-        setUploadError('Select an anime.');
-        return;
-      }
-      if (!episodeId) {
-        setUploadError('Select a missing episode.');
-        return;
-      }
-      if (!uploadVideo || !uploadVideo.files || !uploadVideo.files.length) {
-        setUploadError('Video file required.');
-        return;
-      }
       const body = new FormData();
-      body.append('show_id', showId);
-      body.append('episode_id', episodeId);
-      body.append('video', uploadVideo.files[0]);
-      if (uploadSubtitle && uploadSubtitle.files && uploadSubtitle.files.length) {
-        body.append('subtitle', uploadSubtitle.files[0]);
+      let endpoint = '{{ url_for("api_catalog_upload_episode") }}';
+      if (uploadMode === 'episode') {
+        if (!uploadShow?.value) { setUploadError('Select an anime.'); return; }
+        if (!uploadEpisode?.value) { setUploadError('Select a missing episode.'); return; }
+        if (!uploadVideo?.files?.length) { setUploadError('Video file required.'); return; }
+        body.append('show_id', uploadShow.value);
+        body.append('episode_id', uploadEpisode.value);
+        body.append('video', uploadVideo.files[0]);
+        if (uploadSubtitle?.files?.length) body.append('subtitle', uploadSubtitle.files[0]);
+      } else if (uploadMode === 'anime-bulk') {
+        endpoint = '{{ url_for("api_catalog_upload_episodes_bulk") }}';
+        if (!uploadShow?.value) { setUploadError('Select an anime.'); return; }
+        if (!uploadVideosBulk?.files?.length) { setUploadError('Select one or more videos.'); return; }
+        body.append('show_id', uploadShow.value);
+        Array.from(uploadVideosBulk.files).forEach((f) => body.append('videos', f));
+        if (uploadSubtitle?.files?.length) {
+          Array.from(uploadSubtitle.files).forEach((f) => body.append('subtitles', f));
+        }
+      } else if (uploadMode === 'chapter') {
+        endpoint = '{{ url_for("api_catalog_upload_chapter") }}';
+        if (!uploadManga?.value) { setUploadError('Select a manga title.'); return; }
+        if (!uploadChapter?.value) { setUploadError('Select a missing chapter.'); return; }
+        body.append('manga_id', uploadManga.value);
+        body.append('chapter_key', uploadChapter.value);
+        if (uploadChapterPages?.files?.length) {
+          Array.from(uploadChapterPages.files).forEach((f) => body.append('images', f));
+        } else if (uploadChapterFile?.files?.length) {
+          body.append('file', uploadChapterFile.files[0]);
+        } else {
+          setUploadError('Chapter file or page images required.');
+          return;
+        }
+      } else if (uploadMode === 'manga-bulk') {
+        endpoint = '{{ url_for("api_catalog_upload_chapters_bulk") }}';
+        if (!uploadManga?.value) { setUploadError('Select a manga title.'); return; }
+        if (!uploadChaptersBulk?.files?.length) { setUploadError('Select one or more chapter archives.'); return; }
+        body.append('manga_id', uploadManga.value);
+        Array.from(uploadChaptersBulk.files).forEach((f) => body.append('files', f));
       }
       setUploadBusy(true);
       try {
-        const resp = await fetch('{{ url_for("api_catalog_upload_episode") }}', {
+        const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { 'X-CSRF-Token': csrfToken() },
           body,
         });
         const data = await resp.json().catch(() => ({}));
-        if (resp.status === 403) {
-          setUploadError(data.error || 'Permission denied');
-          return;
-        }
         if (!resp.ok || !data.ok) {
           setUploadError(data.error || 'Upload failed');
           return;
         }
-        setUploadBusy(false);
-        closeUploadModal();
+        const count = data.uploaded_count || 1;
+        setUploadSuccess(`Uploaded ${count} item(s).`);
+        if (uploadMode === 'episode' || uploadMode === 'anime-bulk') {
+          await loadIncompleteShows();
+          if (uploadShow?.value) await loadMissingEpisodes(uploadShow.value);
+        } else {
+          await loadIncompleteManga();
+          if (uploadManga?.value) await loadMissingChapters(uploadManga.value);
+        }
+        [uploadVideo, uploadVideosBulk, uploadSubtitle, uploadChapterFile, uploadChaptersBulk, uploadChapterPages]
+          .forEach((el) => { if (el) el.value = ''; });
       } catch (_) {
         setUploadError('Upload failed');
       } finally {
-        if (uploadBusy) setUploadBusy(false);
+        setUploadBusy(false);
       }
     });
   }

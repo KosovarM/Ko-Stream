@@ -120,7 +120,8 @@ def test_releases_seed_and_page(tmp_path: Path):
     seed_patch_release(path=path, notify=True, users_path=users, base=base)
     items = sort_releases(load_releases(path))
     assert items
-    assert items[0]["date"] == PATCH_2026_07_31["date"]
+    assert items[0]["date"] == "02.08.2026"
+    assert any(r["date"] == PATCH_2026_07_31["date"] for r in items)
     sections = items[0]["sections"]
     assert "bugfixes" in sections
     assert sections["bugfixes"]

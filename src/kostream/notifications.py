@@ -110,6 +110,54 @@ def add_notification(
     return entry
 
 
+def upsert_product_update_notification(
+    user_id: str,
+    *,
+    title: str,
+    body: str,
+    href: str | None = None,
+    type: str = "product_update",
+    base: Path | None = None,
+) -> dict[str, Any] | None:
+    """Update an existing undismissed product-update notification, or append one.
+
+    Keeps a single bell item when the user has not dismissed the prior release toast.
+    """
+    uid = (user_id or "").strip()
+    if not uid:
+        return None
+    path = notifications_path(uid, base)
+    items = load_notifications(path)
+    want_title = (title or "").strip() or "New update released"
+    want_type = (type or "").strip() or "product_update"
+    existing = None
+    for row in items:
+        is_update = (
+            str(row.get("type") or "") == want_type
+            or str(row.get("title") or "") == want_title
+        )
+        if is_update and not row.get("dismissed"):
+            existing = row
+            break
+    if existing is not None:
+        existing["type"] = want_type
+        existing["title"] = want_title
+        existing["body"] = (body or "").strip()
+        existing["href"] = (href or "").strip() or None
+        existing["created_at"] = _utc_now()
+        existing["read"] = False
+        save_notifications(items, path)
+        return existing
+    return add_notification(
+        uid,
+        type=want_type,
+        title=want_title,
+        body=body,
+        href=href,
+        base=base,
+    )
+
+
 def mark_read(
     user_id: str,
     notification_ids: list[str] | None = None,

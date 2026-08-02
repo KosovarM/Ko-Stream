@@ -9,10 +9,10 @@ from typing import Any
 
 from kostream.jsonio import atomic_write_json
 from kostream.notifications import (
-    add_notification,
     load_notifications,
     notifications_path,
     save_notifications,
+    upsert_product_update_notification,
 )
 from kostream.users import USERS_FILE, load_users
 
@@ -97,17 +97,16 @@ def notify_all_users_new_release(
     users_path: Path | None = None,
     base: Path | None = None,
 ) -> int:
-    """Clear prior update notifications, then notify every account."""
-    remove_undismissed_update_notifications(users_path=users_path, base=base)
+    """Replace existing undismissed update notification, or add one per account."""
     count = 0
     body = release_title(date_str)
     for user in load_users(users_path or USERS_FILE):
-        note = add_notification(
+        note = upsert_product_update_notification(
             user.id,
-            type=TYPE_PRODUCT_UPDATE,
             title=NOTIFY_TITLE,
             body=body,
             href=HREF_RELEASES,
+            type=TYPE_PRODUCT_UPDATE,
             base=base,
         )
         if note is not None:
@@ -185,6 +184,32 @@ PATCH_2026_07_31: dict[str, Any] = {
 }
 
 
+PATCH_2026_08_02: dict[str, Any] = {
+    "id": "02.08.2026",
+    "date": "02.08.2026",
+    "title": "Update - 02.08.2026",
+    "sections": {
+        "general": [
+            "Title language options: Japanese and English only (German preference falls back to English)",
+            "Catalog Sync controls reorganized into clearer staff groups",
+            "Release notifications replace an existing undismissed “New update released” item instead of stacking",
+            "Releases entries are collapsible accordions",
+        ],
+        "anime": [
+            "Bulk upload a whole series (multiple videos + optional subtitles) from Catalog Upload",
+            "Skip times sync uses Anime-Skip first, with AniSkip as fallback; Sync skip times control",
+        ],
+        "manga": [
+            "Upload missing manga chapters (images / zip / cbz) like anime episode upload",
+            "Bulk add multiple chapters for a manga/manhwa title in one flow",
+        ],
+        "bugfixes": [
+            "Player: only the Skip Opening or Skip Ending button for the current playback segment is shown",
+        ],
+    },
+}
+
+
 def seed_patch_release(
     *,
     path: Path | None = None,
@@ -192,9 +217,16 @@ def seed_patch_release(
     users_path: Path | None = None,
     base: Path | None = None,
 ) -> dict[str, Any]:
-    """Seed/update the 31.07.2026 product release entry."""
-    return upsert_release(
+    """Seed historical 31.07 entry (no notify) and upsert/notify 02.08.2026."""
+    upsert_release(
         PATCH_2026_07_31,
+        path=path,
+        notify=False,
+        users_path=users_path,
+        base=base,
+    )
+    return upsert_release(
+        PATCH_2026_08_02,
         path=path,
         notify=notify,
         users_path=users_path,

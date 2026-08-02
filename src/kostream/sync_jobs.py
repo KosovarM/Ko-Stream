@@ -472,8 +472,8 @@ def start_aniskip_sync(
     media_root=None,
     anime_index_path=None,
 ) -> SyncJob:
-    """Fetch AniSkip OP/ED skip times for catalog episodes (no title sync)."""
-    job = _begin_job("aniskip", "aniskip", "Fetching AniSkip…")
+    """Fetch OP/ED skip times (Anime-Skip → AniSkip fallback)."""
+    job = _begin_job("aniskip", "aniskip", "Fetching skip times…")
     if job is None:
         return get_sync_job()
 
@@ -495,14 +495,16 @@ def start_aniskip_sync(
                 nums = [ep.number for ep in show.episodes if ep.number > 0]
                 if not nums:
                     continue
-                n = ensure_skip_times_for_episodes(mid, nums, network=True)
+                n = ensure_skip_times_for_episodes(
+                    mid, nums, network=True, title=show.title
+                )
                 if n:
                     fetched += n
                     shows_touched += 1
                 with _lock:
                     job.aniskip = fetched
                     job.message = (
-                        f"AniSkip: {fetched} episode fetch(es)"
+                        f"Skip times: {fetched} episode fetch(es)"
                         f" across {shows_touched} title(s)…"
                     )
             with _lock:
@@ -517,11 +519,11 @@ def start_aniskip_sync(
                 pass
             _finish_ok(
                 job,
-                f"AniSkip synced: {fetched} episode fetch(es)"
+                f"Skip times synced: {fetched} episode fetch(es)"
                 f" across {shows_touched} title(s).",
             )
         except (TimeoutError, OSError, ValueError, TypeError) as exc:
-            _finish_error(job, f"AniSkip sync failed: {exc}", exc)
+            _finish_error(job, f"Skip times sync failed: {exc}", exc)
 
     threading.Thread(target=runner, daemon=True, name="mal-sync-aniskip").start()
     return job

@@ -297,6 +297,137 @@ def save_subtitle_file(
     }
 
 
+_SXXEXX = re.compile(r"[Ss](\d{1,2})[Ee](\d{1,3})")
+_EP_ONLY = re.compile(r"(?:^|[^\d])(?:[Ee](?:p(?:isode)?)?[\s._-]*)(\d{1,3})(?:[^\d]|$)")
+
+
+def parse_episode_slot_from_filename(name: str) -> tuple[int, int] | None:
+    """Return ``(season, episode)`` guessed from a video filename, if any."""
+    stem = Path(name).stem
+    m = _SXXEXX.search(stem) or _SXXEXX.search(name)
+    if m:
+        return int(m.group(1)), int(m.group(2))
+    m2 = _EP_ONLY.search(stem)
+    if m2:
+        return 1, int(m2.group(1))
+    return None
+
+
+def save_bulk_episode_files(
+    show: Show,
+    files: list[tuple[str, bytes]],
+    media_root: Path,
+    *,
+    catalog_path: Path | None = None,
+    subtitles: list[tuple[str, bytes]] | None = None,
+) -> dict[str, Any]:
+    """Upload many episode videos (+ optional .vtt) for one show.
+
+    Videos are matched to missing slots by ``SxxExx`` / ``E##`` in the filename,
+    then remaining files fill remaining missing episodes in order.
+    """
+    if not files:
+        raise LocalMediaError("No video files provided")
+    missing = list_missing_episodes(show, media_root, catalog_path=catalog_path)
+    if not missing:
+        raise LocalMediaError("No missing episodes for this title")
+    by_id = {ep.id: ep for ep in show.episodes}
+    missing_eps = [by_id[m["episode_id"]] for m in missing if m.get("episode_id") in by_id]
+    remaining = list(missing_eps)
+    uploaded: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    # Pair subtitles by stem when possible
+    sub_by_stem: dict[str, tuple[str, bytes]] = {}
+    for sub_name, sub_data in subtitles or []:
+        stem = Path(sub_name).stem
+        # Strip language token for matching: S01E01.en → S01E01
+        if "." in stem:
+            maybe = stem.rsplit(".", 1)[0]
+            sub_by_stem[maybe.casefold()] = (sub_name, sub_data)
+        sub_by_stem[stem.casefold()] = (sub_name, sub_data)
+
+    claimed: set[str] = set()
+    deferred: list[tuple[str, bytes]] = []
+
+    for upload_name, data in files:
+        slot = parse_episode_slot_from_filename(upload_name)
+        episode = None
+        if slot:
+            season, number = slot
+            episode = next(
+                (
+                    ep
+                    for ep in remaining
+                    if ep.season == season and ep.number == number and ep.id not in claimed
+                ),
+                None,
+            )
+        if episode is None:
+            deferred.append((upload_name, data))
+            continue
+        try:
+            result = save_episode_file(
+                show,
+                episode,
+                upload_name,
+                data,
+                media_root,
+                catalog_path=catalog_path,
+                require_missing=True,
+            )
+            stem = Path(result["filename"]).stem
+            sub_result = None
+            pair = sub_by_stem.get(stem.casefold()) or sub_by_stem.get(Path(upload_name).stem.casefold())
+            if pair:
+                sub_result = save_subtitle_file(
+                    show, episode, pair[0], pair[1], media_root, catalog_path=catalog_path
+                )
+            claimed.add(episode.id)
+            remaining = [ep for ep in remaining if ep.id not in claimed]
+            uploaded.append({**result, "subtitle": sub_result})
+        except LocalMediaError as exc:
+            errors.append(f"{upload_name}: {exc}")
+
+    for upload_name, data in deferred:
+        if not remaining:
+            errors.append(f"{upload_name}: no missing episode slot left")
+            continue
+        episode = remaining[0]
+        try:
+            result = save_episode_file(
+                show,
+                episode,
+                upload_name,
+                data,
+                media_root,
+                catalog_path=catalog_path,
+                require_missing=True,
+            )
+            stem = Path(result["filename"]).stem
+            sub_result = None
+            pair = sub_by_stem.get(stem.casefold()) or sub_by_stem.get(Path(upload_name).stem.casefold())
+            if pair:
+                sub_result = save_subtitle_file(
+                    show, episode, pair[0], pair[1], media_root, catalog_path=catalog_path
+                )
+            claimed.add(episode.id)
+            remaining = [ep for ep in remaining if ep.id not in claimed]
+            uploaded.append({**result, "subtitle": sub_result})
+        except LocalMediaError as exc:
+            errors.append(f"{upload_name}: {exc}")
+
+    if not uploaded and errors:
+        raise LocalMediaError(errors[0])
+    return {
+        "ok": True,
+        "uploaded": uploaded,
+        "uploaded_count": len(uploaded),
+        "errors": errors,
+        "remaining_missing": len(remaining),
+    }
+
+
 def open_folder_in_os(folder_path: Path) -> bool:
     """Best-effort open folder in the desktop file manager (local server only)."""
     path = folder_path.resolve()

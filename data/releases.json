@@ -1,6 +1,31 @@
 {
   "releases": [
     {
+      "id": "02.08.2026",
+      "date": "02.08.2026",
+      "title": "Update - 02.08.2026",
+      "sections": {
+        "general": [
+          "Title language options: Japanese and English only (German preference falls back to English)",
+          "Catalog Sync controls reorganized into clearer staff groups",
+          "Release notifications replace an existing undismissed “New update released” item instead of stacking",
+          "Releases entries are collapsible accordions"
+        ],
+        "anime": [
+          "Bulk upload a whole series (multiple videos + optional subtitles) from Catalog Upload",
+          "Skip times sync uses Anime-Skip first, with AniSkip as fallback; Sync skip times control"
+        ],
+        "manga": [
+          "Upload missing manga chapters (images / zip / cbz) like anime episode upload",
+          "Bulk add multiple chapters for a manga/manhwa title in one flow"
+        ],
+        "bugfixes": [
+          "Player: only the Skip Opening or Skip Ending button for the current playback segment is shown"
+        ]
+      },
+      "updated_at": "2026-08-02T13:00:00+00:00"
+    },
+    {
       "id": "31.07.2026",
       "date": "31.07.2026",
       "title": "Update - 31.07.2026",

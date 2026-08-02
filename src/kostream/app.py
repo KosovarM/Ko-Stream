@@ -145,8 +145,17 @@ from kostream.local_media import (
     list_missing_episodes,
     open_folder_in_os,
     prepare_show_folder,
+    save_bulk_episode_files,
     save_episode_file,
     save_subtitle_file,
+)
+from kostream.manga_upload import (
+    MangaUploadError,
+    guess_chapter_key_from_filename,
+    list_incomplete_manga,
+    list_missing_chapters,
+    save_chapter_images_bulk,
+    save_chapter_upload,
 )
 from kostream.media_import import (
     import_media_to_catalog,
@@ -809,7 +818,7 @@ def create_app(
             ),
             "title_language": getattr(g, "title_language", DEFAULT_TITLE_LANG),
             "title_lang_labels": TITLE_LANG_LABELS,
-            "supported_title_langs": ("jp", "en", "ger"),
+            "supported_title_langs": ("jp", "en"),
             "csrf_token": _ensure_csrf_token(),
             "current_user": current_user(),
             "is_master": user_has_role("master"),
@@ -1546,7 +1555,7 @@ def create_app(
 
     @app.route("/api/mal/sync/aniskip", methods=["POST"])
     def api_mal_sync_aniskip():
-        """Sync AniSkip OP/ED skip times only (no episode-title sync)."""
+        """Sync OP/ED skip times (Anime-Skip → AniSkip fallback)."""
         denied = _require_api_roles("master", "manager")
         if denied:
             return denied
@@ -1924,7 +1933,11 @@ def create_app(
         if show.mal_id and episode.number > 0:
             try:
                 ensure_skip_times_for_episodes(
-                    show.mal_id, [episode.number], network=True, force=True
+                    show.mal_id,
+                    [episode.number],
+                    network=True,
+                    force=True,
+                    title=show.title,
                 )
             except (OSError, ValueError, TypeError):
                 pass
@@ -1944,6 +1957,215 @@ def create_app(
             "missing_count": len(remaining),
             "local_count": local_count,
             "expected_count": expected_count,
+        }
+
+    @app.route("/api/catalog/upload-episodes-bulk", methods=["POST"])
+    def api_catalog_upload_episodes_bulk():
+        """Upload multiple episode videos (+ optional .vtt) for one incomplete show."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
+        show_id = (request.form.get("show_id") or "").strip()
+        if not show_id:
+            return {"ok": False, "error": "show_id required"}, 400
+        show = _get_show(show_id)
+        if not show:
+            return {"ok": False, "error": "Show not found"}, 404
+        videos = request.files.getlist("videos") or request.files.getlist("video")
+        if not videos:
+            single = request.files.get("file")
+            videos = [single] if single else []
+        video_payload: list[tuple[str, bytes]] = []
+        for vf in videos:
+            if vf and vf.filename:
+                video_payload.append((vf.filename, vf.read()))
+        if not video_payload:
+            return {"ok": False, "error": "At least one video file required"}, 400
+        subs = request.files.getlist("subtitles") or request.files.getlist("subtitle")
+        sub_payload: list[tuple[str, bytes]] = []
+        for sf in subs:
+            if sf and sf.filename:
+                sub_payload.append((sf.filename, sf.read()))
+        try:
+            result = save_bulk_episode_files(
+                show,
+                video_payload,
+                app.config["MEDIA_ROOT"],
+                catalog_path=app.config["CATALOG_PATH"],
+                subtitles=sub_payload or None,
+            )
+        except LocalMediaError as exc:
+            return {"ok": False, "error": str(exc)}, 400
+        if show.mal_id:
+            nums = []
+            for row in result.get("uploaded") or []:
+                ep_id = row.get("episode_id")
+                ep = next((e for e in show.episodes if e.id == ep_id), None)
+                if ep and ep.number > 0:
+                    nums.append(ep.number)
+            if nums:
+                try:
+                    ensure_skip_times_for_episodes(
+                        show.mal_id, nums, network=True, force=True, title=show.title
+                    )
+                except (OSError, ValueError, TypeError):
+                    pass
+        refreshed = _get_show(show_id) or show
+        remaining = list_missing_episodes(
+            refreshed,
+            app.config["MEDIA_ROOT"],
+            catalog_path=app.config["CATALOG_PATH"],
+        )
+        return {
+            "ok": True,
+            **result,
+            "missing_episodes": remaining,
+            "missing_count": len(remaining),
+        }
+
+    @app.route("/api/catalog/incomplete-manga")
+    def api_catalog_incomplete_manga():
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
+        titles = load_manga_library(
+            app.config.get("MANGA_ROOT") or MANGA_ROOT,
+            app.config.get("MANGA_CATALOG_PATH") or MANGA_SELECTED_FILE,
+            user_id=_current_mal_user_id(),
+        )
+        rows = list_incomplete_manga(titles)
+        return {"ok": True, "titles": rows, "count": len(rows)}
+
+    @app.route("/api/catalog/manga/<manga_id>/missing-chapters")
+    def api_catalog_missing_chapters(manga_id: str):
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
+        manga = get_manga(
+            manga_id,
+            app.config.get("MANGA_ROOT") or MANGA_ROOT,
+            app.config.get("MANGA_CATALOG_PATH") or MANGA_SELECTED_FILE,
+        )
+        if not manga:
+            return {"ok": False, "error": "Manga not found"}, 404
+        missing = list_missing_chapters(manga)
+        return {
+            "ok": True,
+            "manga_id": manga.id,
+            "title": manga.title,
+            "chapters": missing,
+            "count": len(missing),
+        }
+
+    @app.route("/api/catalog/upload-chapter", methods=["POST"])
+    def api_catalog_upload_chapter():
+        """Upload one missing manga chapter (cbz/zip/image)."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
+        manga_id = (request.form.get("manga_id") or "").strip()
+        chapter_key = (request.form.get("chapter_key") or "").strip()
+        if not manga_id:
+            return {"ok": False, "error": "manga_id required"}, 400
+        if not chapter_key:
+            return {"ok": False, "error": "chapter_key required"}, 400
+        manga_root = app.config.get("MANGA_ROOT") or MANGA_ROOT
+        catalog_path = app.config.get("MANGA_CATALOG_PATH") or MANGA_SELECTED_FILE
+        manga = get_manga(manga_id, manga_root, catalog_path)
+        if not manga:
+            return {"ok": False, "error": "Manga not found"}, 404
+        upload = request.files.get("file") or request.files.get("chapter")
+        images = request.files.getlist("images") or request.files.getlist("pages")
+        try:
+            if images and any(f and f.filename for f in images):
+                payload = [(f.filename, f.read()) for f in images if f and f.filename]
+                result = save_chapter_images_bulk(
+                    manga,
+                    chapter_key,
+                    payload,
+                    manga_root,
+                    catalog_path=catalog_path,
+                    require_missing=True,
+                )
+            else:
+                if not upload or not upload.filename:
+                    return {"ok": False, "error": "Chapter file required"}, 400
+                result = save_chapter_upload(
+                    manga,
+                    chapter_key,
+                    upload.filename,
+                    upload.read(),
+                    manga_root,
+                    catalog_path=catalog_path,
+                    require_missing=True,
+                )
+        except MangaUploadError as exc:
+            return {"ok": False, "error": str(exc)}, 400
+        refreshed = get_manga(manga_id, manga_root, catalog_path) or manga
+        remaining = list_missing_chapters(refreshed)
+        return {
+            "ok": True,
+            **result,
+            "missing_chapters": remaining,
+            "missing_count": len(remaining),
+        }
+
+    @app.route("/api/catalog/upload-chapters-bulk", methods=["POST"])
+    def api_catalog_upload_chapters_bulk():
+        """Upload multiple chapter archives for one manga/manhwa title."""
+        denied = _require_api_roles("master", "manager")
+        if denied:
+            return denied
+        manga_id = (request.form.get("manga_id") or "").strip()
+        if not manga_id:
+            return {"ok": False, "error": "manga_id required"}, 400
+        manga_root = app.config.get("MANGA_ROOT") or MANGA_ROOT
+        catalog_path = app.config.get("MANGA_CATALOG_PATH") or MANGA_SELECTED_FILE
+        manga = get_manga(manga_id, manga_root, catalog_path)
+        if not manga:
+            return {"ok": False, "error": "Manga not found"}, 404
+        files = request.files.getlist("files") or request.files.getlist("chapters")
+        if not files:
+            return {"ok": False, "error": "At least one chapter file required"}, 400
+        missing = list_missing_chapters(manga)
+        missing_keys = [m["chapter_key"] for m in missing]
+        uploaded: list[dict] = []
+        errors: list[str] = []
+        key_iter = list(missing_keys)
+        for vf in files:
+            if not vf or not vf.filename:
+                continue
+            guessed = guess_chapter_key_from_filename(vf.filename)
+            key = guessed if guessed in key_iter else (key_iter[0] if key_iter else None)
+            if not key:
+                errors.append(f"{vf.filename}: no missing chapter slot left")
+                continue
+            try:
+                result = save_chapter_upload(
+                    manga,
+                    key,
+                    vf.filename,
+                    vf.read(),
+                    manga_root,
+                    catalog_path=catalog_path,
+                    require_missing=True,
+                )
+                uploaded.append(result)
+                if key in key_iter:
+                    key_iter.remove(key)
+            except MangaUploadError as exc:
+                errors.append(f"{vf.filename}: {exc}")
+        if not uploaded and errors:
+            return {"ok": False, "error": errors[0], "errors": errors}, 400
+        refreshed = get_manga(manga_id, manga_root, catalog_path) or manga
+        remaining = list_missing_chapters(refreshed)
+        return {
+            "ok": True,
+            "uploaded": uploaded,
+            "uploaded_count": len(uploaded),
+            "errors": errors,
+            "missing_chapters": remaining,
+            "missing_count": len(remaining),
         }
 
     @app.route("/api/catalog/remove", methods=["POST", "DELETE"])

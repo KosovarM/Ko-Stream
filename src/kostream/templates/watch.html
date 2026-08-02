@@ -399,6 +399,8 @@
     const ed = aniskipData && aniskipData.ed;
     if (op && t >= Number(op.start) && t < Number(op.end)) showOp = true;
     if (ed && t >= Number(ed.start) && t < Number(ed.end)) showEd = true;
+    // Only one button for the active segment (prefer OP if intervals overlap).
+    if (showOp && showEd) showEd = false;
     if (skipOpBtn) {
       skipOpBtn.hidden = !showOp;
     }

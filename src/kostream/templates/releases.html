@@ -9,42 +9,44 @@
 
   {% if releases %}
   {% for rel in releases %}
-  <article class="catalog-section releases-entry">
-    <h2 class="releases-entry-title">{{ rel.title or ('Update - ' ~ rel.date) }}</h2>
-    {% set sections = rel.sections or {} %}
-    {% if sections.general %}
-    <h3 class="releases-section-heading">{{ _('General update') }}</h3>
-    <ul class="releases-list">
-      {% for item in sections.general %}
-      <li>{{ item }}</li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-    {% if sections.anime %}
-    <h3 class="releases-section-heading">{{ _('Anime update') }}</h3>
-    <ul class="releases-list">
-      {% for item in sections.anime %}
-      <li>{{ item }}</li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-    {% if sections.manga %}
-    <h3 class="releases-section-heading">{{ _('Manga/Manhwa update') }}</h3>
-    <ul class="releases-list">
-      {% for item in sections.manga %}
-      <li>{{ item }}</li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-    {% if sections.bugfixes %}
-    <h3 class="releases-section-heading">{{ _('Bugfixes') }}</h3>
-    <ul class="releases-list">
-      {% for item in sections.bugfixes %}
-      <li>{{ item }}</li>
-      {% endfor %}
-    </ul>
-    {% endif %}
-  </article>
+  <details class="releases-entry"{% if loop.first %} open{% endif %}>
+    <summary class="releases-entry-title">{{ rel.title or ('Update - ' ~ rel.date) }}</summary>
+    <div class="releases-entry-body">
+      {% set sections = rel.sections or {} %}
+      {% if sections.general %}
+      <h3 class="releases-section-heading">{{ _('General update') }}</h3>
+      <ul class="releases-list">
+        {% for item in sections.general %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if sections.anime %}
+      <h3 class="releases-section-heading">{{ _('Anime update') }}</h3>
+      <ul class="releases-list">
+        {% for item in sections.anime %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if sections.manga %}
+      <h3 class="releases-section-heading">{{ _('Manga/Manhwa update') }}</h3>
+      <ul class="releases-list">
+        {% for item in sections.manga %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+      {% if sections.bugfixes %}
+      <h3 class="releases-section-heading">{{ _('Bugfixes') }}</h3>
+      <ul class="releases-list">
+        {% for item in sections.bugfixes %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% endif %}
+    </div>
+  </details>
   {% endfor %}
   {% else %}
   <p class="empty">{{ _('No releases published yet.') }}</p>
