@@ -210,6 +210,23 @@ PATCH_2026_08_02: dict[str, Any] = {
 }
 
 
+
+PATCH_2026_08_08: dict[str, Any] = {
+    "id": "08.08.2026",
+    "date": "08.08.2026",
+    "title": "Update - 08.08.2026",
+    "sections": {
+        "general": [],
+        "anime": [],
+        "manga": [
+            "Horizontal reader: side-scroll between pages (tap sides still works) so two-page spreads stay continuous",
+            "Vertical reader: hard end-stop at chapter bottom — no scroll-through; Next chapter button or a second intentional gesture after the end",
+        ],
+        "bugfixes": [],
+    },
+}
+
+
 def seed_patch_release(
     *,
     path: Path | None = None,
@@ -217,7 +234,7 @@ def seed_patch_release(
     users_path: Path | None = None,
     base: Path | None = None,
 ) -> dict[str, Any]:
-    """Seed historical 31.07 entry (no notify) and upsert/notify 02.08.2026."""
+    """Seed historical entries (no notify) and upsert/notify latest 08.08.2026."""
     upsert_release(
         PATCH_2026_07_31,
         path=path,
@@ -225,8 +242,15 @@ def seed_patch_release(
         users_path=users_path,
         base=base,
     )
-    return upsert_release(
+    upsert_release(
         PATCH_2026_08_02,
+        path=path,
+        notify=False,
+        users_path=users_path,
+        base=base,
+    )
+    return upsert_release(
+        PATCH_2026_08_08,
         path=path,
         notify=notify,
         users_path=users_path,

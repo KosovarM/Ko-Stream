@@ -98,8 +98,11 @@ def test_seed_prepends_02_08_keeps_31_07(tmp_path: Path):
     bootstrap_test_users(users)
     seed_patch_release(path=path, notify=True, users_path=users, base=base)
     items = sort_releases(load_releases(path))
-    assert [r["date"] for r in items[:2]] == ["02.08.2026", "31.07.2026"]
-    assert items[0]["sections"] == PATCH_2026_08_02["sections"]
+    # Latest seed is 08.08; 02.08 and 31.07 remain historical.
+    assert "02.08.2026" in [r["date"] for r in items]
+    assert "31.07.2026" in [r["date"] for r in items]
+    row = next(r for r in items if r["date"] == "02.08.2026")
+    assert row["sections"] == PATCH_2026_08_02["sections"]
 
 
 def test_releases_page_accordion(tmp_path: Path):

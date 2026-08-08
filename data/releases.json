@@ -1,6 +1,21 @@
 {
   "releases": [
     {
+      "id": "08.08.2026",
+      "date": "08.08.2026",
+      "title": "Update - 08.08.2026",
+      "sections": {
+        "general": [],
+        "anime": [],
+        "manga": [
+          "Horizontal reader: side-scroll between pages (tap sides still works) so two-page spreads stay continuous",
+          "Vertical reader: hard end-stop at chapter bottom — no scroll-through; Next chapter button or a second intentional gesture after the end"
+        ],
+        "bugfixes": []
+      },
+      "updated_at": "2026-08-08T02:09:46+00:00"
+    },
+    {
       "id": "02.08.2026",
       "date": "02.08.2026",
       "title": "Update - 02.08.2026",
